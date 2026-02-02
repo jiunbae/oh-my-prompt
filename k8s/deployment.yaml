@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prompt-analyzer
+  namespace: prompt-analyzer
+  labels:
+    app: prompt-analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prompt-analyzer
+  template:
+    metadata:
+      labels:
+        app: prompt-analyzer
+    spec:
+      containers:
+        - name: prompt-analyzer
+          image: ghcr.io/your-username/prompt-analyzer:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: prompt-analyzer-config
+            - secretRef:
+                name: prompt-analyzer-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
