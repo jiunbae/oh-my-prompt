@@ -1,0 +1,207 @@
+"use client";
+
+import { useState } from "react";
+import { PromptCard } from "@/components/prompt-card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { SkeletonList } from "@/components/ui/skeleton";
+
+interface Prompt {
+  id: string;
+  timestamp: Date;
+  projectName?: string;
+  preview: string;
+  promptType: "user" | "system" | "assistant";
+  tokenCount: number;
+  tags?: string[];
+}
+
+interface PromptListProps {
+  prompts: Prompt[];
+  isLoading?: boolean;
+  totalCount?: number;
+  currentPage?: number;
+  pageSize?: number;
+  onPageChange?: (page: number) => void;
+  onSearch?: (query: string) => void;
+  onSortChange?: (sort: "date" | "tokens") => void;
+}
+
+export function PromptList({
+  prompts,
+  isLoading = false,
+  totalCount = 0,
+  currentPage = 1,
+  pageSize = 12,
+  onPageChange,
+  onSearch,
+  onSortChange,
+}: PromptListProps) {
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [sortBy, setSortBy] = useState<"date" | "tokens">("date");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const totalPages = Math.ceil(totalCount / pageSize);
+
+  const handleSortChange = (sort: "date" | "tokens") => {
+    setSortBy(sort);
+    onSortChange?.(sort);
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSearch?.(searchQuery);
+  };
+
+  if (isLoading) {
+    return <SkeletonList count={6} />;
+  }
+
+  if (prompts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <svg
+          className="h-16 w-16 text-zinc-600 mb-4"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+          />
+        </svg>
+        <h3 className="text-lg font-medium text-zinc-300 mb-2">
+          No prompts found
+        </h3>
+        <p className="text-sm text-zinc-500 max-w-sm">
+          Start using Claude Code to see your conversations appear here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+        <form onSubmit={handleSearch} className="flex gap-2 w-full sm:w-auto">
+          <Input
+            type="search"
+            placeholder="Search prompts..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full sm:w-64"
+          />
+          <Button type="submit" variant="outline">
+            Search
+          </Button>
+        </form>
+
+        <div className="flex gap-2">
+          <div className="flex rounded-md border border-zinc-700">
+            <button
+              onClick={() => handleSortChange("date")}
+              className={`px-3 py-1.5 text-sm ${
+                sortBy === "date"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+            >
+              Date
+            </button>
+            <button
+              onClick={() => handleSortChange("tokens")}
+              className={`px-3 py-1.5 text-sm border-l border-zinc-700 ${
+                sortBy === "tokens"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+            >
+              Tokens
+            </button>
+          </div>
+
+          <div className="flex rounded-md border border-zinc-700">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`px-2 py-1.5 ${
+                viewMode === "grid"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+              aria-label="Grid view"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`px-2 py-1.5 border-l border-zinc-700 ${
+                viewMode === "list"
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+              aria-label="List view"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={
+          viewMode === "grid"
+            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+            : "flex flex-col gap-3"
+        }
+      >
+        {prompts.map((prompt) => (
+          <PromptCard key={prompt.id} {...prompt} />
+        ))}
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-4 border-t border-zinc-800">
+          <span className="text-sm text-zinc-500">
+            Showing {(currentPage - 1) * pageSize + 1}-
+            {Math.min(currentPage * pageSize, totalCount)} of {totalCount}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange?.(currentPage - 1)}
+              disabled={currentPage <= 1}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange?.(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
