@@ -15,11 +15,9 @@ spec:
       labels:
         app: prompt-analyzer
     spec:
-      imagePullSecrets:
-        - name: ghcr-secret
       containers:
         - name: prompt-analyzer
-          image: ghcr.io/your-username/prompt-analyzer:latest
+          image: registry.example.com/prompt-analyzer:latest
           ports:
             - containerPort: 3000
           envFrom:
