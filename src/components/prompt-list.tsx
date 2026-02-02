@@ -9,9 +9,9 @@ import { SkeletonList } from "@/components/ui/skeleton";
 interface Prompt {
   id: string;
   timestamp: Date;
-  projectName?: string;
+  projectName?: string | null;
   preview: string;
-  promptType: "user" | "system" | "assistant";
+  promptType: "user_input" | "task_notification" | "system" | "user" | "assistant";
   tokenCount: number;
   tags?: string[];
 }

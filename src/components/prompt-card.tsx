@@ -5,9 +5,9 @@ import { Badge } from "@/components/ui/badge";
 interface PromptCardProps {
   id: string;
   timestamp: Date;
-  projectName?: string;
+  projectName?: string | null;
   preview: string;
-  promptType: "user" | "system" | "assistant";
+  promptType: "user_input" | "task_notification" | "system" | "user" | "assistant";
   tokenCount: number;
   tags?: string[];
 }
