@@ -5,6 +5,9 @@ import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
+// Force dynamic rendering - don't pre-render at build time
+export const dynamic = "force-dynamic";
+
 async function getPrompt(id: string) {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {

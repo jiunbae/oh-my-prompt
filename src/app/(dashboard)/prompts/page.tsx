@@ -5,6 +5,9 @@ import * as schema from "@/db/schema";
 import { desc, sql, and, gte, lte, eq, ilike } from "drizzle-orm";
 import { SearchFilters } from "@/components/search-filters";
 
+// Force dynamic rendering - don't pre-render at build time
+export const dynamic = "force-dynamic";
+
 interface SearchParams {
   page?: string;
   search?: string;

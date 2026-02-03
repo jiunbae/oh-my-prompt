@@ -5,6 +5,9 @@ import { desc, sql } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
+// Force dynamic rendering - don't pre-render at build time
+export const dynamic = "force-dynamic";
+
 async function getAnalytics() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
