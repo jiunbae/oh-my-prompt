@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useUser } from "@/contexts/user-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,14 @@ export default function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [minioConfig, setMinioConfig] = useState<{ endpoint: string; bucket: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/config/minio")
+      .then((res) => res.json())
+      .then((data) => setMinioConfig(data))
+      .catch(() => setMinioConfig({ endpoint: "", bucket: "" }));
+  }, []);
 
   const regenerateToken = async () => {
     setRegenerating(true);
@@ -114,7 +122,8 @@ export default function SettingsPage() {
                   <pre className="bg-zinc-900 p-3 rounded text-xs overflow-x-auto">
 {`# In your Claude Code hook script:
 export PROMPT_MANAGER_TOKEN="${user.token}"
-export PROMPT_MANAGER_ENDPOINT="your-minio-endpoint"`}
+export PROMPT_MANAGER_ENDPOINT="${minioConfig?.endpoint || "loading..."}"
+export PROMPT_MANAGER_BUCKET="${minioConfig?.bucket || "loading..."}"`}
                   </pre>
                 </div>
 
