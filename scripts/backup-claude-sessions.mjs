@@ -106,44 +106,48 @@ function findSessionFiles() {
     }
   }
   
-  // 2. Workspace locations (as requested)
-  const workspaceRoot = path.join(process.env.HOME, "workspace");
-  if (fs.existsSync(workspaceRoot)) {
+  // 2. Workspace locations
+  const workspaceRoots = ["workspace", "workspace-ext", "workspace-vibe"];
+  
+  for (const rootName of workspaceRoots) {
+    const workspaceRoot = path.join(process.env.HOME, rootName);
+    if (!fs.existsSync(workspaceRoot)) continue;
+    
     try {
       const projects = fs.readdirSync(workspaceRoot);
       for (const project of projects) {
-        const claudeDir = path.join(workspaceRoot, project, ".claude");
+        const projectPath = path.join(workspaceRoot, project);
+        if (!fs.statSync(projectPath).isDirectory()) continue;
+        
+        const claudeDir = path.join(projectPath, ".claude");
         if (fs.existsSync(claudeDir)) {
-          // Look for any .jsonl files in .claude or subdirs (like transcripts)
-          const scan = (dir) => {
-            if (!fs.existsSync(dir)) return;
+          // Scan .claude, .claude/transcripts, and .claude/sessions
+          const subDirs = ["", "transcripts", "sessions"];
+          
+          for (const subDir of subDirs) {
+            const targetDir = path.join(claudeDir, subDir);
+            if (!fs.existsSync(targetDir)) continue;
+            
             try {
-              fs.readdirSync(dir).forEach(f => {
-                const fullPath = path.join(dir, f);
+              fs.readdirSync(targetDir).forEach(f => {
+                const fullPath = path.join(targetDir, f);
                 try {
                   const stats = fs.lstatSync(fullPath);
-                  if (stats.isDirectory()) {
-                    scan(fullPath);
-                  } else if (f.endsWith(".jsonl")) {
+                  if (stats.isFile() && f.endsWith(".jsonl")) {
                     files.push({
                       path: fullPath,
                       source: "workspace",
-                      projectDir: path.join(workspaceRoot, project)
+                      projectDir: projectPath
                     });
                   }
-                } catch (e) {
-                  // Ignore errors for individual files (e.g. broken symlinks)
-                }
+                } catch (e) {}
               });
-            } catch (e) {
-              // Ignore errors for directories
-            }
-          };
-          scan(claudeDir);
+            } catch (e) {}
+          }
         }
       }
     } catch (e) {
-      console.warn(`Could not read workspace root: ${e.message}`);
+      console.warn(`Could not read workspace root ${rootName}: ${e.message}`);
     }
   }
   
@@ -224,58 +228,80 @@ async function processFile(fileInfo, historyMap) {
   let added = 0;
   let skipped = 0;
   
+  let lastInputHash = null;
+  let lastInputTimestamp = null;
+  
   for (const line of lines) {
     if (!line.trim()) continue;
     
     try {
       const entry = JSON.parse(line);
-      // Only input prompts
-      if (entry.type !== "user") continue;
-      
-      const prompt = entry.content;
-      const timestamp = entry.timestamp; // ISO string
+      const timestamp = entry.timestamp;
       const date = new Date(timestamp);
-      
       if (isNaN(date.getTime())) continue;
       
       const year = date.getUTCFullYear();
       const month = String(date.getUTCMonth() + 1).padStart(2, "0");
       const day = String(date.getUTCDate()).padStart(2, "0");
-      
-      // New multi-user path structure
       const userPrefix = USER_TOKEN ? `${USER_TOKEN}/` : "";
       const prefix = `${userPrefix}${year}/${month}/${day}/`;
-      
-      const hash = getHash(prompt);
-      const objectName = `${prefix}${hash}.json`;
-      
-      // Deduplication check
-      if (await isAlreadyInMinio(prefix, prompt, timestamp)) {
-        skipped++;
-        continue;
+
+      if (entry.type === "user") {
+        const prompt = entry.content;
+        const hash = getHash(prompt);
+        lastInputHash = hash;
+        lastInputTimestamp = timestamp;
+        
+        const objectName = `${prefix}${hash}.json`;
+        
+        if (await isAlreadyInMinio(prefix, prompt, timestamp)) {
+          skipped++;
+          continue;
+        }
+        
+        const payload = {
+          timestamp,
+          working_directory: workingDir,
+          prompt_length: prompt.length,
+          prompt: prompt,
+          type: "input"
+        };
+        
+        if (DRY_RUN) {
+          console.log(`[DRY RUN] Would upload input: ${objectName}`);
+        } else {
+          await minioClient.putObject(MINIO_BUCKET, objectName, JSON.stringify(payload), { "Content-Type": "application/json" });
+          contentCache.get(prefix).add(hash);
+        }
+        added++;
+      } else if (entry.type === "assistant" && lastInputHash) {
+        // This is an output prompt linked to the previous input
+        const response = entry.content;
+        const objectName = `${prefix}${lastInputHash}_output.json`;
+        
+        // Simple check for output existence (can be more thorough if needed)
+        const hashes = contentCache.get(prefix) || new Set();
+        if (hashes.has(lastInputHash + "_output")) {
+          skipped++;
+          continue;
+        }
+
+        const payload = {
+          timestamp,
+          input_hash: lastInputHash,
+          input_timestamp: lastInputTimestamp,
+          response: response,
+          type: "output"
+        };
+
+        if (DRY_RUN) {
+          console.log(`[DRY RUN] Would upload output: ${objectName}`);
+        } else {
+          await minioClient.putObject(MINIO_BUCKET, objectName, JSON.stringify(payload), { "Content-Type": "application/json" });
+          if (contentCache.has(prefix)) contentCache.get(prefix).add(lastInputHash + "_output");
+        }
+        added++;
       }
-      
-      const payload = {
-        timestamp,
-        working_directory: workingDir,
-        prompt_length: prompt.length,
-        prompt: prompt
-      };
-      
-      if (DRY_RUN) {
-        console.log(`[DRY RUN] Would upload: ${objectName}`);
-      } else {
-        await minioClient.putObject(
-          MINIO_BUCKET,
-          objectName,
-          JSON.stringify(payload),
-          { "Content-Type": "application/json" }
-        );
-        // Update cache
-        contentCache.get(prefix).add(hash);
-        contentCache.get(prefix).add(hash + "_" + timestamp);
-      }
-      added++;
       
     } catch (e) {
       // console.warn(`Error parsing line in ${fileInfo.path}: ${e.message}`);

@@ -18,6 +18,7 @@ import { isMinioConfigured, testMinioConnection } from "@/lib/minio";
  * Request body:
  * - type: "full" | "incremental" (default: "full")
  * - since: ISO date string (required for incremental sync)
+ * - syncType: "manual" | "auto" | "cron" (default: "manual") - purpose of the sync
  */
 export async function POST(request: NextRequest) {
   try {
@@ -90,26 +91,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse request body
-    let body: { type?: string; since?: string } = {};
+    let body: { type?: string; since?: string; syncType?: string } = {};
     try {
       body = await request.json();
     } catch {
       // Empty body is OK, default to full sync
     }
 
-    const syncType = body.type || "full";
+    const operationType = body.type || "full";
+    const syncPurpose = (body.syncType as "manual" | "auto" | "cron") || "manual";
 
-    // Build sync options with user context
-    const syncOptions = userId && userToken
-      ? { userId, userToken }
-      : undefined;
+    // Build sync options with user context and sync type
+    const syncOptions = {
+      userId,
+      userToken,
+      syncType: syncPurpose,
+    };
 
     console.log(
-      `Starting ${syncType} sync...${syncOptions ? ` (user-scoped: ${userToken})` : " (global)"}`
+      `Starting ${operationType} sync (${syncPurpose})...${userId ? ` (user-scoped: ${userToken})` : " (global)"}`
     );
 
     let result;
-    if (syncType === "incremental") {
+    if (operationType === "incremental") {
       if (!body.since) {
         return NextResponse.json(
           {
@@ -138,8 +142,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: result.success,
-      type: syncType,
-      userScoped: !!syncOptions,
+      syncLogId: result.syncLogId,
+      type: operationType,
+      syncType: syncPurpose,
+      userScoped: !!userId,
       filesProcessed: result.filesProcessed,
       filesAdded: result.filesAdded,
       filesSkipped: result.filesSkipped,

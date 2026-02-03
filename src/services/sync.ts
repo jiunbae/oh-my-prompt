@@ -16,6 +16,8 @@ export interface SyncOptions {
   userToken?: string;
   /** User ID to associate prompts with */
   userId?: string;
+  /** Sync type for logging purposes: "manual", "auto", or "cron" */
+  syncType?: "manual" | "auto" | "cron";
 }
 
 /**
@@ -264,11 +266,13 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
     `Starting full sync from MinIO...${prefix ? ` (prefix: ${prefix})` : " (all objects)"}`
   );
 
+  let syncLogId: string | undefined;
+
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
     const { eq, and } = await import("drizzle-orm");
 
-    // Create sync log entry
+    // Create sync log entry with user and sync type info
     const [syncLog] = await db
       .insert(syncLogTable)
       .values({
@@ -276,8 +280,12 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
         filesProcessed: 0,
         filesAdded: 0,
         filesSkipped: 0,
+        userId: options?.userId ?? null,
+        syncType: options?.syncType ?? "manual",
       })
       .returning();
+
+    syncLogId = syncLog.id;
 
     try {
       // List objects (with optional prefix for user-specific sync)
@@ -386,6 +394,7 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
     filesSkipped,
     errors,
     duration,
+    syncLogId,
   };
 }
 
@@ -415,11 +424,13 @@ export async function syncIncremental(
     `Starting incremental sync from ${since.toISOString()}...${userPrefix ? ` (user: ${options?.userToken})` : ""}`
   );
 
+  let syncLogId: string | undefined;
+
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
     const { eq, gte, and } = await import("drizzle-orm");
 
-    // Create sync log entry
+    // Create sync log entry with user and sync type info
     const [syncLog] = await db
       .insert(syncLogTable)
       .values({
@@ -427,8 +438,12 @@ export async function syncIncremental(
         filesProcessed: 0,
         filesAdded: 0,
         filesSkipped: 0,
+        userId: options?.userId ?? null,
+        syncType: options?.syncType ?? "manual",
       })
       .returning();
+
+    syncLogId = syncLog.id;
 
     try {
       // Build prefixes for relevant dates (with user prefix if multi-user)
@@ -548,6 +563,7 @@ export async function syncIncremental(
     filesSkipped,
     errors,
     duration,
+    syncLogId,
   };
 }
 

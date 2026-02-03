@@ -52,6 +52,7 @@ export interface SyncResult {
   filesSkipped: number;
   errors: string[];
   duration: number; // milliseconds
+  syncLogId?: string; // ID of the sync log entry
 }
 
 /**
