@@ -1,36 +1,142 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Prompt Analytics Dashboard
 
-## Getting Started
+A dashboard for viewing and analyzing Claude Code prompts stored in MinIO.
 
-First, run the development server:
+## Features
 
+- Browse and search Claude Code prompts
+- Analytics with daily activity charts, token counts, and project breakdowns
+- Filter by project, prompt type, and date range
+- Password-protected access
+- Real-time sync from MinIO storage
+
+## Tech Stack
+
+- **Frontend**: Next.js 16 (App Router), React, Tailwind CSS
+- **Database**: PostgreSQL with Drizzle ORM
+- **Storage**: MinIO (S3-compatible object storage)
+- **Deployment**: Kubernetes, ArgoCD (GitOps)
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 22+
+- pnpm
+- Docker (for local PostgreSQL)
+
+### Local Development
+
+1. Clone the repository:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/your-username/prompt-analyzer.git
+cd prompt-analyzer
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Install dependencies:
+```bash
+pnpm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Set up environment variables:
+```bash
+cp .env.example .env.local
+# Edit .env.local with your configuration
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Start PostgreSQL:
+```bash
+docker-compose up -d postgres
+```
 
-## Learn More
+5. Run database migrations:
+```bash
+pnpm db:push
+```
 
-To learn more about Next.js, take a look at the following resources:
+6. Start the development server:
+```bash
+pnpm dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+7. Open http://localhost:3000
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Environment Variables
 
-## Deploy on Vercel
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `MINIO_ENDPOINT` | MinIO server endpoint | Yes |
+| `MINIO_ACCESS_KEY` | MinIO access key | Yes |
+| `MINIO_SECRET_KEY` | MinIO secret key | Yes |
+| `MINIO_BUCKET` | MinIO bucket name | Yes |
+| `MINIO_USE_SSL` | Use SSL for MinIO connection | No (default: true) |
+| `AUTH_PASSWORD` | Dashboard access password | Yes |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+├── app/                    # Next.js App Router pages
+│   ├── (dashboard)/       # Protected dashboard routes
+│   │   ├── analytics/     # Analytics page
+│   │   ├── prompts/       # Prompts list and detail
+│   │   └── settings/      # Settings page
+│   ├── api/               # API routes
+│   └── login/             # Login page
+├── components/            # React components
+├── db/                    # Database schema
+├── lib/                   # Utility libraries
+└── services/             # Business logic (sync, etc.)
+```
+
+## Deployment
+
+### Kubernetes (GitOps)
+
+The app is deployed via ArgoCD. Configuration is managed in the IaC repository.
+
+1. Build and push Docker image:
+```bash
+docker build -t registry.example.com/prompt-analyzer:latest .
+docker push registry.example.com/prompt-analyzer:latest
+```
+
+2. Update image tag in IaC repo:
+```bash
+cd ~/workspace/IaC/kubernetes/apps/prompt-analyzer
+# Update newTag in kustomization.yaml
+git commit -am "chore: update image tag"
+git push
+```
+
+3. ArgoCD will automatically sync the deployment.
+
+### Manual Deployment
+
+```bash
+# Build
+pnpm build
+
+# Start
+NODE_ENV=production node .next/standalone/server.js
+```
+
+## Security Notes
+
+- All routes except `/login` require authentication
+- Cookies are set with `httpOnly`, `secure` (production), and `sameSite: lax`
+- Database queries use parameterized statements (Drizzle ORM)
+- Container runs as non-root user
+- Secrets are managed via Kubernetes Secrets (not in git)
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/login` | POST | Authenticate with password |
+| `/api/sync` | POST | Trigger MinIO sync |
+
+## License
+
+Private - Internal use only
