@@ -34,17 +34,27 @@ for file in $files; do
     fi
 
     # Parse JSONL and upload each prompt + response pair
-    python3 - <<EOF
+    export FILE_PATH="$file"
+    export PROJECT_DIR="$project_dir"
+    export MINIO_ACCESS_KEY_ENV="$MINIO_ACCESS_KEY"
+    export MINIO_SECRET_KEY_ENV="$MINIO_SECRET_KEY"
+    export USER_TOKEN_ENV="$USER_TOKEN"
+    export DRY_RUN_ENV="$DRY_RUN"
+
+    python3 - <<'EOF'
 import json, hashlib, datetime, os, subprocess, hmac, urllib.parse
 
-access_key = "$MINIO_ACCESS_KEY"
-secret_key = "$MINIO_SECRET_KEY"
-bucket = "$MINIO_BUCKET"
-endpoint = "$MINIO_ENDPOINT"
-token = "$USER_TOKEN"
-dry_run = "$DRY_RUN" == "--dry-run"
-file_path = "$file"
-project_dir = "$project_dir"
+access_key = os.environ.get("MINIO_ACCESS_KEY_ENV")
+secret_key = os.environ.get("MINIO_SECRET_KEY_ENV")
+bucket = "claude-prompts"
+endpoint = "https://minio.jiun.dev"
+token = os.environ.get("USER_TOKEN_ENV")
+dry_run = os.environ.get("DRY_RUN_ENV") == "--dry-run"
+file_path = os.environ.get("FILE_PATH")
+project_dir = os.environ.get("PROJECT_DIR")
+
+def sign(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
 def object_exists(object_path):
     # S3 Signature V4 for HEAD request
@@ -69,9 +79,6 @@ def object_exists(object_path):
     credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
     string_to_sign = f"{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
 
-    def sign(key, msg):
-        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
-
     k_date = sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
     k_region = sign(k_date, region)
     k_service = sign(k_region, service)
@@ -91,7 +98,7 @@ def object_exists(object_path):
     try:
         result = subprocess.check_output(cmd).decode('utf-8').strip()
         return result == "200"
-    except:
+    except Exception:
         return False
 
 def upload_to_minio(payload_dict, object_path):
@@ -143,9 +150,6 @@ def upload_to_minio(payload_dict, object_path):
         f"{credential_scope}\n"
         f"{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
     )
-
-    def sign(key, msg):
-        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
     k_date = sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
     k_region = sign(k_date, region)

@@ -27,11 +27,6 @@ export interface SyncOptions {
  * @returns Project name or null if not found
  */
 export function extractProjectName(dir: string): string | null {
-  // Try common patterns:
-  // - /Users/{user}/workspace/{project}/...
-  // - /Users/{user}/{project}/...
-  // - /home/{user}/workspace/{project}/...
-  // - /home/{user}/{project}/...
   const patterns = [
     /\/(?:Users|home)\/[^/]+\/workspace\/([^/]+)/,
     /\/(?:Users|home)\/[^/]+\/([^/]+)/,
@@ -46,9 +41,6 @@ export function extractProjectName(dir: string): string | null {
 
 /**
  * Detect prompt type based on content markers
- *
- * @param prompt - Prompt text content
- * @returns Prompt type classification
  */
 export function detectPromptType(prompt: string): PromptType {
   if (prompt.includes("<task-notification>")) return "task_notification";
@@ -58,10 +50,6 @@ export function detectPromptType(prompt: string): PromptType {
 
 /**
  * Estimate token count from text
- * Uses rough estimation of ~4 characters per token for English
- *
- * @param text - Text to estimate tokens for
- * @returns Estimated token count
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -69,9 +57,6 @@ export function estimateTokens(text: string): number {
 
 /**
  * Count words in text
- *
- * @param text - Text to count words in
- * @returns Word count
  */
 export function countWords(text: string): number {
   return text.split(/\s+/).filter((word) => word.length > 0).length;
@@ -79,10 +64,6 @@ export function countWords(text: string): number {
 
 /**
  * Extract metadata from prompt content
- *
- * @param prompt - Raw prompt text
- * @param workingDirectory - Working directory path
- * @returns Extracted metadata
  */
 export function extractMetadata(
   prompt: string,
@@ -98,10 +79,6 @@ export function extractMetadata(
 
 /**
  * List all JSON objects in the MinIO bucket
- *
- * @param bucket - Bucket name to list from
- * @param prefix - Optional prefix to filter objects
- * @returns Array of object information
  */
 export async function listAllObjects(
   bucket: string = PROMPTS_BUCKET,
@@ -116,8 +93,7 @@ export async function listAllObjects(
   return new Promise((resolve, reject) => {
     const stream = getMinioClient().listObjectsV2(bucket, prefix, true);
 
-    stream.on("data", (obj) => {
-      // Only include JSON files
+    stream.on("data", (obj: any) => {
       if (obj.name?.endsWith(".json")) {
         objects.push({
           name: obj.name,
@@ -128,7 +104,7 @@ export async function listAllObjects(
       }
     });
 
-    stream.on("error", (err) => {
+    stream.on("error", (err: Error) => {
       console.error("Error listing objects:", err);
       reject(err);
     });
@@ -142,10 +118,6 @@ export async function listAllObjects(
 
 /**
  * Fetch and parse a single prompt from MinIO
- *
- * @param key - Object key (path) in the bucket
- * @param bucket - Bucket name
- * @returns Parsed prompt data or null if invalid
  */
 export async function fetchPrompt(
   key: string,
@@ -160,14 +132,13 @@ export async function fetchPrompt(
     const chunks: Buffer[] = [];
 
     return new Promise((resolve, reject) => {
-      stream.on("data", (chunk) => chunks.push(chunk));
+      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
       stream.on("error", reject);
       stream.on("end", () => {
         try {
           const data = Buffer.concat(chunks).toString("utf-8");
           const prompt = JSON.parse(data) as MinioPrompt;
 
-          // Validate required fields
           const isOutput = key.endsWith("_output.json") || prompt.type === "output";
           const hasWorkingDirectory =
             typeof prompt.working_directory === "string" && prompt.working_directory.length > 0;
@@ -201,10 +172,6 @@ export async function fetchPrompt(
 
 /**
  * Process a raw MinIO prompt into database-ready format
- *
- * @param minioPrompt - Raw prompt from MinIO
- * @param key - Object key
- * @returns Processed prompt for database insertion
  */
 export function processPrompt(
   minioPrompt: MinioPrompt,
@@ -241,15 +208,13 @@ export function processPrompt(
   };
 }
 
-// Import database utilities lazily to avoid circular dependencies
-let db: ReturnType<typeof import("drizzle-orm/postgres-js").drizzle> | null =
-  null;
-let promptsTable: typeof import("@/db/schema").prompts | null = null;
-let syncLogTable: typeof import("@/db/schema").minioSyncLog | null = null;
+let db: any = null;
+let promptsTable: any = null;
+let syncLogTable: any = null;
 
 async function getDb() {
   if (!db) {
-    const postgres = await import("postgres");
+    const postgres = (await import("postgres")).default;
     const { drizzle } = await import("drizzle-orm/postgres-js");
     const schema = await import("@/db/schema");
 
@@ -258,48 +223,35 @@ async function getDb() {
       throw new Error("DATABASE_URL environment variable is not set");
     }
 
-    const client = postgres.default(connectionString);
+    const client = postgres(connectionString);
     db = drizzle(client, { schema });
     promptsTable = schema.prompts;
     syncLogTable = schema.minioSyncLog;
   }
-
-  if (!db || !promptsTable || !syncLogTable) {
-    throw new Error("Database is not initialized");
-  }
-
   return { db, promptsTable, syncLogTable };
 }
 
 /**
  * Perform a full sync of all prompts from MinIO to database
- *
- * @param options - Optional sync options including user token for multi-user support
- * @returns Sync result summary
  */
-export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
+export async function syncAll(options: SyncOptions): Promise<SyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
   let filesProcessed = 0;
   let filesAdded = 0;
   let filesSkipped = 0;
 
-  // Determine the MinIO prefix based on user token
-  // Multi-user path structure: {user_token}/year/month/day/timestamp.json
-  // Legacy path structure: year/month/day/timestamp.json
-  const prefix = options?.userToken ? `${options.userToken}/` : undefined;
+  if (!options?.userId || !options?.userToken) {
+    throw new Error("Authentication required for sync operations");
+  }
 
-  console.log(
-    `Starting full sync from MinIO...${prefix ? ` (prefix: ${prefix})` : " (all objects)"}`
-  );
-
+  const prefix = `${options.userToken}/`;
   let syncLogId: string | undefined;
 
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
-    const { eq } = await import("drizzle-orm");
+    const { eq, and } = await import("drizzle-orm");
 
-    // Create sync log entry with user and sync type info
     const [syncLog] = await db
       .insert(syncLogTable)
       .values({
@@ -307,45 +259,27 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
         filesProcessed: 0,
         filesAdded: 0,
         filesSkipped: 0,
-        userId: options?.userId ?? null,
-        syncType: options?.syncType ?? "manual",
+        userId: options.userId,
+        syncType: options.syncType ?? "manual",
       })
       .returning();
 
     syncLogId = syncLog.id;
 
     try {
-      // List objects (with optional prefix for user-specific sync)
       const objects = await listAllObjects(PROMPTS_BUCKET, prefix);
-      console.log(`Found ${objects.length} objects to process`);
+      const existingPrompts = await db
+        .select({ minioKey: promptsTable.minioKey })
+        .from(promptsTable)
+        .where(eq(promptsTable.userId, options.userId));
+      
+      const existingKeys = new Set(existingPrompts.map((p: any) => p.minioKey));
 
-      // Get existing keys to avoid duplicates
-      // If syncing for a specific user, only check their prompts
-      let existingPrompts: Array<{ minioKey: string }> = [];
-      if (options?.userId) {
-        existingPrompts = await db
-          .select({ minioKey: promptsTable.minioKey })
-          .from(promptsTable)
-          .where(eq(promptsTable.userId, options.userId));
-      } else {
-        existingPrompts = await db
-          .select({ minioKey: promptsTable.minioKey })
-          .from(promptsTable);
-      }
-      const existingKeys = new Set(existingPrompts.map((p) => p.minioKey));
-      console.log(`Found ${existingKeys.size} existing prompts in database`);
-
-      // Process objects in two passes: inputs first, then outputs
-      // This ensures input records exist before we try to update them with responses
       const inputs = objects.filter((obj) => !obj.name.endsWith("_output.json"));
       const outputs = objects.filter((obj) => obj.name.endsWith("_output.json"));
 
-      console.log(`Processing ${inputs.length} inputs and ${outputs.length} outputs`);
-
-      // Pass 1: Inputs
       for (const obj of inputs) {
         filesProcessed++;
-
         if (existingKeys.has(obj.name)) {
           filesSkipped++;
           continue;
@@ -353,47 +287,29 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
 
         try {
           const promptData = await fetchPrompt(obj.name);
-          if (!promptData) {
-            errors.push(`Failed to parse: ${obj.name}`);
-            continue;
-          }
+          if (!promptData) continue;
 
           const processed = processPrompt(promptData, obj.name);
-          const insertData = options?.userId
-            ? { ...processed, userId: options.userId }
-            : processed;
-
-          await db.insert(promptsTable).values(insertData);
+          await db.insert(promptsTable).values({ ...processed, userId: options.userId });
           filesAdded++;
-
-          if (filesAdded % 50 === 0) {
-            console.log(`Progress: ${filesAdded} inputs added`);
-          }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          errors.push(`Error processing input ${obj.name}: ${message}`);
+          errors.push(`Error processing input ${obj.name}: ${error}`);
         }
       }
 
-      // Pass 2: Outputs
       for (const obj of outputs) {
         filesProcessed++;
-
         try {
           const promptData = await fetchPrompt(obj.name);
-          if (!promptData) {
-            errors.push(`Failed to parse: ${obj.name}`);
-            continue;
-          }
+          if (!promptData) continue;
 
           const processed = processPrompt(promptData, obj.name);
           if (processed.isOutput && processed.inputHash) {
             const inputKey = obj.name.replace("_output.json", ".json");
-
             const [existing] = await db
               .select()
               .from(promptsTable)
-              .where(eq(promptsTable.minioKey, inputKey))
+              .where(and(eq(promptsTable.minioKey, inputKey), eq(promptsTable.userId, options.userId)))
               .limit(1);
 
             if (existing) {
@@ -409,21 +325,14 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
                 .where(eq(promptsTable.id, existing.id));
               filesAdded++;
             } else {
-              // If input not found, we skip for now
               filesSkipped++;
             }
           }
-
-          if (filesAdded % 50 === 0) {
-            console.log(`Progress: ${filesAdded} total prompts processed`);
-          }
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          errors.push(`Error processing output ${obj.name}: ${message}`);
+          errors.push(`Error processing output ${obj.name}: ${error}`);
         }
       }
 
-      // Update sync log with success
       await db
         .update(syncLogTable)
         .set({
@@ -435,9 +344,6 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
         })
         .where(eq(syncLogTable.id, syncLog.id));
     } catch (error) {
-      // Update sync log with failure
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
       await db
         .update(syncLogTable)
         .set({
@@ -446,22 +352,14 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
           filesProcessed,
           filesAdded,
           filesSkipped,
-          errorMessage,
+          errorMessage: String(error),
         })
         .where(eq(syncLogTable.id, syncLog.id));
-
       throw error;
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    errors.push(`Sync failed: ${message}`);
-    console.error("Sync failed:", error);
+    errors.push(`Sync failed: ${error}`);
   }
-
-  const duration = Date.now() - startTime;
-  console.log(
-    `Sync completed in ${duration}ms: ${filesAdded} added, ${filesSkipped} skipped, ${errors.length} errors`
-  );
 
   return {
     success: errors.length === 0,
@@ -469,23 +367,17 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
     filesAdded,
     filesSkipped,
     errors,
-    duration,
+    duration: Date.now() - startTime,
     syncLogId,
   };
 }
 
 /**
  * Perform incremental sync for prompts since a given date
- * Uses the date-based folder structure: {year}/{month}/{day}/
- * For multi-user: {user_token}/{year}/{month}/{day}/
- *
- * @param since - Date to sync from
- * @param options - Optional sync options including user token for multi-user support
- * @returns Sync result summary
  */
 export async function syncIncremental(
   since: Date,
-  options?: SyncOptions
+  options: SyncOptions
 ): Promise<SyncResult> {
   const startTime = Date.now();
   const errors: string[] = [];
@@ -493,20 +385,17 @@ export async function syncIncremental(
   let filesAdded = 0;
   let filesSkipped = 0;
 
-  // User token prefix for multi-user support
-  const userPrefix = options?.userToken ? `${options.userToken}/` : "";
+  if (!options?.userId || !options?.userToken) {
+    throw new Error("Authentication required for sync operations");
+  }
 
-  console.log(
-    `Starting incremental sync from ${since.toISOString()}...${userPrefix ? ` (user: ${options?.userToken})` : ""}`
-  );
-
+  const userPrefix = `${options.userToken}/`;
   let syncLogId: string | undefined;
 
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
     const { eq, gte, and } = await import("drizzle-orm");
 
-    // Create sync log entry with user and sync type info
     const [syncLog] = await db
       .insert(syncLogTable)
       .values({
@@ -514,86 +403,87 @@ export async function syncIncremental(
         filesProcessed: 0,
         filesAdded: 0,
         filesSkipped: 0,
-        userId: options?.userId ?? null,
-        syncType: options?.syncType ?? "manual",
+        userId: options.userId,
+        syncType: options.syncType ?? "manual",
       })
       .returning();
 
     syncLogId = syncLog.id;
 
     try {
-      // Build prefixes for relevant dates (with user prefix if multi-user)
       const datePrefixes = getDatePrefixes(since, new Date());
       const prefixes = datePrefixes.map((dp) => `${userPrefix}${dp}`);
-      console.log(`Scanning ${prefixes.length} date prefixes`);
-
-      // Get existing keys for the date range
-      // If syncing for a specific user, only check their prompts
-      let existingPrompts: Array<{ minioKey: string }> = [];
-      if (options?.userId) {
-        existingPrompts = await db
-          .select({ minioKey: promptsTable.minioKey })
-          .from(promptsTable)
-          .where(
-            and(
-              gte(promptsTable.timestamp, since),
-              eq(promptsTable.userId, options.userId)
-            )
-          );
-      } else {
-        existingPrompts = await db
-          .select({ minioKey: promptsTable.minioKey })
-          .from(promptsTable)
-          .where(gte(promptsTable.timestamp, since));
-      }
-      const existingKeys = new Set(existingPrompts.map((p) => p.minioKey));
-
-      // Process each date prefix
+      const allObjects: MinioObjectInfo[] = [];
       for (const prefix of prefixes) {
         const objects = await listAllObjects(PROMPTS_BUCKET, prefix);
+        allObjects.push(...objects);
+      }
 
-        for (const obj of objects) {
-          filesProcessed++;
+      const existingPrompts = await db
+        .select({ minioKey: promptsTable.minioKey })
+        .from(promptsTable)
+        .where(and(gte(promptsTable.timestamp, since), eq(promptsTable.userId, options.userId)));
+      
+      const existingKeys = new Set(existingPrompts.map((p: any) => p.minioKey));
 
-          if (existingKeys.has(obj.name)) {
-            filesSkipped++;
-            continue;
-          }
+      const inputs = allObjects.filter((obj) => !obj.name.endsWith("_output.json"));
+      const outputs = allObjects.filter((obj) => obj.name.endsWith("_output.json"));
 
-          try {
-            const prompt = await fetchPrompt(obj.name);
-            if (!prompt) {
-              errors.push(`Failed to parse: ${obj.name}`);
-              continue;
-            }
+      for (const obj of inputs) {
+        filesProcessed++;
+        if (existingKeys.has(obj.name)) {
+          filesSkipped++;
+          continue;
+        }
 
-            // Check if prompt is actually after the since date
-            const promptDate = new Date(prompt.timestamp);
-            if (promptDate < since) {
-              filesSkipped++;
-              continue;
-            }
+        try {
+          const promptData = await fetchPrompt(obj.name);
+          if (!promptData || new Date(promptData.timestamp) < since) continue;
 
-            const processed = processPrompt(prompt, obj.name);
-
-            // Add userId if provided
-            const insertData = options?.userId
-              ? { ...processed, userId: options.userId }
-              : processed;
-
-            await db.insert(promptsTable).values(insertData);
-            filesAdded++;
-          } catch (insertError) {
-            const message =
-              insertError instanceof Error
-                ? insertError.message
-                : String(insertError);
-            errors.push(`Error inserting ${obj.name}: ${message}`);
-          }
+          const processed = processPrompt(promptData, obj.name);
+          await db.insert(promptsTable).values({ ...processed, userId: options.userId });
+          filesAdded++;
+        } catch (error) {
+          errors.push(`Error processing incremental input ${obj.name}: ${error}`);
         }
       }
 
-      // Update sync log with success
+      for (const obj of outputs) {
+        filesProcessed++;
+        try {
+          const promptData = await fetchPrompt(obj.name);
+          if (!promptData) continue;
+
+          const processed = processPrompt(promptData, obj.name);
+          if (processed.isOutput && processed.inputHash) {
+            const inputKey = obj.name.replace("_output.json", ".json");
+            const [existing] = await db
+              .select()
+              .from(promptsTable)
+              .where(and(eq(promptsTable.minioKey, inputKey), eq(promptsTable.userId, options.userId)))
+              .limit(1);
+
+            if (existing) {
+              await db
+                .update(promptsTable)
+                .set({
+                  responseText: processed.responseText,
+                  responseLength: processed.responseLength,
+                  tokenEstimateResponse: processed.tokenEstimateResponse,
+                  wordCountResponse: processed.wordCountResponse,
+                  updatedAt: new Date(),
+                })
+                .where(eq(promptsTable.id, existing.id));
+              filesAdded++;
+            } else {
+              filesSkipped++;
+            }
+          }
+        } catch (error) {
+          errors.push(`Error processing incremental output ${obj.name}: ${error}`);
+        }
+      }
+
       await db
         .update(syncLogTable)
         .set({
@@ -605,8 +495,6 @@ export async function syncIncremental(
         })
         .where(eq(syncLogTable.id, syncLog.id));
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
       await db
         .update(syncLogTable)
         .set({
@@ -615,22 +503,14 @@ export async function syncIncremental(
           filesProcessed,
           filesAdded,
           filesSkipped,
-          errorMessage,
+          errorMessage: String(error),
         })
         .where(eq(syncLogTable.id, syncLog.id));
-
       throw error;
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    errors.push(`Incremental sync failed: ${message}`);
-    console.error("Incremental sync failed:", error);
+    errors.push(`Incremental sync failed: ${error}`);
   }
-
-  const duration = Date.now() - startTime;
-  console.log(
-    `Incremental sync completed in ${duration}ms: ${filesAdded} added, ${filesSkipped} skipped, ${errors.length} errors`
-  );
 
   return {
     success: errors.length === 0,
@@ -638,16 +518,13 @@ export async function syncIncremental(
     filesAdded,
     filesSkipped,
     errors,
-    duration,
+    duration: Date.now() - startTime,
     syncLogId,
   };
 }
 
 /**
  * Find user by their MinIO token
- *
- * @param token - User's unique token
- * @returns User data or null if not found
  */
 export async function findUserByToken(token: string) {
   const { db } = await getDb();
@@ -665,11 +542,6 @@ export async function findUserByToken(token: string) {
 
 /**
  * Generate date prefixes for MinIO path structure
- * Format: {year}/{month}/{day}/
- *
- * @param startDate - Start date
- * @param endDate - End date
- * @returns Array of path prefixes
  */
 function getDatePrefixes(startDate: Date, endDate: Date): string[] {
   const prefixes: string[] = [];
@@ -692,8 +564,6 @@ function getDatePrefixes(startDate: Date, endDate: Date): string[] {
 
 /**
  * Get the status of the last sync operation
- *
- * @returns Last sync status or null if no syncs have been performed
  */
 export async function getLastSyncStatus() {
   try {
@@ -706,9 +576,7 @@ export async function getLastSyncStatus() {
       .orderBy(desc(syncLogTable.startedAt))
       .limit(1);
 
-    if (!lastSync) {
-      return null;
-    }
+    if (!lastSync) return null;
 
     return {
       id: lastSync.id,
@@ -728,8 +596,6 @@ export async function getLastSyncStatus() {
 
 /**
  * Check if a sync is currently running
- *
- * @returns True if a sync is in progress
  */
 export async function isSyncRunning(): Promise<boolean> {
   try {
