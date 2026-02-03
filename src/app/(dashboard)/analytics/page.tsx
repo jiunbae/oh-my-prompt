@@ -196,21 +196,21 @@ export default async function AnalyticsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-end gap-1 h-32">
+          <div className="flex items-end gap-1" style={{ height: "128px" }}>
             {dailyStats.map((day, i) => {
-              const height = (Number(day.count) / maxDailyCount) * 100;
+              const heightPx = Math.max((Number(day.count) / maxDailyCount) * 112, 4);
               const date = new Date(day.date);
               return (
                 <div
                   key={i}
-                  className="flex-1 flex flex-col items-center gap-1"
+                  className="flex-1 flex flex-col items-end justify-end"
                   title={`${day.date}: ${day.count} prompts`}
                 >
                   <div
                     className="w-full bg-indigo-500 rounded-t transition-all hover:bg-indigo-400"
-                    style={{ height: `${Math.max(height, 4)}%` }}
+                    style={{ height: `${heightPx}px` }}
                   />
-                  <span className="text-[10px] text-zinc-500">
+                  <span className="text-[10px] text-zinc-500 mt-1">
                     {date.getDate()}
                   </span>
                 </div>
