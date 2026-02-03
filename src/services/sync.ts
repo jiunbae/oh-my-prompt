@@ -167,15 +167,21 @@ export async function fetchPrompt(
 
           // Validate required fields
           const isOutput = key.endsWith("_output.json") || prompt.type === "output";
+          const hasWorkingDirectory =
+            typeof prompt.working_directory === "string" && prompt.working_directory.length > 0;
+
           if (
             !prompt.timestamp ||
-            !prompt.working_directory ||
-            (!isOutput && (prompt.prompt_length === undefined || !prompt.prompt)) ||
+            (!isOutput && (!hasWorkingDirectory || prompt.prompt_length === undefined || !prompt.prompt)) ||
             (isOutput && !prompt.response)
           ) {
             console.warn(`Invalid prompt format in ${key}`);
             resolve(null);
             return;
+          }
+
+          if (isOutput && !hasWorkingDirectory) {
+            prompt.working_directory = "unknown";
           }
 
           resolve(prompt);
@@ -207,10 +213,11 @@ export function processPrompt(
     ? (minioPrompt.input_hash || key.split("/").pop()?.replace("_output.json", ""))
     : undefined;
 
+  const workingDirectory = minioPrompt.working_directory ?? "unknown";
   const metadata = !isOutput && minioPrompt.prompt 
-    ? extractMetadata(minioPrompt.prompt, minioPrompt.working_directory)
+    ? extractMetadata(minioPrompt.prompt, workingDirectory)
     : {
-        projectName: extractProjectName(minioPrompt.working_directory),
+        projectName: extractProjectName(workingDirectory),
         promptType: "user_input" as PromptType,
         tokenEstimate: 0,
         wordCount: 0
@@ -219,7 +226,7 @@ export function processPrompt(
   return {
     minioKey: key,
     timestamp: new Date(minioPrompt.timestamp),
-    workingDirectory: minioPrompt.working_directory,
+    workingDirectory,
     promptLength: minioPrompt.prompt_length,
     promptText: minioPrompt.prompt,
     responseText: minioPrompt.response,

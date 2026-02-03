@@ -35,7 +35,7 @@ for file in $files; do
 
     # Parse JSONL and upload each prompt + response pair
     python3 - <<EOF
-import json, hashlib, datetime, os, subprocess, hmac, base64
+import json, hashlib, datetime, os, subprocess, hmac, urllib.parse
 
 access_key = "$MINIO_ACCESS_KEY"
 secret_key = "$MINIO_SECRET_KEY"
@@ -53,19 +53,67 @@ def upload_to_minio(payload_dict, object_path):
         print(f"  [DRY RUN] Would upload: {object_path}")
         return
 
-    # S3 Signature V2
+    # S3 Signature V4
     resource = f"/{bucket}/{object_path}"
-    date_header = subprocess.check_output(["date", "-R"]).decode('utf-8').strip()
     content_type = "application/json"
-    string_to_sign = f"PUT\n\n{content_type}\n{date_header}\n{resource}"
-    
-    signature = base64.b64encode(hmac.new(secret_key.encode('utf-8'), string_to_sign.encode('utf-8'), hashlib.sha1).digest()).decode('utf-8')
+    now = datetime.datetime.utcnow()
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = now.strftime("%Y%m%d")
+    region = "us-east-1"
+    service = "s3"
+
+    parsed = urllib.parse.urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    canonical_uri = resource
+    canonical_querystring = ""
+    canonical_headers = (
+        f"content-type:{content_type}\n"
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+    canonical_request = (
+        "PUT\n"
+        f"{canonical_uri}\n"
+        f"{canonical_querystring}\n"
+        f"{canonical_headers}\n"
+        f"{signed_headers}\n"
+        f"{payload_hash}"
+    )
+
+    algorithm = "AWS4-HMAC-SHA256"
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = (
+        f"{algorithm}\n"
+        f"{amz_date}\n"
+        f"{credential_scope}\n"
+        f"{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+    )
+
+    def sign(key, msg):
+        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+    k_date = sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    k_region = sign(k_date, region)
+    k_service = sign(k_region, service)
+    k_signing = sign(k_service, "aws4_request")
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    authorization_header = (
+        f"{algorithm} Credential={access_key}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
     
     cmd = [
         "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "PUT",
-        "-H", f"Date: {date_header}",
+        "-H", f"Host: {host}",
         "-H", f"Content-Type: {content_type}",
-        "-H", f"Authorization: AWS {access_key}:{signature}",
+        "-H", f"x-amz-content-sha256: {payload_hash}",
+        "-H", f"x-amz-date: {amz_date}",
+        "-H", f"Authorization: {authorization_header}",
         "-d", payload,
         f"{endpoint}{resource}"
     ]

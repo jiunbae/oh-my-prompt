@@ -7,7 +7,7 @@
  */
 export interface MinioPrompt {
   timestamp: string; // ISO 8601 format: "2026-02-02T05:19:51Z"
-  working_directory: string; // e.g., "/Users/username/project/path"
+  working_directory?: string; // e.g., "/Users/username/project/path" (optional for output)
   prompt_length?: number; // Character count (optional for output)
   prompt?: string; // Actual prompt text (optional for output)
   type?: "input" | "output";
