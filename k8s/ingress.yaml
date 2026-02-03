@@ -9,10 +9,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - prompt.example.com
+        - prompt.example.com  # TODO: Replace with your domain
       secretName: prompt-analyzer-tls
   rules:
-    - host: prompt.example.com
+    - host: prompt.example.com  # TODO: Replace with your domain
       http:
         paths:
           - path: /

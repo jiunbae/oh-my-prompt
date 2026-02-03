@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-username/prompt-analyzer.git
+    repoURL: https://github.com/your-username/prompt-analyzer.git  # TODO: Replace with your repo
     targetRevision: main
     path: k8s
   destination:

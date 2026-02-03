@@ -1,3 +1,5 @@
+# Example Gitea Actions workflow for CI/CD
+# Rename to deploy.yaml and update the environment variables
 name: Build and Deploy
 
 on:
@@ -6,9 +8,9 @@ on:
       - main
 
 env:
-  REGISTRY: registry.example.com
+  REGISTRY: your-registry.example.com  # TODO: Your container registry
   IMAGE_NAME: prompt-analyzer
-  IAC_REPO: your-username/IaC
+  IAC_REPO: your-username/your-iac-repo  # TODO: Your IaC repository
   APP_PATH: kubernetes/apps/prompt-analyzer
 
 jobs:
@@ -54,8 +56,8 @@ jobs:
       - name: Commit and push to IaC repo
         run: |
           cd iac
-          git config user.name "Gitea Actions"
-          git config user.email "actions@gitea.example.com"
+          git config user.name "CI Bot"
+          git config user.email "ci@example.com"
           git add ${{ env.APP_PATH }}/kustomization.yaml
           git diff --staged --quiet || git commit -m "chore(prompt-analyzer): update image tag to ${{ gitea.sha }}"
           git push

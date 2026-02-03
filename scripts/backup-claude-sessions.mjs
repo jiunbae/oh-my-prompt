@@ -11,7 +11,9 @@ const __dirname = dirname(__filename);
 
 // Load env variables manually to avoid dependency on dotenv if not needed, 
 // but we can just read the file.
-const envContent = fs.readFileSync(path.join(__dirname, "../.env.local"), "utf-8");
+const envContent = fs.existsSync(path.join(__dirname, "../.env.local")) 
+  ? fs.readFileSync(path.join(__dirname, "../.env.local"), "utf-8")
+  : "";
 const env = Object.fromEntries(
   envContent
     .split("\n")
@@ -22,15 +24,23 @@ const env = Object.fromEntries(
     })
 );
 
-const MINIO_ENDPOINT = env.MINIO_ENDPOINT || "minio.example.com";
-const MINIO_ACCESS_KEY = env.MINIO_ACCESS_KEY;
-const MINIO_SECRET_KEY = env.MINIO_SECRET_KEY;
-const MINIO_BUCKET = env.MINIO_BUCKET || "claude-prompts";
+const MINIO_ENDPOINT = env.MINIO_ENDPOINT || process.env.MINIO_ENDPOINT;
+if (!MINIO_ENDPOINT) {
+  console.error("Error: MINIO_ENDPOINT must be set in .env.local or environment");
+  process.exit(1);
+}
+const MINIO_ACCESS_KEY = env.MINIO_ACCESS_KEY || process.env.MINIO_ACCESS_KEY;
+const MINIO_SECRET_KEY = env.MINIO_SECRET_KEY || process.env.MINIO_SECRET_KEY;
+const MINIO_BUCKET = env.MINIO_BUCKET || process.env.MINIO_BUCKET || "claude-prompts";
+
+// Multi-user support
+const USER_TOKEN = env.USER_TOKEN || process.env.USER_TOKEN || 
+                 process.argv.find(arg => arg.startsWith("--user-token="))?.split("=")[1];
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
 if (!MINIO_ACCESS_KEY || !MINIO_SECRET_KEY) {
-  console.error("Error: MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set in .env.local");
+  console.error("Error: MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set in .env.local or environment");
   process.exit(1);
 }
 
@@ -82,50 +92,58 @@ function findSessionFiles() {
   // 1. Standard location
   const standardTranscripts = path.join(process.env.HOME, ".claude/transcripts");
   if (fs.existsSync(standardTranscripts)) {
-    fs.readdirSync(standardTranscripts).forEach(file => {
-      if (file.endsWith(".jsonl")) {
-        files.push({
-          path: path.join(standardTranscripts, file),
-          source: "standard"
-        });
-      }
-    });
+    try {
+      fs.readdirSync(standardTranscripts).forEach(file => {
+        if (file.endsWith(".jsonl")) {
+          files.push({
+            path: path.join(standardTranscripts, file),
+            source: "standard"
+          });
+        }
+      });
+    } catch (e) {
+      console.warn(`Could not read standard transcripts: ${e.message}`);
+    }
   }
   
   // 2. Workspace locations (as requested)
   const workspaceRoot = path.join(process.env.HOME, "workspace");
   if (fs.existsSync(workspaceRoot)) {
-    const projects = fs.readdirSync(workspaceRoot);
-    for (const project of projects) {
-      const claudeDir = path.join(workspaceRoot, project, ".claude");
-      if (fs.existsSync(claudeDir)) {
-        // Look for any .jsonl files in .claude or subdirs (like transcripts)
-        const scan = (dir) => {
-          if (!fs.existsSync(dir)) return;
-          try {
-            fs.readdirSync(dir).forEach(f => {
-              const fullPath = path.join(dir, f);
-              try {
-                const stats = fs.lstatSync(fullPath);
-                if (stats.isDirectory()) {
-                  scan(fullPath);
-                } else if (f.endsWith(".jsonl")) {
-                  files.push({
-                    path: fullPath,
-                    source: "workspace",
-                    projectDir: path.join(workspaceRoot, project)
-                  });
+    try {
+      const projects = fs.readdirSync(workspaceRoot);
+      for (const project of projects) {
+        const claudeDir = path.join(workspaceRoot, project, ".claude");
+        if (fs.existsSync(claudeDir)) {
+          // Look for any .jsonl files in .claude or subdirs (like transcripts)
+          const scan = (dir) => {
+            if (!fs.existsSync(dir)) return;
+            try {
+              fs.readdirSync(dir).forEach(f => {
+                const fullPath = path.join(dir, f);
+                try {
+                  const stats = fs.lstatSync(fullPath);
+                  if (stats.isDirectory()) {
+                    scan(fullPath);
+                  } else if (f.endsWith(".jsonl")) {
+                    files.push({
+                      path: fullPath,
+                      source: "workspace",
+                      projectDir: path.join(workspaceRoot, project)
+                    });
+                  }
+                } catch (e) {
+                  // Ignore errors for individual files (e.g. broken symlinks)
                 }
-              } catch (e) {
-                // Ignore errors for individual files (e.g. broken symlinks)
-              }
-            });
-          } catch (e) {
-            // Ignore errors for directories
-          }
-        };
-        scan(claudeDir);
+              });
+            } catch (e) {
+              // Ignore errors for directories
+            }
+          };
+          scan(claudeDir);
+        }
       }
+    } catch (e) {
+      console.warn(`Could not read workspace root: ${e.message}`);
     }
   }
   
@@ -150,19 +168,14 @@ async function isAlreadyInMinio(prefix, promptText, timestamp) {
     const objects = await listObjects(prefix);
     const hashes = new Set();
     
-    // To be absolutely sure, we'd need to download and check, but let's 
-    // at least check the keys. If we use deterministic naming for backups,
-    // the key check is enough for our own previous backups.
-    // For hook-logged files, we'd need content.
-    
-    // Optimization: Only download if the day folder is small-ish
+    // Optimization: Only download if the folder is small-ish
     if (objects.length < 200) {
       for (const obj of objects) {
         try {
           const dataStream = await minioClient.getObject(MINIO_BUCKET, obj.name);
           const content = await new Promise((resolve, reject) => {
             let d = "";
-            dataStream.on("data", chunk => d += chunk);
+            dataStream.on("data", chunk => { d += chunk; });
             dataStream.on("end", () => resolve(d));
             dataStream.on("error", reject);
           });
@@ -228,7 +241,10 @@ async function processFile(fileInfo, historyMap) {
       const year = date.getUTCFullYear();
       const month = String(date.getUTCMonth() + 1).padStart(2, "0");
       const day = String(date.getUTCDate()).padStart(2, "0");
-      const prefix = `${year}/${month}/${day}/`;
+      
+      // New multi-user path structure
+      const userPrefix = USER_TOKEN ? `${USER_TOKEN}/` : "";
+      const prefix = `${userPrefix}${year}/${month}/${day}/`;
       
       const hash = getHash(prompt);
       const objectName = `${prefix}${hash}.json`;
@@ -273,6 +289,11 @@ async function processFile(fileInfo, historyMap) {
 
 async function run() {
   console.log("Starting Claude session backup to MinIO...");
+  if (USER_TOKEN) {
+    console.log(`Using USER_TOKEN: ${USER_TOKEN.slice(0, 8)}...`);
+  } else {
+    console.warn("No USER_TOKEN provided. Using legacy path structure (root of bucket).");
+  }
   if (DRY_RUN) console.log("--- DRY RUN MODE ---");
   
   const historyMap = loadHistory();

@@ -20,7 +20,10 @@ export const PROMPTS_BUCKET = process.env.MINIO_BUCKET || "claude-prompts";
 let _minioClient: Client | null = null;
 
 function getEndpoint(): string {
-  const endpoint = process.env.MINIO_ENDPOINT || "minio.example.com";
+  const endpoint = process.env.MINIO_ENDPOINT;
+  if (!endpoint) {
+    throw new Error("MINIO_ENDPOINT environment variable is required");
+  }
   // Strip protocol if accidentally included
   return endpoint.replace(/^https?:\/\//, "");
 }

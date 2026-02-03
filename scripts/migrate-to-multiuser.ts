@@ -3,15 +3,18 @@
  * Migration script for multi-user support
  *
  * This script:
- * 1. Creates an initial admin user "admin"
- * 2. Adds admin's email to the allowlist
+ * 1. Creates an initial admin user
+ * 2. Adds admin email to the allowlist
  * 3. Associates all existing prompts with the admin user
  *
- * Usage: npx tsx scripts/migrate-to-multiuser.ts
+ * Usage:
+ *   ADMIN_EMAIL=admin@example.com npx tsx scripts/migrate-to-multiuser.ts
  *
  * Environment variables required:
  * - DATABASE_URL: PostgreSQL connection string
- * - ADMIN_PASSWORD: Initial password for admin user (defaults to a generated one)
+ * - ADMIN_EMAIL: Email for the initial admin user
+ * - ADMIN_NAME: Display name for admin (optional, defaults to "Admin")
+ * - ADMIN_PASSWORD: Initial password (optional, generates one if not set)
  */
 
 import postgres from "postgres";
@@ -74,10 +77,16 @@ const prompts = pgTable("prompts", {
   userId: uuid("user_id"),
 });
 
-// Configuration
-const ADMIN_EMAIL = "admin@example.com";
-const ADMIN_NAME = "Jiun";
+// Configuration from environment
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_NAME = process.env.ADMIN_NAME || "Admin";
 const SALT_ROUNDS = 12;
+
+if (!ADMIN_EMAIL) {
+  console.error("ERROR: ADMIN_EMAIL environment variable is required");
+  console.error("Usage: ADMIN_EMAIL=admin@example.com npx tsx scripts/migrate-to-multiuser.ts");
+  process.exit(1);
+}
 
 function generatePassword(): string {
   const chars =

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: prompt-analyzer
-          image: registry.example.com/prompt-analyzer:latest
+          image: your-registry.example.com/prompt-analyzer:latest  # TODO: Replace with your registry
           ports:
             - containerPort: 3000
           envFrom:
