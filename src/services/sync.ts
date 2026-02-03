@@ -1,11 +1,11 @@
 import { getMinioClient, PROMPTS_BUCKET, isMinioConfigured } from "@/lib/minio";
 import type {
-  MinioPrompt,
-  PromptType,
-  PromptMetadata,
-  ProcessedPrompt,
-  SyncResult,
   MinioObjectInfo,
+  MinioPrompt,
+  ProcessedPrompt,
+  PromptMetadata,
+  PromptType,
+  SyncResult,
 } from "./types";
 
 /**
@@ -16,6 +16,8 @@ export interface SyncOptions {
   userToken?: string;
   /** User ID to associate prompts with */
   userId?: string;
+  /** Sync type for logging purposes: "manual", "auto", or "cron" */
+  syncType?: "manual" | "auto" | "cron";
 }
 
 /**
@@ -116,7 +118,7 @@ export async function listAllObjects(
 
     stream.on("data", (obj) => {
       // Only include JSON files
-      if (obj.name && obj.name.endsWith(".json")) {
+      if (obj.name?.endsWith(".json")) {
         objects.push({
           name: obj.name,
           lastModified: obj.lastModified,
@@ -227,8 +229,8 @@ export function processPrompt(
     minioKey: key,
     timestamp: new Date(minioPrompt.timestamp),
     workingDirectory,
-    promptLength: minioPrompt.prompt_length,
-    promptText: minioPrompt.prompt,
+    promptLength: minioPrompt.prompt_length ?? 0,
+    promptText: minioPrompt.prompt ?? "",
     responseText: minioPrompt.response,
     responseLength: minioPrompt.response_length,
     tokenEstimateResponse: minioPrompt.response ? estimateTokens(minioPrompt.response) : undefined,
@@ -262,7 +264,11 @@ async function getDb() {
     syncLogTable = schema.minioSyncLog;
   }
 
-  return { db, promptsTable: promptsTable!, syncLogTable: syncLogTable! };
+  if (!db || !promptsTable || !syncLogTable) {
+    throw new Error("Database is not initialized");
+  }
+
+  return { db, promptsTable, syncLogTable };
 }
 
 /**
@@ -287,11 +293,13 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
     `Starting full sync from MinIO...${prefix ? ` (prefix: ${prefix})` : " (all objects)"}`
   );
 
+  let syncLogId: string | undefined;
+
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
-    const { eq, and } = await import("drizzle-orm");
+    const { eq } = await import("drizzle-orm");
 
-    // Create sync log entry
+    // Create sync log entry with user and sync type info
     const [syncLog] = await db
       .insert(syncLogTable)
       .values({
@@ -299,8 +307,12 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
         filesProcessed: 0,
         filesAdded: 0,
         filesSkipped: 0,
+        userId: options?.userId ?? null,
+        syncType: options?.syncType ?? "manual",
       })
       .returning();
+
+    syncLogId = syncLog.id;
 
     try {
       // List objects (with optional prefix for user-specific sync)
@@ -309,7 +321,7 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
 
       // Get existing keys to avoid duplicates
       // If syncing for a specific user, only check their prompts
-      let existingPrompts;
+      let existingPrompts: Array<{ minioKey: string }> = [];
       if (options?.userId) {
         existingPrompts = await db
           .select({ minioKey: promptsTable.minioKey })
@@ -323,8 +335,48 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
       const existingKeys = new Set(existingPrompts.map((p) => p.minioKey));
       console.log(`Found ${existingKeys.size} existing prompts in database`);
 
-      // Process each object
-      for (const obj of objects) {
+      // Process objects in two passes: inputs first, then outputs
+      // This ensures input records exist before we try to update them with responses
+      const inputs = objects.filter((obj) => !obj.name.endsWith("_output.json"));
+      const outputs = objects.filter((obj) => obj.name.endsWith("_output.json"));
+
+      console.log(`Processing ${inputs.length} inputs and ${outputs.length} outputs`);
+
+      // Pass 1: Inputs
+      for (const obj of inputs) {
+        filesProcessed++;
+
+        if (existingKeys.has(obj.name)) {
+          filesSkipped++;
+          continue;
+        }
+
+        try {
+          const promptData = await fetchPrompt(obj.name);
+          if (!promptData) {
+            errors.push(`Failed to parse: ${obj.name}`);
+            continue;
+          }
+
+          const processed = processPrompt(promptData, obj.name);
+          const insertData = options?.userId
+            ? { ...processed, userId: options.userId }
+            : processed;
+
+          await db.insert(promptsTable).values(insertData);
+          filesAdded++;
+
+          if (filesAdded % 50 === 0) {
+            console.log(`Progress: ${filesAdded} inputs added`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`Error processing input ${obj.name}: ${message}`);
+        }
+      }
+
+      // Pass 2: Outputs
+      for (const obj of outputs) {
         filesProcessed++;
 
         try {
@@ -335,12 +387,9 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
           }
 
           const processed = processPrompt(promptData, obj.name);
-
           if (processed.isOutput && processed.inputHash) {
-            // Find the input prompt and update it
             const inputKey = obj.name.replace("_output.json", ".json");
-            
-            // Try to find by minioKey first
+
             const [existing] = await db
               .select()
               .from(promptsTable)
@@ -360,31 +409,17 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
                 .where(eq(promptsTable.id, existing.id));
               filesAdded++;
             } else {
-              // If input not found, we skip or store it temporarily?
-              // For now, skip output if input is missing
+              // If input not found, we skip for now
               filesSkipped++;
             }
-          } else {
-            // Regular input prompt
-            if (existingKeys.has(obj.name)) {
-              filesSkipped++;
-              continue;
-            }
-
-            const insertData = options?.userId
-              ? { ...processed, userId: options.userId }
-              : processed;
-
-            await db.insert(promptsTable).values(insertData);
-            filesAdded++;
           }
 
           if (filesAdded % 50 === 0) {
-            console.log(`Progress: ${filesAdded} prompts processed`);
+            console.log(`Progress: ${filesAdded} total prompts processed`);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          errors.push(`Error processing ${obj.name}: ${message}`);
+          errors.push(`Error processing output ${obj.name}: ${message}`);
         }
       }
 
@@ -435,6 +470,7 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
     filesSkipped,
     errors,
     duration,
+    syncLogId,
   };
 }
 
@@ -464,11 +500,13 @@ export async function syncIncremental(
     `Starting incremental sync from ${since.toISOString()}...${userPrefix ? ` (user: ${options?.userToken})` : ""}`
   );
 
+  let syncLogId: string | undefined;
+
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
     const { eq, gte, and } = await import("drizzle-orm");
 
-    // Create sync log entry
+    // Create sync log entry with user and sync type info
     const [syncLog] = await db
       .insert(syncLogTable)
       .values({
@@ -476,8 +514,12 @@ export async function syncIncremental(
         filesProcessed: 0,
         filesAdded: 0,
         filesSkipped: 0,
+        userId: options?.userId ?? null,
+        syncType: options?.syncType ?? "manual",
       })
       .returning();
+
+    syncLogId = syncLog.id;
 
     try {
       // Build prefixes for relevant dates (with user prefix if multi-user)
@@ -487,7 +529,7 @@ export async function syncIncremental(
 
       // Get existing keys for the date range
       // If syncing for a specific user, only check their prompts
-      let existingPrompts;
+      let existingPrompts: Array<{ minioKey: string }> = [];
       if (options?.userId) {
         existingPrompts = await db
           .select({ minioKey: promptsTable.minioKey })
@@ -597,6 +639,7 @@ export async function syncIncremental(
     filesSkipped,
     errors,
     duration,
+    syncLogId,
   };
 }
 

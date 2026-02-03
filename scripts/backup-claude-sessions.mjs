@@ -137,9 +137,13 @@ function findSessionFiles() {
                       projectDir: projectPath
                     });
                   }
-                } catch (e) {}
+                } catch (e) {
+                  // Ignore errors for individual files (e.g. broken symlinks)
+                }
               });
-            } catch (e) {}
+            } catch (e) {
+              // Ignore errors for directories
+            }
           };
           scan(claudeDir);
         }
@@ -270,6 +274,7 @@ async function processFile(fileInfo, historyMap) {
         } else {
           await minioClient.putObject(MINIO_BUCKET, objectName, JSON.stringify(payload), { "Content-Type": "application/json" });
           contentCache.get(prefix).add(hash);
+          contentCache.get(prefix).add(hash + "_" + timestamp);
         }
         added++;
       } else if (entry.type === "assistant" && lastInputHash) {

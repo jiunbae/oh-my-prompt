@@ -39,14 +39,14 @@ export interface ProcessedPrompt {
   minioKey: string;
   timestamp: Date;
   workingDirectory: string;
-  promptLength?: number;
-  promptText?: string;
+  promptLength: number;
+  promptText: string;
   responseText?: string;
   responseLength?: number;
   projectName: string | null;
   promptType: PromptType;
-  tokenEstimate?: number;
-  wordCount?: number;
+  tokenEstimate: number;
+  wordCount: number;
   tokenEstimateResponse?: number;
   wordCountResponse?: number;
   isOutput?: boolean;
@@ -63,6 +63,7 @@ export interface SyncResult {
   filesSkipped: number;
   errors: string[];
   duration: number; // milliseconds
+  syncLogId?: string; // ID of the sync log entry
 }
 
 /**

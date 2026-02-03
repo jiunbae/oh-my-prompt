@@ -138,12 +138,31 @@ export const minioSyncLog = pgTable("minio_sync_log", {
   filesAdded: integer("files_added").default(0),
   filesSkipped: integer("files_skipped").default(0),
   errorMessage: text("error_message"),
+  // Multi-user sync management columns
+  userId: uuid("user_id").references(() => users.id),
+  syncType: varchar("sync_type", { length: 20 }), // "manual", "auto", or "cron"
+});
+
+// Sync settings table (multi-user sync management)
+export const syncSettings = pgTable("sync_settings", {
+  id: uuid("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  userId: uuid("user_id")
+    .references(() => users.id)
+    .unique(),
+  autoSyncEnabled: boolean("auto_sync_enabled").default(false),
+  syncIntervalMinutes: integer("sync_interval_minutes").default(10),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
 // Relations
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ one, many }) => ({
   prompts: many(prompts),
   allowedEmails: many(allowedEmails),
+  syncSettings: one(syncSettings),
+  syncLogs: many(minioSyncLog),
 }));
 
 export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
@@ -176,6 +195,20 @@ export const promptTagsRelations = relations(promptTags, ({ one }) => ({
   }),
 }));
 
+export const syncSettingsRelations = relations(syncSettings, ({ one }) => ({
+  user: one(users, {
+    fields: [syncSettings.userId],
+    references: [users.id],
+  }),
+}));
+
+export const minioSyncLogRelations = relations(minioSyncLog, ({ one }) => ({
+  user: one(users, {
+    fields: [minioSyncLog.userId],
+    references: [users.id],
+  }),
+}));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -188,3 +221,5 @@ export type NewTag = typeof tags.$inferInsert;
 export type PromptTag = typeof promptTags.$inferSelect;
 export type AnalyticsDaily = typeof analyticsDaily.$inferSelect;
 export type MinioSyncLog = typeof minioSyncLog.$inferSelect;
+export type SyncSettings = typeof syncSettings.$inferSelect;
+export type NewSyncSettings = typeof syncSettings.$inferInsert;

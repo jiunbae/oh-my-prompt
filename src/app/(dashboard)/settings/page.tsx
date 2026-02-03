@@ -5,6 +5,8 @@ import { useUser } from "@/contexts/user-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SyncStatus } from "@/components/sync-status";
+import { SyncHistory } from "@/components/sync-history";
 
 export default function SettingsPage() {
   const { user, loading, refetch } = useUser();
@@ -174,6 +176,22 @@ export PROMPT_MANAGER_ENDPOINT="your-minio-endpoint"`}
 
         <Card>
           <CardHeader>
+            <CardTitle>Data Sync</CardTitle>
+            <CardDescription>
+              Sync prompts from MinIO storage to the database
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SyncStatus />
+            <div className="pt-4 border-t border-zinc-800">
+              <h4 className="text-sm font-medium text-zinc-300 mb-3">Recent Syncs</h4>
+              <SyncHistory limit={5} />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle>General</CardTitle>
             <CardDescription>
               Basic dashboard settings and preferences
@@ -198,41 +216,6 @@ export PROMPT_MANAGER_ENDPOINT="your-minio-endpoint"`}
                 <option value="grid">Grid</option>
                 <option value="list">List</option>
               </select>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Data Sync</CardTitle>
-            <CardDescription>
-              Configure data synchronization with MinIO storage
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-300">
-                MinIO Endpoint
-              </label>
-              <Input
-                type="url"
-                placeholder="http://localhost:9000"
-                className="max-w-md"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-300">
-                Bucket Name
-              </label>
-              <Input
-                type="text"
-                placeholder="prompts"
-                className="max-w-md"
-              />
-            </div>
-            <div className="flex items-center gap-4">
-              <Button variant="outline">Test Connection</Button>
-              <Button>Sync Now</Button>
             </div>
           </CardContent>
         </Card>

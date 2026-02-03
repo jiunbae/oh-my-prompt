@@ -46,14 +46,65 @@ dry_run = "$DRY_RUN" == "--dry-run"
 file_path = "$file"
 project_dir = "$project_dir"
 
+def object_exists(object_path):
+    # S3 Signature V4 for HEAD request
+    now = datetime.datetime.utcnow()
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = now.strftime("%Y%m%d")
+    region = "us-east-1"
+    service = "s3"
+    
+    resource = f"/{bucket}/{object_path}"
+    parsed = urllib.parse.urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    empty_payload_hash = hashlib.sha256(b"").hexdigest()
+
+    canonical_uri = resource
+    canonical_querystring = ""
+    canonical_headers = f"host:{host}\nx-amz-date:{amz_date}\n"
+    signed_headers = "host;x-amz-date"
+    canonical_request = f"HEAD\n{canonical_uri}\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{empty_payload_hash}"
+
+    algorithm = "AWS4-HMAC-SHA256"
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = f"{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+
+    def sign(key, msg):
+        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+    k_date = sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    k_region = sign(k_date, region)
+    k_service = sign(k_region, service)
+    k_signing = sign(k_service, "aws4_request")
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    authorization_header = f"{algorithm} Credential={access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+
+    cmd = [
+        "curl", "-s", "-I", "-o", "/dev/null", "-w", "%{http_code}", "-X", "HEAD",
+        "-H", f"Host: {host}",
+        "-H", f"x-amz-content-sha256: {empty_payload_hash}",
+        "-H", f"x-amz-date: {amz_date}",
+        "-H", f"Authorization: {authorization_header}",
+        f"{endpoint}{resource}"
+    ]
+    try:
+        result = subprocess.check_output(cmd).decode('utf-8').strip()
+        return result == "200"
+    except:
+        return False
+
 def upload_to_minio(payload_dict, object_path):
+    if object_exists(object_path):
+        return
+
     payload = json.dumps(payload_dict, ensure_ascii=False)
     
     if dry_run:
         print(f"  [DRY RUN] Would upload: {object_path}")
         return
 
-    # S3 Signature V4
+    # S3 Signature V4 for PUT request
     resource = f"/{bucket}/{object_path}"
     content_type = "application/json"
     now = datetime.datetime.utcnow()
