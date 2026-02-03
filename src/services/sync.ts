@@ -201,10 +201,19 @@ export function processPrompt(
   minioPrompt: MinioPrompt,
   key: string
 ): ProcessedPrompt {
-  const metadata = extractMetadata(
-    minioPrompt.prompt,
-    minioPrompt.working_directory
-  );
+  const isOutput = key.endsWith("_output.json") || minioPrompt.type === "output";
+  const inputHash = isOutput 
+    ? (minioPrompt.input_hash || key.split("/").pop()?.replace("_output.json", ""))
+    : undefined;
+
+  const metadata = !isOutput && minioPrompt.prompt 
+    ? extractMetadata(minioPrompt.prompt, minioPrompt.working_directory)
+    : {
+        projectName: extractProjectName(minioPrompt.working_directory),
+        promptType: "user_input" as PromptType,
+        tokenEstimate: 0,
+        wordCount: 0
+      };
 
   return {
     minioKey: key,
@@ -212,6 +221,12 @@ export function processPrompt(
     workingDirectory: minioPrompt.working_directory,
     promptLength: minioPrompt.prompt_length,
     promptText: minioPrompt.prompt,
+    responseText: minioPrompt.response,
+    responseLength: minioPrompt.response_length,
+    tokenEstimateResponse: minioPrompt.response ? estimateTokens(minioPrompt.response) : undefined,
+    wordCountResponse: minioPrompt.response ? countWords(minioPrompt.response) : undefined,
+    isOutput,
+    inputHash,
     ...metadata,
   };
 }
@@ -304,38 +319,64 @@ export async function syncAll(options?: SyncOptions): Promise<SyncResult> {
       for (const obj of objects) {
         filesProcessed++;
 
-        // Skip if already exists
-        if (existingKeys.has(obj.name)) {
-          filesSkipped++;
-          continue;
-        }
-
         try {
-          const prompt = await fetchPrompt(obj.name);
-          if (!prompt) {
+          const promptData = await fetchPrompt(obj.name);
+          if (!promptData) {
             errors.push(`Failed to parse: ${obj.name}`);
             continue;
           }
 
-          const processed = processPrompt(prompt, obj.name);
+          const processed = processPrompt(promptData, obj.name);
 
-          // Add userId if provided
-          const insertData = options?.userId
-            ? { ...processed, userId: options.userId }
-            : processed;
+          if (processed.isOutput && processed.inputHash) {
+            // Find the input prompt and update it
+            const inputKey = obj.name.replace("_output.json", ".json");
+            
+            // Try to find by minioKey first
+            const [existing] = await db
+              .select()
+              .from(promptsTable)
+              .where(eq(promptsTable.minioKey, inputKey))
+              .limit(1);
 
-          await db.insert(promptsTable).values(insertData);
-          filesAdded++;
+            if (existing) {
+              await db
+                .update(promptsTable)
+                .set({
+                  responseText: processed.responseText,
+                  responseLength: processed.responseLength,
+                  tokenEstimateResponse: processed.tokenEstimateResponse,
+                  wordCountResponse: processed.wordCountResponse,
+                  updatedAt: new Date(),
+                })
+                .where(eq(promptsTable.id, existing.id));
+              filesAdded++;
+            } else {
+              // If input not found, we skip or store it temporarily?
+              // For now, skip output if input is missing
+              filesSkipped++;
+            }
+          } else {
+            // Regular input prompt
+            if (existingKeys.has(obj.name)) {
+              filesSkipped++;
+              continue;
+            }
+
+            const insertData = options?.userId
+              ? { ...processed, userId: options.userId }
+              : processed;
+
+            await db.insert(promptsTable).values(insertData);
+            filesAdded++;
+          }
 
           if (filesAdded % 50 === 0) {
-            console.log(`Progress: ${filesAdded} prompts added`);
+            console.log(`Progress: ${filesAdded} prompts processed`);
           }
-        } catch (insertError) {
-          const message =
-            insertError instanceof Error
-              ? insertError.message
-              : String(insertError);
-          errors.push(`Error inserting ${obj.name}: ${message}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          errors.push(`Error processing ${obj.name}: ${message}`);
         }
       }
 

@@ -8,8 +8,13 @@
 export interface MinioPrompt {
   timestamp: string; // ISO 8601 format: "2026-02-02T05:19:51Z"
   working_directory: string; // e.g., "/Users/username/project/path"
-  prompt_length: number; // Character count
-  prompt: string; // Actual prompt text
+  prompt_length?: number; // Character count (optional for output)
+  prompt?: string; // Actual prompt text (optional for output)
+  type?: "input" | "output";
+  response?: string; // Assistant response text (for type: "output")
+  response_length?: number; // (for type: "output")
+  input_hash?: string; // (for type: "output")
+  input_timestamp?: string; // (for type: "output")
 }
 
 /**
@@ -34,12 +39,18 @@ export interface ProcessedPrompt {
   minioKey: string;
   timestamp: Date;
   workingDirectory: string;
-  promptLength: number;
-  promptText: string;
+  promptLength?: number;
+  promptText?: string;
+  responseText?: string;
+  responseLength?: number;
   projectName: string | null;
   promptType: PromptType;
-  tokenEstimate: number;
-  wordCount: number;
+  tokenEstimate?: number;
+  wordCount?: number;
+  tokenEstimateResponse?: number;
+  wordCountResponse?: number;
+  isOutput?: boolean;
+  inputHash?: string;
 }
 
 /**
