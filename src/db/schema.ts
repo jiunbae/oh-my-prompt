@@ -59,6 +59,8 @@ export const prompts = pgTable(
     workingDirectory: varchar("working_directory", { length: 500 }),
     promptLength: integer("prompt_length").notNull(),
     promptText: text("prompt_text").notNull(),
+    responseText: text("response_text"),
+    responseLength: integer("response_length"),
 
     // Extracted metadata
     projectName: varchar("project_name", { length: 255 }),
@@ -67,6 +69,8 @@ export const prompts = pgTable(
     // Analytics fields
     tokenEstimate: integer("token_estimate"),
     wordCount: integer("word_count"),
+    tokenEstimateResponse: integer("token_estimate_response"),
+    wordCountResponse: integer("word_count_response"),
 
     // Sync tracking
     syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),

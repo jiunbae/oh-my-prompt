@@ -34,38 +34,141 @@ for file in $files; do
     fi
 
     # Parse JSONL and upload each prompt + response pair
-    python3 - <<EOF
-import json, hashlib, datetime, os, subprocess, hmac, base64
+    export FILE_PATH="$file"
+    export PROJECT_DIR="$project_dir"
+    export MINIO_ACCESS_KEY_ENV="$MINIO_ACCESS_KEY"
+    export MINIO_SECRET_KEY_ENV="$MINIO_SECRET_KEY"
+    export USER_TOKEN_ENV="$USER_TOKEN"
+    export DRY_RUN_ENV="$DRY_RUN"
 
-access_key = "$MINIO_ACCESS_KEY"
-secret_key = "$MINIO_SECRET_KEY"
-bucket = "$MINIO_BUCKET"
-endpoint = "$MINIO_ENDPOINT"
-token = "$USER_TOKEN"
-dry_run = "$DRY_RUN" == "--dry-run"
-file_path = "$file"
-project_dir = "$project_dir"
+    python3 - <<'EOF'
+import json, hashlib, datetime, os, subprocess, hmac, urllib.parse
+
+access_key = os.environ.get("MINIO_ACCESS_KEY_ENV")
+secret_key = os.environ.get("MINIO_SECRET_KEY_ENV")
+bucket = "claude-prompts"
+endpoint = "https://minio.jiun.dev"
+token = os.environ.get("USER_TOKEN_ENV")
+dry_run = os.environ.get("DRY_RUN_ENV") == "--dry-run"
+file_path = os.environ.get("FILE_PATH")
+project_dir = os.environ.get("PROJECT_DIR")
+
+def sign(key, msg):
+    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+def object_exists(object_path):
+    # S3 Signature V4 for HEAD request
+    now = datetime.datetime.utcnow()
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = now.strftime("%Y%m%d")
+    region = "us-east-1"
+    service = "s3"
+    
+    resource = f"/{bucket}/{object_path}"
+    parsed = urllib.parse.urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    empty_payload_hash = hashlib.sha256(b"").hexdigest()
+
+    canonical_uri = resource
+    canonical_querystring = ""
+    canonical_headers = f"host:{host}\nx-amz-date:{amz_date}\n"
+    signed_headers = "host;x-amz-date"
+    canonical_request = f"HEAD\n{canonical_uri}\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{empty_payload_hash}"
+
+    algorithm = "AWS4-HMAC-SHA256"
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = f"{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+
+    k_date = sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    k_region = sign(k_date, region)
+    k_service = sign(k_region, service)
+    k_signing = sign(k_service, "aws4_request")
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    authorization_header = f"{algorithm} Credential={access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+
+    cmd = [
+        "curl", "-s", "-I", "-o", "/dev/null", "-w", "%{http_code}", "-X", "HEAD",
+        "-H", f"Host: {host}",
+        "-H", f"x-amz-content-sha256: {empty_payload_hash}",
+        "-H", f"x-amz-date: {amz_date}",
+        "-H", f"Authorization: {authorization_header}",
+        f"{endpoint}{resource}"
+    ]
+    try:
+        result = subprocess.check_output(cmd).decode('utf-8').strip()
+        return result == "200"
+    except Exception:
+        return False
 
 def upload_to_minio(payload_dict, object_path):
+    if object_exists(object_path):
+        return
+
     payload = json.dumps(payload_dict, ensure_ascii=False)
     
     if dry_run:
         print(f"  [DRY RUN] Would upload: {object_path}")
         return
 
-    # S3 Signature V2
+    # S3 Signature V4 for PUT request
     resource = f"/{bucket}/{object_path}"
-    date_header = subprocess.check_output(["date", "-R"]).decode('utf-8').strip()
     content_type = "application/json"
-    string_to_sign = f"PUT\n\n{content_type}\n{date_header}\n{resource}"
-    
-    signature = base64.b64encode(hmac.new(secret_key.encode('utf-8'), string_to_sign.encode('utf-8'), hashlib.sha1).digest()).decode('utf-8')
+    now = datetime.datetime.utcnow()
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = now.strftime("%Y%m%d")
+    region = "us-east-1"
+    service = "s3"
+
+    parsed = urllib.parse.urlparse(endpoint)
+    host = parsed.netloc or parsed.path
+    payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    canonical_uri = resource
+    canonical_querystring = ""
+    canonical_headers = (
+        f"content-type:{content_type}\n"
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date"
+    canonical_request = (
+        "PUT\n"
+        f"{canonical_uri}\n"
+        f"{canonical_querystring}\n"
+        f"{canonical_headers}\n"
+        f"{signed_headers}\n"
+        f"{payload_hash}"
+    )
+
+    algorithm = "AWS4-HMAC-SHA256"
+    credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
+    string_to_sign = (
+        f"{algorithm}\n"
+        f"{amz_date}\n"
+        f"{credential_scope}\n"
+        f"{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+    )
+
+    k_date = sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    k_region = sign(k_date, region)
+    k_service = sign(k_region, service)
+    k_signing = sign(k_service, "aws4_request")
+    signature = hmac.new(k_signing, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    authorization_header = (
+        f"{algorithm} Credential={access_key}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
     
     cmd = [
         "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "PUT",
-        "-H", f"Date: {date_header}",
+        "-H", f"Host: {host}",
         "-H", f"Content-Type: {content_type}",
-        "-H", f"Authorization: AWS {access_key}:{signature}",
+        "-H", f"x-amz-content-sha256: {payload_hash}",
+        "-H", f"x-amz-date: {amz_date}",
+        "-H", f"Authorization: {authorization_header}",
         "-d", payload,
         f"{endpoint}{resource}"
     ]
@@ -83,7 +186,7 @@ with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             try:
                 dt = datetime.datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                 date_path = dt.strftime("%Y/%m/%d")
-            except:
+            except (ValueError, KeyError):
                 date_path = datetime.datetime.utcnow().strftime("%Y/%m/%d")
 
             if entry.get('type') == 'user':
@@ -114,6 +217,7 @@ with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     "type": "output"
                 }, object_path)
         except Exception as e:
+            print(f"  [ERROR] Skipping line in {file_path} due to: {e}")
             continue
 EOF
 done
