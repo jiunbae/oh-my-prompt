@@ -7,20 +7,24 @@ import { Input } from "@/components/ui/input";
 
 interface SearchFiltersProps {
   projects: Array<{ name: string; count: number }>;
+  tags?: Array<{ id: string; name: string; color?: string | null }>;
   currentSearch?: string;
   currentProject?: string;
   currentType?: string;
   currentFrom?: string;
   currentTo?: string;
+  currentTag?: string;
 }
 
 export function SearchFilters({
   projects,
+  tags = [],
   currentSearch,
   currentProject,
   currentType,
   currentFrom,
   currentTo,
+  currentTag,
 }: SearchFiltersProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -29,7 +33,7 @@ export function SearchFilters({
 
   const [search, setSearch] = useState(currentSearch ?? "");
   const [showAdvanced, setShowAdvanced] = useState(
-    !!(currentProject || currentType || currentFrom || currentTo)
+    !!(currentProject || currentType || currentFrom || currentTo || currentTag)
   );
 
   const createQueryString = useCallback(
@@ -72,7 +76,7 @@ export function SearchFilters({
     });
   };
 
-  const hasFilters = currentSearch || currentProject || currentType || currentFrom || currentTo;
+  const hasFilters = currentSearch || currentProject || currentType || currentFrom || currentTo || currentTag;
 
   return (
     <div className="space-y-4">
@@ -85,6 +89,7 @@ export function SearchFilters({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Search Icon</title>
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -115,6 +120,7 @@ export function SearchFilters({
             stroke="currentColor"
             viewBox="0 0 24 24"
           >
+            <title>Toggle Filters</title>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
           <span className="ml-2">Filters</span>
@@ -126,8 +132,9 @@ export function SearchFilters({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-zinc-900/50 rounded-lg border border-zinc-800">
           {/* Project Filter */}
           <div className="space-y-1">
-            <label className="text-xs text-zinc-400 font-medium">Project</label>
+            <label htmlFor="project-filter" className="text-xs text-zinc-400 font-medium">Project</label>
             <select
+              id="project-filter"
               value={currentProject ?? ""}
               onChange={(e) => handleFilterChange("project", e.target.value || undefined)}
               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 text-sm"
@@ -143,8 +150,9 @@ export function SearchFilters({
 
           {/* Type Filter */}
           <div className="space-y-1">
-            <label className="text-xs text-zinc-400 font-medium">Type</label>
+            <label htmlFor="type-filter" className="text-xs text-zinc-400 font-medium">Type</label>
             <select
+              id="type-filter"
               value={currentType ?? ""}
               onChange={(e) => handleFilterChange("type", e.target.value || undefined)}
               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 text-sm"
@@ -158,8 +166,9 @@ export function SearchFilters({
 
           {/* From Date */}
           <div className="space-y-1">
-            <label className="text-xs text-zinc-400 font-medium">From Date</label>
+            <label htmlFor="from-filter" className="text-xs text-zinc-400 font-medium">From Date</label>
             <input
+              id="from-filter"
               type="date"
               value={currentFrom ?? ""}
               onChange={(e) => handleFilterChange("from", e.target.value || undefined)}
@@ -169,13 +178,31 @@ export function SearchFilters({
 
           {/* To Date */}
           <div className="space-y-1">
-            <label className="text-xs text-zinc-400 font-medium">To Date</label>
+            <label htmlFor="to-filter" className="text-xs text-zinc-400 font-medium">To Date</label>
             <input
+              id="to-filter"
               type="date"
               value={currentTo ?? ""}
               onChange={(e) => handleFilterChange("to", e.target.value || undefined)}
               className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 text-sm"
             />
+          </div>
+
+          <div className="space-y-1">
+            <label htmlFor="tag-filter" className="text-xs text-zinc-400 font-medium">Tag</label>
+            <select
+              id="tag-filter"
+              value={currentTag ?? ""}
+              onChange={(e) => handleFilterChange("tag", e.target.value || undefined)}
+              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 text-sm"
+            >
+              <option value="">All tags</option>
+              {tags.map((t) => (
+                <option key={t.id} value={t.name}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       )}
@@ -188,6 +215,7 @@ export function SearchFilters({
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full text-xs">
               Search: &quot;{currentSearch}&quot;
               <button
+                type="button"
                 onClick={() => {
                   setSearch("");
                   handleFilterChange("search", undefined);
@@ -201,7 +229,7 @@ export function SearchFilters({
           {currentProject && (
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-300 rounded-full text-xs">
               Project: {currentProject}
-              <button onClick={() => handleFilterChange("project", undefined)} className="hover:text-green-100">
+              <button type="button" onClick={() => handleFilterChange("project", undefined)} className="hover:text-green-100">
                 ×
               </button>
             </span>
@@ -209,7 +237,7 @@ export function SearchFilters({
           {currentType && (
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs">
               Type: {currentType}
-              <button onClick={() => handleFilterChange("type", undefined)} className="hover:text-purple-100">
+              <button type="button" onClick={() => handleFilterChange("type", undefined)} className="hover:text-purple-100">
                 ×
               </button>
             </span>
@@ -218,6 +246,7 @@ export function SearchFilters({
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-500/20 text-orange-300 rounded-full text-xs">
               Date: {currentFrom ?? "..."} - {currentTo ?? "..."}
               <button
+                type="button"
                 onClick={() => {
                   handleFilterChange("from", undefined);
                   handleFilterChange("to", undefined);
@@ -228,7 +257,16 @@ export function SearchFilters({
               </button>
             </span>
           )}
+          {currentTag && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-yellow-500/20 text-yellow-300 rounded-full text-xs">
+              Tag: {currentTag}
+              <button type="button" onClick={() => handleFilterChange("tag", undefined)} className="hover:text-yellow-100">
+                ×
+              </button>
+            </span>
+          )}
           <button
+            type="button"
             onClick={handleClearFilters}
             className="text-xs text-zinc-400 hover:text-zinc-200 underline"
           >

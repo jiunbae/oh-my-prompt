@@ -17,6 +17,7 @@ interface SearchParams {
   type?: string;
   from?: string;
   to?: string;
+  tag?: string;
 }
 
 /**
@@ -58,7 +59,7 @@ async function getPrompts(
   }
 
   if (params.search) {
-    conditions.push(ilike(schema.prompts.promptText, `%${params.search}%`));
+    conditions.push(sql`${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${params.search})`);
   }
 
   if (params.project) {
@@ -79,6 +80,14 @@ async function getPrompts(
     conditions.push(lte(schema.prompts.timestamp, toDate));
   }
 
+  if (params.tag) {
+    conditions.push(sql`EXISTS (
+      SELECT 1 FROM ${schema.promptTags} pt
+      JOIN ${schema.tags} t ON pt.tag_id = t.id
+      WHERE pt.prompt_id = ${schema.prompts.id} AND t.name = ${params.tag}
+    )`);
+  }
+
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
   // Build user-scoped where clause for projects query
@@ -86,23 +95,20 @@ async function getPrompts(
     ? and(sql`project_name is not null`, eq(schema.prompts.userId, userId))
     : sql`project_name is not null`;
 
-  const [items, countResult, projectsResult] = await Promise.all([
-    db
-      .select({
-        id: schema.prompts.id,
-        timestamp: schema.prompts.timestamp,
-        projectName: schema.prompts.projectName,
-        promptType: schema.prompts.promptType,
-        promptLength: schema.prompts.promptLength,
-        tokenEstimate: schema.prompts.tokenEstimate,
-        promptText: schema.prompts.promptText,
-        workingDirectory: schema.prompts.workingDirectory,
-      })
-      .from(schema.prompts)
-      .where(whereClause)
-      .orderBy(desc(schema.prompts.timestamp))
-      .limit(pageSize)
-      .offset(offset),
+  const [items, countResult, projectsResult, allTags] = await Promise.all([
+    db.query.prompts.findMany({
+      where: whereClause,
+      orderBy: [desc(schema.prompts.timestamp)],
+      limit: pageSize,
+      offset: offset,
+      with: {
+        promptTags: {
+          with: {
+            tag: true,
+          },
+        },
+      },
+    }),
     db.select({ count: sql<number>`count(*)` }).from(schema.prompts).where(whereClause),
     db
       .select({ name: schema.prompts.projectName, count: sql<number>`count(*)` })
@@ -110,6 +116,7 @@ async function getPrompts(
       .where(userCondition)
       .groupBy(schema.prompts.projectName)
       .orderBy(desc(sql`count(*)`)),
+    db.select().from(schema.tags).orderBy(schema.tags.name),
   ]);
 
   await client.end();
@@ -122,10 +129,11 @@ async function getPrompts(
       promptType: (item.promptType as "user_input" | "task_notification" | "system") || "user_input",
       tokenCount: item.tokenEstimate ?? Math.ceil(item.promptLength / 4),
       preview: item.promptText.slice(0, 200) + (item.promptText.length > 200 ? "..." : ""),
-      tags: [],
+      tags: item.promptTags.map((pt) => pt.tag),
     })),
     totalCount: Number(countResult[0]?.count ?? 0),
     projects: projectsResult.map((p) => ({ name: p.name ?? "", count: Number(p.count) })),
+    allTags,
   };
 }
 
@@ -141,7 +149,7 @@ export default async function PromptsPage({
   const user = await getCurrentUser();
   const userId = user?.userId ?? null;
 
-  const { items, totalCount, projects } = await getPrompts(params, userId, pageSize);
+  const { items, totalCount, projects, allTags } = await getPrompts(params, userId, pageSize);
   const currentPage = parseInt(params.page ?? "1", 10);
 
   return (
@@ -155,11 +163,13 @@ export default async function PromptsPage({
 
       <SearchFilters
         projects={projects}
+        tags={allTags}
         currentSearch={params.search}
         currentProject={params.project}
         currentType={params.type}
         currentFrom={params.from}
         currentTo={params.to}
+        currentTag={params.tag}
       />
 
       <PromptList

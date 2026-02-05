@@ -2,6 +2,12 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
+interface Tag {
+  id: string;
+  name: string;
+  color?: string | null;
+}
+
 interface PromptCardProps {
   id: string;
   timestamp: Date;
@@ -9,7 +15,7 @@ interface PromptCardProps {
   preview: string;
   promptType: "user_input" | "task_notification" | "system" | "user" | "assistant";
   tokenCount: number;
-  tags?: string[];
+  tags?: Tag[];
 }
 
 function formatDate(date: Date): string {
@@ -66,8 +72,13 @@ export function PromptCard({
         <div className="flex items-center justify-between">
           <div className="flex gap-1.5 flex-wrap">
             {tags.slice(0, 3).map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-xs">
-                {tag}
+              <Badge
+                key={tag.id}
+                variant="secondary"
+                className="text-xs"
+                style={tag.color ? { backgroundColor: `${tag.color}22`, color: tag.color, borderColor: tag.color } : undefined}
+              >
+                {tag.name}
               </Badge>
             ))}
             {tags.length > 3 && (

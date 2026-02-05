@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SkeletonList } from "@/components/ui/skeleton";
 
+interface Tag {
+  id: string;
+  name: string;
+  color?: string | null;
+}
+
 interface Prompt {
   id: string;
   timestamp: Date;
@@ -14,7 +20,7 @@ interface Prompt {
   preview: string;
   promptType: "user_input" | "task_notification" | "system" | "user" | "assistant";
   tokenCount: number;
-  tags?: string[];
+  tags?: Tag[];
 }
 
 interface PromptListProps {
@@ -75,6 +81,7 @@ export function PromptList({
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
+          <title>No Prompts Icon</title>
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -111,6 +118,7 @@ export function PromptList({
         <div className="flex gap-2">
           <div className="flex rounded-md border border-zinc-700">
             <button
+              type="button"
               onClick={() => handleSortChange("date")}
               className={`px-3 py-1.5 text-sm ${
                 sortBy === "date"
@@ -121,6 +129,7 @@ export function PromptList({
               Date
             </button>
             <button
+              type="button"
               onClick={() => handleSortChange("tokens")}
               className={`px-3 py-1.5 text-sm border-l border-zinc-700 ${
                 sortBy === "tokens"
@@ -134,6 +143,7 @@ export function PromptList({
 
           <div className="flex rounded-md border border-zinc-700">
             <button
+              type="button"
               onClick={() => setViewMode("grid")}
               className={`px-2 py-1.5 ${
                 viewMode === "grid"
@@ -143,6 +153,7 @@ export function PromptList({
               aria-label="Grid view"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <title>Grid View</title>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -152,6 +163,7 @@ export function PromptList({
               </svg>
             </button>
             <button
+              type="button"
               onClick={() => setViewMode("list")}
               className={`px-2 py-1.5 border-l border-zinc-700 ${
                 viewMode === "list"
@@ -161,6 +173,7 @@ export function PromptList({
               aria-label="List view"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <title>List View</title>
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"

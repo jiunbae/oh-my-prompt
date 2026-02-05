@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "../trpc";
+import { createTRPCRouter, protectedProcedure, publicProcedure } from "../trpc";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
@@ -24,7 +24,7 @@ export const promptsRouter = createTRPCRouter({
   /**
    * List prompts with pagination and filtering
    */
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         limit: z.number().min(1).max(100).default(20),
@@ -34,11 +34,11 @@ export const promptsRouter = createTRPCRouter({
         search: z.string().optional(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = getDb();
       const { limit, offset, projectName, promptType, search } = input;
 
-      const conditions = [];
+      const conditions = [eq(schema.prompts.userId, ctx.user.id)];
       if (projectName) {
         conditions.push(eq(schema.prompts.projectName, projectName));
       }
@@ -46,27 +46,25 @@ export const promptsRouter = createTRPCRouter({
         conditions.push(eq(schema.prompts.promptType, promptType));
       }
       if (search) {
-        conditions.push(ilike(schema.prompts.promptText, `%${search}%`));
+        conditions.push(sql`${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${search})`);
       }
 
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = and(...conditions);
 
       const [items, countResult] = await Promise.all([
-        db
-          .select({
-            id: schema.prompts.id,
-            timestamp: schema.prompts.timestamp,
-            projectName: schema.prompts.projectName,
-            promptType: schema.prompts.promptType,
-            promptLength: schema.prompts.promptLength,
-            tokenEstimate: schema.prompts.tokenEstimate,
-            promptText: schema.prompts.promptText,
-          })
-          .from(schema.prompts)
-          .where(whereClause)
-          .orderBy(desc(schema.prompts.timestamp))
-          .limit(limit)
-          .offset(offset),
+        db.query.prompts.findMany({
+          where: whereClause,
+          orderBy: [desc(schema.prompts.timestamp)],
+          limit,
+          offset,
+          with: {
+            promptTags: {
+              with: {
+                tag: true,
+              },
+            },
+          },
+        }),
         db
           .select({ count: sql<number>`count(*)` })
           .from(schema.prompts)
@@ -76,6 +74,7 @@ export const promptsRouter = createTRPCRouter({
       return {
         items: items.map((item) => ({
           ...item,
+          tags: item.promptTags.map((pt) => pt.tag),
           preview: item.promptText.slice(0, 200) + (item.promptText.length > 200 ? "..." : ""),
         })),
         totalCount: Number(countResult[0]?.count ?? 0),
@@ -85,23 +84,33 @@ export const promptsRouter = createTRPCRouter({
   /**
    * Get a single prompt by ID
    */
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = getDb();
-      const result = await db
-        .select()
-        .from(schema.prompts)
-        .where(eq(schema.prompts.id, input.id))
-        .limit(1);
+      const result = await db.query.prompts.findFirst({
+        where: and(eq(schema.prompts.id, input.id), eq(schema.prompts.userId, ctx.user.id)),
+        with: {
+          promptTags: {
+            with: {
+              tag: true,
+            },
+          },
+        },
+      });
 
-      return result[0] ?? null;
+      if (!result) return null;
+
+      return {
+        ...result,
+        tags: result.promptTags.map((pt) => pt.tag),
+      };
     }),
 
   /**
    * Get prompt statistics/analytics
    */
-  getStats: publicProcedure.query(async () => {
+  getStats: protectedProcedure.query(async ({ ctx }) => {
     const db = getDb();
 
     const [totalResult, projectsResult, typesResult] = await Promise.all([
@@ -111,14 +120,15 @@ export const promptsRouter = createTRPCRouter({
           totalTokens: sql<number>`coalesce(sum(token_estimate), 0)`,
           uniqueProjects: sql<number>`count(distinct project_name)`,
         })
-        .from(schema.prompts),
+        .from(schema.prompts)
+        .where(eq(schema.prompts.userId, ctx.user.id)),
       db
         .select({
           project: schema.prompts.projectName,
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(sql`project_name is not null`)
+        .where(and(sql`project_name is not null`, eq(schema.prompts.userId, ctx.user.id)))
         .groupBy(schema.prompts.projectName)
         .orderBy(desc(sql`count(*)`))
         .limit(10),
@@ -128,6 +138,7 @@ export const promptsRouter = createTRPCRouter({
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
+        .where(eq(schema.prompts.userId, ctx.user.id))
         .groupBy(schema.prompts.promptType),
     ]);
 
@@ -151,7 +162,7 @@ export const promptsRouter = createTRPCRouter({
   /**
    * Get unique project names
    */
-  getProjects: publicProcedure.query(async () => {
+  getProjects: protectedProcedure.query(async ({ ctx }) => {
     const db = getDb();
     const result = await db
       .select({
@@ -160,7 +171,7 @@ export const promptsRouter = createTRPCRouter({
         lastPrompt: sql<Date>`max(timestamp)`,
       })
       .from(schema.prompts)
-      .where(sql`project_name is not null`)
+      .where(and(sql`project_name is not null`, eq(schema.prompts.userId, ctx.user.id)))
       .groupBy(schema.prompts.projectName)
       .orderBy(desc(sql`count(*)`));
 

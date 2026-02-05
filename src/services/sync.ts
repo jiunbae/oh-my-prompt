@@ -1,4 +1,6 @@
 import { getMinioClient, PROMPTS_BUCKET, isMinioConfigured } from "@/lib/minio";
+import { env } from "@/env";
+import { logger } from "@/lib/logger";
 import type {
   MinioObjectInfo,
   MinioPrompt,
@@ -105,12 +107,12 @@ export async function listAllObjects(
     });
 
     stream.on("error", (err: Error) => {
-      console.error("Error listing objects:", err);
+      logger.error({ err }, "Error listing objects");
       reject(err);
     });
 
     stream.on("end", () => {
-      console.log(`Listed ${objects.length} JSON objects from ${bucket}`);
+      logger.info(`Listed ${objects.length} JSON objects from ${bucket}`);
       resolve(objects);
     });
   });
@@ -148,7 +150,7 @@ export async function fetchPrompt(
             (!isOutput && (!hasWorkingDirectory || prompt.prompt_length === undefined || !prompt.prompt)) ||
             (isOutput && !prompt.response)
           ) {
-            console.warn(`Invalid prompt format in ${key}`);
+            logger.warn({ key }, "Invalid prompt format");
             resolve(null);
             return;
           }
@@ -159,13 +161,13 @@ export async function fetchPrompt(
 
           resolve(prompt);
         } catch (parseError) {
-          console.error(`Error parsing JSON from ${key}:`, parseError);
+          logger.error({ key, parseError }, "Error parsing JSON from MinIO");
           resolve(null);
         }
       });
     });
   } catch (error) {
-    console.error(`Error fetching ${key}:`, error);
+    logger.error({ key, error }, "Error fetching prompt from MinIO");
     return null;
   }
 }
@@ -218,17 +220,40 @@ async function getDb() {
     const { drizzle } = await import("drizzle-orm/postgres-js");
     const schema = await import("@/db/schema");
 
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error("DATABASE_URL environment variable is not set");
-    }
-
+    const connectionString = env.DATABASE_URL;
     const client = postgres(connectionString);
     db = drizzle(client, { schema });
     promptsTable = schema.prompts;
     syncLogTable = schema.minioSyncLog;
   }
   return { db, promptsTable, syncLogTable };
+}
+
+/**
+ * Auto-classify a prompt into categories/tags
+ */
+export function classifyPrompt(text: string): string[] {
+  const tags: string[] = [];
+  const lowercase = text.toLowerCase();
+
+  const rules = [
+    { tag: "debugging", keywords: ["error", "fix", "bug", "crash", "fails", "investigate"] },
+    { tag: "refactoring", keywords: ["refactor", "cleanup", "improve", "optimize", "rewrite"] },
+    { tag: "feature", keywords: ["add", "implement", "new", "feature", "create"] },
+    { tag: "testing", keywords: ["test", "jest", "vitest", "unit", "e2e", "coverage"] },
+    { tag: "database", keywords: ["sql", "db", "query", "migration", "drizzle", "postgres"] },
+    { tag: "frontend", keywords: ["ui", "component", "react", "css", "tailwind", "layout"] },
+    { tag: "api", keywords: ["trpc", "endpoint", "rest", "route", "handler"] },
+    { tag: "documentation", keywords: ["doc", "readme", "comment", "guide"] },
+  ];
+
+  for (const rule of rules) {
+    if (rule.keywords.some((kw) => lowercase.includes(kw))) {
+      tags.push(rule.tag);
+    }
+  }
+
+  return tags;
 }
 
 /**
@@ -250,7 +275,7 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
 
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
-    const { eq, and } = await import("drizzle-orm");
+    const { eq, and, sql } = await import("drizzle-orm");
 
     const [syncLog] = await db
       .insert(syncLogTable)
@@ -290,7 +315,53 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
           if (!promptData) continue;
 
           const processed = processPrompt(promptData, obj.name);
-          await db.insert(promptsTable).values({ ...processed, userId: options.userId });
+          const [newPrompt] = await db
+            .insert(promptsTable)
+            .values({
+              ...processed,
+              userId: options.userId,
+              searchVector: sql`to_tsvector('english', ${processed.promptText} || ' ' || ${
+                processed.responseText ?? ""
+              })`,
+            })
+            .returning();
+
+          const suggestedTags = classifyPrompt(processed.promptText);
+          const schema = await import("@/db/schema");
+          for (const tagName of suggestedTags) {
+            let [tag] = await db
+              .select()
+              .from(schema.tags)
+              .where(eq(schema.tags.name, tagName))
+              .limit(1);
+
+            if (!tag) {
+              [tag] = await db
+                .insert(schema.tags)
+                .values({ name: tagName })
+                .onConflictDoNothing()
+                .returning();
+              
+              if (!tag) {
+                [tag] = await db
+                  .select()
+                  .from(schema.tags)
+                  .where(eq(schema.tags.name, tagName))
+                  .limit(1);
+              }
+            }
+
+            if (tag) {
+              await db
+                .insert(schema.promptTags)
+                .values({
+                  promptId: newPrompt.id,
+                  tagId: tag.id,
+                })
+                .onConflictDoNothing();
+            }
+          }
+
           filesAdded++;
         } catch (error) {
           errors.push(`Error processing input ${obj.name}: ${error}`);
@@ -320,6 +391,9 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
                   responseLength: processed.responseLength,
                   tokenEstimateResponse: processed.tokenEstimateResponse,
                   wordCountResponse: processed.wordCountResponse,
+                  searchVector: sql`to_tsvector('english', ${existing.promptText} || ' ' || ${
+                    processed.responseText ?? ""
+                  })`,
                   updatedAt: new Date(),
                 })
                 .where(eq(promptsTable.id, existing.id));
@@ -394,7 +468,7 @@ export async function syncIncremental(
 
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
-    const { eq, gte, and } = await import("drizzle-orm");
+    const { eq, gte, and, sql } = await import("drizzle-orm");
 
     const [syncLog] = await db
       .insert(syncLogTable)
@@ -471,6 +545,9 @@ export async function syncIncremental(
                   responseLength: processed.responseLength,
                   tokenEstimateResponse: processed.tokenEstimateResponse,
                   wordCountResponse: processed.wordCountResponse,
+                  searchVector: sql`to_tsvector('english', ${existing.promptText} || ' ' || ${
+                    processed.responseText ?? ""
+                  })`,
                   updatedAt: new Date(),
                 })
                 .where(eq(promptsTable.id, existing.id));

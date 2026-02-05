@@ -1,31 +1,13 @@
 import { Client } from "minio";
+import { env } from "@/env";
+import { logger } from "./logger";
 
-/**
- * MinIO client configuration
- *
- * Environment variables required:
- * - MINIO_ENDPOINT: MinIO server endpoint (e.g., "minio.example.com") - without protocol
- * - MINIO_ACCESS_KEY: Access key for authentication
- * - MINIO_SECRET_KEY: Secret key for authentication
- */
+export const PROMPTS_BUCKET = env.MINIO_BUCKET;
 
-/**
- * Default bucket name for prompts
- */
-export const PROMPTS_BUCKET = process.env.MINIO_BUCKET || "claude-prompts";
-
-/**
- * Lazy-loaded MinIO client to avoid build-time instantiation
- */
 let _minioClient: Client | null = null;
 
 function getEndpoint(): string {
-  const endpoint = process.env.MINIO_ENDPOINT;
-  if (!endpoint) {
-    throw new Error("MINIO_ENDPOINT environment variable is required");
-  }
-  // Strip protocol if accidentally included
-  return endpoint.replace(/^https?:\/\//, "");
+  return env.MINIO_ENDPOINT.replace(/^https?:\/\//, "");
 }
 
 export function getMinioClient(): Client {
@@ -33,35 +15,28 @@ export function getMinioClient(): Client {
     _minioClient = new Client({
       endPoint: getEndpoint(),
       port: 443,
-      useSSL: true,
-      accessKey: process.env.MINIO_ACCESS_KEY || "",
-      secretKey: process.env.MINIO_SECRET_KEY || "",
+      useSSL: env.MINIO_USE_SSL,
+      accessKey: env.MINIO_ACCESS_KEY,
+      secretKey: env.MINIO_SECRET_KEY,
     });
   }
   return _minioClient;
 }
 
-/**
- * Check if MinIO client is properly configured
- */
 export function isMinioConfigured(): boolean {
   return !!(
-    process.env.MINIO_ENDPOINT &&
-    process.env.MINIO_ACCESS_KEY &&
-    process.env.MINIO_SECRET_KEY
+    env.MINIO_ENDPOINT &&
+    env.MINIO_ACCESS_KEY &&
+    env.MINIO_SECRET_KEY
   );
 }
 
-/**
- * Test MinIO connection
- */
 export async function testMinioConnection(): Promise<boolean> {
   try {
     const client = getMinioClient();
-    const exists = await client.bucketExists(PROMPTS_BUCKET);
-    return exists;
+    return await client.bucketExists(PROMPTS_BUCKET);
   } catch (error) {
-    console.error("MinIO connection test failed:", error);
+    logger.error({ error }, "MinIO connection test failed");
     return false;
   }
 }
