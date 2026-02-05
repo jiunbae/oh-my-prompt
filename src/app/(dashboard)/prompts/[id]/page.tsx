@@ -6,6 +6,7 @@ import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { analyzePrompt } from "@/lib/prompt-insights";
 
 // Force dynamic rendering - don't pre-render at build time
 export const dynamic = "force-dynamic";
@@ -79,6 +80,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
   });
 
   const tags = promptWithTags?.promptTags.map(pt => pt.tag) ?? [];
+  const promptReview = analyzePrompt(prompt.promptText);
 
   // Parse the prompt to create a simple message structure
   const messages = [
@@ -111,6 +113,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
       outputTokens={prompt.tokenEstimateResponse ?? 0}
       promptType={prompt.promptType}
       tags={tags}
+      review={promptReview}
     />
   );
 }

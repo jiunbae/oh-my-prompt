@@ -4,7 +4,7 @@
 
 # Config
 MINIO_ENDPOINT="https://minio.jiun.dev"
-MINIO_BUCKET="claude-prompts"
+MINIO_BUCKET="oh-my-prompt"
 MINIO_ACCESS_KEY="$1"
 MINIO_SECRET_KEY="$2"
 USER_TOKEN="$3"
@@ -46,7 +46,7 @@ import json, hashlib, datetime, os, subprocess, hmac, urllib.parse
 
 access_key = os.environ.get("MINIO_ACCESS_KEY_ENV")
 secret_key = os.environ.get("MINIO_SECRET_KEY_ENV")
-bucket = "claude-prompts"
+bucket = "oh-my-prompt"
 endpoint = "https://minio.jiun.dev"
 token = os.environ.get("USER_TOKEN_ENV")
 dry_run = os.environ.get("DRY_RUN_ENV") == "--dry-run"

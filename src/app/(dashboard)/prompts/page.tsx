@@ -2,7 +2,7 @@ import { PromptList } from "@/components/prompt-list";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
-import { desc, sql, and, gte, lte, eq, ilike } from "drizzle-orm";
+import { desc, sql, and, gte, lte, eq } from "drizzle-orm";
 import { SearchFilters } from "@/components/search-filters";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
@@ -176,7 +176,7 @@ export default async function PromptsPage({
       <div>
         <h1 className="text-2xl font-semibold text-zinc-100">Prompts</h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Browse and search your Claude Code conversations ({totalCount} total)
+          Browse and search your prompt history ({totalCount} total)
         </p>
       </div>
 

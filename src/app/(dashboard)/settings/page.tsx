@@ -53,7 +53,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-zinc-100">Settings</h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Configure your dashboard preferences
+          Configure your prompt workspace
         </p>
       </div>
 
@@ -63,7 +63,7 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle>API Token</CardTitle>
             <CardDescription>
-              Your personal token for MinIO uploads and Claude Code hook integration
+              Your personal token for MinIO uploads and prompt capture hooks (Claude Code supported)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -115,15 +115,15 @@ export default function SettingsPage() {
                   </Button>
                 </div>
                 <div className="bg-zinc-800/50 rounded-lg p-4 text-sm text-zinc-400">
-                  <p className="font-medium text-zinc-300 mb-2">Claude Code Hook Configuration</p>
+                  <p className="font-medium text-zinc-300 mb-2">Prompt Capture Hook (Claude Code)</p>
                   <p className="mb-2">
-                    Use this token when configuring your Claude Code hook to upload prompts:
+                    Use this token when configuring your prompt capture hook to upload prompts:
                   </p>
                   <pre className="bg-zinc-900 p-3 rounded text-xs overflow-x-auto">
-{`# In your Claude Code hook script:
-export PROMPT_MANAGER_TOKEN="${user.token}"
-export PROMPT_MANAGER_ENDPOINT="${minioConfig?.endpoint || "loading..."}"
-export PROMPT_MANAGER_BUCKET="${minioConfig?.bucket || "loading..."}"`}
+{`# In your prompt capture hook script (Claude Code):
+export OH_MY_PROMPT_TOKEN="${user.token}"
+export OH_MY_PROMPT_ENDPOINT="${minioConfig?.endpoint || "loading..."}"
+export OH_MY_PROMPT_BUCKET="${minioConfig?.bucket || "loading..."}"`}
                   </pre>
                 </div>
 
@@ -132,7 +132,7 @@ export PROMPT_MANAGER_BUCKET="${minioConfig?.bucket || "loading..."}"`}
                   {showConfirm ? (
                     <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
                       <p className="text-red-300 text-sm mb-3">
-                        Are you sure? This will invalidate your current token. You&apos;ll need to update your Claude Code hook configuration.
+                        Are you sure? This will invalidate your current token. You&apos;ll need to update your prompt capture hook configuration.
                       </p>
                       <div className="flex gap-3">
                         <Button

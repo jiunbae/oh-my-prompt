@@ -1,19 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: prompt-analyzer
+  name: oh-my-prompt
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-username/prompt-analyzer.git  # TODO: Replace with your repo
+    repoURL: https://github.com/your-username/oh-my-prompt.git  # TODO: Replace with your repo
     targetRevision: main
     path: k8s
   destination:
     server: https://kubernetes.default.svc
-    namespace: prompt-analyzer
+    namespace: oh-my-prompt
   syncPolicy:
     automated:
       prune: true

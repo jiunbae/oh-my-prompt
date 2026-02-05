@@ -1,4 +1,4 @@
-# Proposal: Paired Input/Output Prompt Syncing for Prompt Analyzer
+# Proposal: Paired Input/Output Prompt Syncing for Oh My Prompt
 
 ## Overview
 Currently, the system logs individual input prompts to MinIO using content-based hashing. To improve analysis quality, we need to capture the assistant's output (responses) and link them directly to the corresponding input prompts.

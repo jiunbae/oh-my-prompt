@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
  */
 export async function GET() {
   const endpoint = process.env.MINIO_ENDPOINT || "";
-  const bucket = process.env.MINIO_BUCKET || "claude-prompts";
+  const bucket = process.env.MINIO_BUCKET || "oh-my-prompt";
 
   return NextResponse.json({
     endpoint,

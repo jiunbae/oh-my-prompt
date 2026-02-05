@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Prompt Analytics Dashboard",
-  description: "Analytics dashboard for Claude Code prompts",
+  title: "Oh My Prompt",
+  description: "Prompt journal and insight dashboard for better agent instructions",
 };
 
 export default function RootLayout({

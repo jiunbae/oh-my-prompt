@@ -39,7 +39,7 @@ export async function POST() {
     return NextResponse.json({
       success: true,
       token: updatedUser.token,
-      message: "Token regenerated successfully. Update your Claude Code hook configuration.",
+      message: "Token regenerated successfully. Update your prompt capture hook configuration.",
     });
   } catch (error) {
     console.error("Token regeneration error:", error);

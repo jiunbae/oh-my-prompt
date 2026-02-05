@@ -1,30 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: prompt-analyzer
-  namespace: prompt-analyzer
+  name: oh-my-prompt
+  namespace: oh-my-prompt
   labels:
-    app: prompt-analyzer
+    app: oh-my-prompt
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: prompt-analyzer
+      app: oh-my-prompt
   template:
     metadata:
       labels:
-        app: prompt-analyzer
+        app: oh-my-prompt
     spec:
       containers:
-        - name: prompt-analyzer
-          image: your-registry.example.com/prompt-analyzer:latest  # TODO: Replace with your registry
+        - name: oh-my-prompt
+          image: your-registry.example.com/oh-my-prompt:latest  # TODO: Replace with your registry
           ports:
             - containerPort: 3000
           envFrom:
             - configMapRef:
-                name: prompt-analyzer-config
+                name: oh-my-prompt-config
             - secretRef:
-                name: prompt-analyzer-secrets
+                name: oh-my-prompt-secrets
           resources:
             requests:
               memory: "256Mi"

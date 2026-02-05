@@ -93,7 +93,7 @@ export default function RegisterPage() {
             Create Account
           </CardTitle>
           <p className="text-sm text-zinc-400 mt-1">
-            Register for Prompt Analytics
+            Register for Oh My Prompt
           </p>
         </CardHeader>
         <CardContent>

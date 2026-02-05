@@ -34,7 +34,7 @@ const navItems: NavItem[] = [
   },
   {
     href: "/analytics",
-    label: "Analytics",
+    label: "Insights",
     icon: (
       <svg
         className="h-5 w-5"
@@ -165,7 +165,7 @@ export function Sidebar() {
             />
           </svg>
           <span className="text-lg font-semibold text-zinc-100">
-            Prompt Analytics
+            Oh My Prompt
           </span>
         </Link>
       </div>

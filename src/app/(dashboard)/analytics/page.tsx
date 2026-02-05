@@ -2,10 +2,13 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
 import { desc, sql, eq } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { TokenUsageChart } from "@/components/charts/token-usage-chart";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { analyzePrompt, summarizePromptReviews } from "@/lib/prompt-insights";
 
 // Force dynamic rendering - don't pre-render at build time
 export const dynamic = "force-dynamic";
@@ -40,16 +43,25 @@ async function getAnalytics(userId: string | null) {
       ? eq(schema.prompts.userId, userId)
       : undefined;
 
-    // Build SQL user filter for raw SQL queries
-    const userSqlFilter = userId
-      ? sql`user_id = ${userId}`
-      : sql`1=1`;
-
     const userProjectFilter = userId
       ? sql`project_name is not null AND user_id = ${userId}`
       : sql`project_name is not null`;
 
-    const [stats, dailyStats, projectStats, typeStats, recentPrompts] = await Promise.all([
+    const promptInsightsQuery = db
+      .select({
+        promptText: schema.prompts.promptText,
+        promptLength: schema.prompts.promptLength,
+      })
+      .from(schema.prompts)
+      .orderBy(desc(schema.prompts.timestamp))
+      .limit(200);
+
+    const promptInsightsPromise = userFilter
+      ? promptInsightsQuery.where(userFilter)
+      : promptInsightsQuery;
+
+    const [stats, dailyStats, projectStats, typeStats, recentPrompts, promptSamples] =
+      await Promise.all([
       // Overall stats - filtered by user
       db
         .select({
@@ -108,9 +120,16 @@ async function getAnalytics(userId: string | null) {
         .where(userFilter)
         .orderBy(desc(schema.prompts.timestamp))
         .limit(5),
+      promptInsightsPromise,
     ]);
 
     await client.end();
+
+    const promptReviews = promptSamples.map((prompt) =>
+      analyzePrompt(prompt.promptText)
+    );
+
+    const promptInsights = summarizePromptReviews(promptReviews);
 
     return {
       stats: stats[0],
@@ -118,6 +137,7 @@ async function getAnalytics(userId: string | null) {
       projectStats,
       typeStats,
       recentPrompts,
+      promptInsights,
     };
   } catch (error) {
     console.error("Analytics error:", error);
@@ -140,6 +160,12 @@ function formatDate(date: Date): string {
   }).format(new Date(date));
 }
 
+function getScoreLabel(score: number) {
+  if (score >= 80) return "Strong";
+  if (score >= 55) return "Good";
+  return "Needs Work";
+}
+
 export default async function AnalyticsPage() {
   // Get current user from session
   const user = await getCurrentUser();
@@ -155,15 +181,23 @@ export default async function AnalyticsPage() {
     );
   }
 
-  const { stats, dailyStats, projectStats, typeStats, recentPrompts } = data;
-  const maxDailyCount = Math.max(...dailyStats.map((d) => Number(d.count)), 1);
+  const { stats, dailyStats, projectStats, typeStats, recentPrompts, promptInsights } =
+    data;
+
+  const averageScoreLabel = getScoreLabel(promptInsights.averageScore);
+  const averageScoreVariant =
+    averageScoreLabel === "Strong"
+      ? "success"
+      : averageScoreLabel === "Good"
+        ? "secondary"
+        : "warning";
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Analytics</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100">Insights</h1>
         <p className="text-sm text-zinc-400 mt-1">
-          Insights from your Claude Code usage
+          See how you prompt and where to improve
         </p>
       </div>
 
@@ -256,6 +290,102 @@ export default async function AnalyticsPage() {
             />
           </CardContent>
         </Card>
+      </div>
+
+      {/* Prompt Improvement */}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-100">Prompt Improvement</h2>
+          <p className="text-sm text-zinc-400">
+            Based on your most recent {promptInsights.total} prompts
+          </p>
+        </div>
+        {promptInsights.total === 0 ? (
+          <Card className="bg-zinc-900 border-zinc-800">
+            <CardContent className="py-8 text-center text-zinc-500">
+              Not enough prompts yet to generate insights.
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid md:grid-cols-3 gap-6">
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="text-lg text-zinc-100">Prompt Health</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-3xl font-semibold text-zinc-100">
+                    {promptInsights.averageScore}
+                  </span>
+                  <Badge variant={averageScoreVariant}>{averageScoreLabel}</Badge>
+                </div>
+                <div className="text-sm text-zinc-400 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span>Average words</span>
+                    <span className="text-zinc-200">
+                      {promptInsights.length.averageWords}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Short prompts</span>
+                    <span className="text-zinc-200">
+                      {promptInsights.length.shortCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Long prompts</span>
+                    <span className="text-zinc-200">
+                      {promptInsights.length.longCount}
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="text-lg text-zinc-100">Signal Coverage</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {promptInsights.signalStats.map((stat) => (
+                  <div key={stat.id} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-zinc-300">{stat.label}</span>
+                      <span className="text-zinc-500">{stat.percent}%</span>
+                    </div>
+                    <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500/80 rounded-full"
+                        style={{ width: `${stat.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="text-lg text-zinc-100">Top Gaps</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-zinc-300">
+                {promptInsights.topGaps.length === 0 ? (
+                  <p className="text-zinc-500">Great coverage across key signals.</p>
+                ) : (
+                  promptInsights.topGaps.map((gap) => (
+                    <div
+                      key={gap.id}
+                      className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2"
+                    >
+                      <span>{gap.label}</span>
+                      <span className="text-zinc-500">{gap.percent}%</span>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
 
       <div className="grid md:grid-cols-2 gap-6">

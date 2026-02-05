@@ -31,7 +31,7 @@ if (!MINIO_ENDPOINT) {
 }
 const MINIO_ACCESS_KEY = env.MINIO_ACCESS_KEY || process.env.MINIO_ACCESS_KEY;
 const MINIO_SECRET_KEY = env.MINIO_SECRET_KEY || process.env.MINIO_SECRET_KEY;
-const MINIO_BUCKET = env.MINIO_BUCKET || process.env.MINIO_BUCKET || "claude-prompts";
+const MINIO_BUCKET = env.MINIO_BUCKET || process.env.MINIO_BUCKET || "oh-my-prompt";
 
 // Multi-user support
 const USER_TOKEN = env.USER_TOKEN || process.env.USER_TOKEN || 
@@ -317,7 +317,7 @@ async function processFile(fileInfo, historyMap) {
 }
 
 async function run() {
-  console.log("Starting Claude session backup to MinIO...");
+  console.log("Starting prompt session backup (Claude Code) to MinIO...");
   if (USER_TOKEN) {
     console.log(`Using USER_TOKEN: ${USER_TOKEN.slice(0, 8)}...`);
   } else {

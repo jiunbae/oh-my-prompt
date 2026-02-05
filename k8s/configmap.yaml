@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prompt-analyzer-config
-  namespace: prompt-analyzer
+  name: oh-my-prompt-config
+  namespace: oh-my-prompt
 data:
   MINIO_ENDPOINT: "minio.example.com"  # TODO: Replace with your MinIO endpoint
-  MINIO_BUCKET: "claude-prompts"
+  MINIO_BUCKET: "oh-my-prompt"
   MINIO_USE_SSL: "true"

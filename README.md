@@ -1,11 +1,13 @@
-# Prompt Analytics Dashboard
+# Oh My Prompt
 
-A self-hosted dashboard for viewing and analyzing Claude Code prompts stored in MinIO.
+A self-hosted prompt journal and insight dashboard that helps you see how you prompt agents and continuously improve. Currently integrates with Claude Code logs stored in MinIO.
 
 ## Features
 
-- Browse and search Claude Code prompts
-- Analytics with daily activity charts, token counts, and project breakdowns
+- Prompt journal with search, filters, tags, and detail views
+- Prompt review signals (goal, context, constraints, output format, examples)
+- Insight dashboards with activity, token usage, and prompt quality trends
+- Clear improvement suggestions based on your recent prompts
 - Filter by project, prompt type, and date range
 - Multi-user support with email/password authentication
 - Admin-managed user allowlist
@@ -33,8 +35,8 @@ A self-hosted dashboard for viewing and analyzing Claude Code prompts stored in 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/prompt-analyzer.git
-cd prompt-analyzer
+git clone https://github.com/your-username/oh-my-prompt.git
+cd oh-my-prompt
 ```
 
 2. Install dependencies:
@@ -88,7 +90,7 @@ src/
 ├── app/                    # Next.js App Router pages
 │   ├── (dashboard)/       # Protected dashboard routes
 │   │   ├── admin/         # Admin panel (allowlist)
-│   │   ├── analytics/     # Analytics page
+│   │   ├── analytics/     # Insights page
 │   │   ├── prompts/       # Prompts list and detail
 │   │   └── settings/      # Settings page
 │   ├── api/               # API routes
@@ -128,7 +130,7 @@ bucket/
 
 ### Syncing Prompts
 
-Users can sync their Claude Code prompts using the backup script:
+Users can sync their Claude Code prompts (current supported source) using the backup script:
 ```bash
 USER_TOKEN=your-user-token node scripts/backup-claude-sessions.mjs
 ```
@@ -147,7 +149,7 @@ curl -X POST https://your-domain/api/sync \
 
 ```bash
 # Build
-docker build -t prompt-analyzer:latest .
+docker build -t oh-my-prompt:latest .
 
 # Run
 docker run -p 3000:3000 \
@@ -155,8 +157,8 @@ docker run -p 3000:3000 \
   -e MINIO_ENDPOINT=minio.example.com \
   -e MINIO_ACCESS_KEY=your-key \
   -e MINIO_SECRET_KEY=your-secret \
-  -e MINIO_BUCKET=claude-prompts \
-  prompt-analyzer:latest
+  -e MINIO_BUCKET=oh-my-prompt \
+  oh-my-prompt:latest
 ```
 
 ### Kubernetes
@@ -168,7 +170,7 @@ Example manifests are provided in `k8s/`. Update the placeholder values:
 
 Create secrets for sensitive values:
 ```bash
-kubectl create secret generic prompt-analyzer-secrets \
+kubectl create secret generic oh-my-prompt-secrets \
   --from-literal=DATABASE_URL=postgresql://... \
   --from-literal=MINIO_ACCESS_KEY=... \
   --from-literal=MINIO_SECRET_KEY=...

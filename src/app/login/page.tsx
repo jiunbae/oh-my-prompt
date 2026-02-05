@@ -45,10 +45,10 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm bg-zinc-900 border-zinc-800">
         <CardHeader className="text-center">
           <CardTitle className="text-xl text-zinc-100">
-            Prompt Analytics
+            Oh My Prompt
           </CardTitle>
           <p className="text-sm text-zinc-400 mt-1">
-            Sign in to your account
+            Sign in to your prompt journal
           </p>
         </CardHeader>
         <CardContent>

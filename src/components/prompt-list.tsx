@@ -93,7 +93,7 @@ export function PromptList({
           No prompts found
         </h3>
         <p className="text-sm text-zinc-500 max-w-sm">
-          Start using Claude Code to see your conversations appear here.
+          Start capturing your prompts to see your history appear here.
         </p>
       </div>
     );
