@@ -1,28 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  syncAll,
-  syncIncremental,
   getLastSyncStatus,
   isSyncRunning,
   findUserByToken,
 } from "@/services/sync";
 import { isMinioConfigured, testMinioConnection } from "@/lib/minio";
+import { syncQueue } from "@/lib/queue";
+import { logger } from "@/lib/logger";
 
-/**
- * POST /api/sync - Trigger a sync operation
- *
- * Authentication (one of the following):
- * - Header: X-User-Token: {user_token} (for external tools like Claude Code hook)
- * - Cookie: auth_session (for web UI)
- *
- * Request body:
- * - type: "full" | "incremental" (default: "full")
- * - since: ISO date string (required for incremental sync)
- * - syncType: "manual" | "auto" | "cron" (default: "manual") - purpose of the sync
- */
 export async function POST(request: NextRequest) {
   try {
-    // Check if MinIO is configured
     if (!isMinioConfigured()) {
       return NextResponse.json(
         {
@@ -33,14 +20,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Authenticate user - try X-User-Token header first (for external tools)
-    // then fall back to session cookie (for web UI)
     let userId: string | undefined;
     let userToken: string | undefined;
 
     const tokenHeader = request.headers.get("X-User-Token");
     if (tokenHeader) {
-      // External tool authentication via token
       const user = await findUserByToken(tokenHeader);
       if (!user) {
         return NextResponse.json(
@@ -53,20 +37,28 @@ export async function POST(request: NextRequest) {
       }
       userId = user.id;
       userToken = user.token;
-      console.log(`Sync requested by user (token auth): ${user.email}`);
+      logger.info({ email: user.email }, "Sync requested by user (token auth)");
     } else {
-      // Web UI authentication via middleware headers
       const headerUserId = request.headers.get("x-user-id");
       const headerUserToken = request.headers.get("x-user-token");
 
       if (headerUserId && headerUserToken) {
         userId = headerUserId;
         userToken = headerUserToken;
-        console.log(`Sync requested by user (session auth): ${headerUserId}`);
+        logger.info({ userId: headerUserId }, "Sync requested by user (session auth)");
       }
     }
 
-    // Check if sync is already running
+    if (!userId || !userToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Authentication required",
+        },
+        { status: 401 }
+      );
+    }
+
     const running = await isSyncRunning();
     if (running) {
       return NextResponse.json(
@@ -78,7 +70,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Test MinIO connection
     const connected = await testMinioConnection();
     if (!connected) {
       return NextResponse.json(
@@ -90,71 +81,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Parse request body
     let body: { type?: string; since?: string; syncType?: string } = {};
     try {
       body = await request.json();
     } catch {
-      // Empty body is OK, default to full sync
     }
 
     const operationType = body.type || "full";
     const syncPurpose = (body.syncType as "manual" | "auto" | "cron") || "manual";
 
-    // Build sync options with user context and sync type
-    const syncOptions = {
+    const job = await syncQueue.add(`sync-${userId}`, {
       userId,
       userToken,
       syncType: syncPurpose,
-    };
+      incremental: operationType === "incremental",
+      since: body.since,
+    });
 
-    console.log(
-      `Starting ${operationType} sync (${syncPurpose})...${userId ? ` (user-scoped: ${userToken})` : " (global)"}`
+    logger.info(
+      { jobId: job.id, userId, operationType },
+      "Enqueued sync job"
     );
 
-    let result;
-    if (operationType === "incremental") {
-      if (!body.since) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Incremental sync requires 'since' date parameter",
-          },
-          { status: 400 }
-        );
-      }
-
-      const sinceDate = new Date(body.since);
-      if (isNaN(sinceDate.getTime())) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Invalid 'since' date format. Use ISO 8601 format.",
-          },
-          { status: 400 }
-        );
-      }
-
-      result = await syncIncremental(sinceDate, syncOptions);
-    } else {
-      result = await syncAll(syncOptions);
-    }
-
     return NextResponse.json({
-      success: result.success,
-      syncLogId: result.syncLogId,
+      success: true,
+      jobId: job.id,
+      message: "Sync job enqueued successfully",
       type: operationType,
       syncType: syncPurpose,
-      userScoped: !!userId,
-      filesProcessed: result.filesProcessed,
-      filesAdded: result.filesAdded,
-      filesSkipped: result.filesSkipped,
-      duration: result.duration,
-      errors: result.errors.length > 0 ? result.errors.slice(0, 10) : undefined,
-      errorCount: result.errors.length,
     });
   } catch (error) {
-    console.error("Sync API error:", error);
+    logger.error({ error }, "Sync API error");
     return NextResponse.json(
       {
         success: false,

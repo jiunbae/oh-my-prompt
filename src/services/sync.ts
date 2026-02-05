@@ -1,6 +1,7 @@
 import { getMinioClient, PROMPTS_BUCKET, isMinioConfigured } from "@/lib/minio";
 import { env } from "@/env";
 import { logger } from "@/lib/logger";
+import { sql } from "drizzle-orm";
 import type {
   MinioObjectInfo,
   MinioPrompt,
@@ -256,6 +257,49 @@ export function classifyPrompt(text: string): string[] {
   return tags;
 }
 
+export async function updateDailyAnalytics(dateStr: string) {
+  const { db } = await getDb();
+  const schema = await import("@/db/schema");
+  const { eq, sql } = await import("drizzle-orm");
+
+  const [stats] = await db
+    .select({
+      count: sql<number>`count(*)`,
+      totalChars: sql<number>`sum(prompt_length + coalesce(response_length, 0))`,
+      totalTokens: sql<number>`sum(token_estimate + coalesce(token_estimate_response, 0))`,
+      uniqueProjects: sql<number>`count(distinct project_name)`,
+    })
+    .from(schema.prompts)
+    .where(sql`date(timestamp) = ${dateStr}`);
+
+  if (stats) {
+    const avgLength = stats.count > 0 ? Number(stats.totalChars) / stats.count : 0;
+
+    await db
+      .insert(schema.analyticsDaily)
+      .values({
+        date: dateStr,
+        promptCount: Number(stats.count),
+        totalChars: Number(stats.totalChars),
+        totalTokensEst: Number(stats.totalTokens),
+        uniqueProjects: Number(stats.uniqueProjects),
+        avgPromptLength: String(avgLength.toFixed(2)),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: schema.analyticsDaily.date,
+        set: {
+          promptCount: Number(stats.count),
+          totalChars: Number(stats.totalChars),
+          totalTokensEst: Number(stats.totalTokens),
+          uniqueProjects: Number(stats.uniqueProjects),
+          avgPromptLength: String(avgLength.toFixed(2)),
+          updatedAt: new Date(),
+        },
+      });
+  }
+}
+
 /**
  * Perform a full sync of all prompts from MinIO to database
  */
@@ -272,6 +316,193 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
 
   const prefix = `${options.userToken}/`;
   let syncLogId: string | undefined;
+  const affectedDates = new Set<string>();
+
+  try {
+    const { db, promptsTable, syncLogTable } = await getDb();
+    const { eq, and, sql } = await import("drizzle-orm");
+
+    const [syncLog] = await db
+      .insert(syncLogTable)
+      .values({
+        status: "running",
+        filesProcessed: 0,
+        filesAdded: 0,
+        filesSkipped: 0,
+        userId: options.userId,
+        syncType: options.syncType ?? "manual",
+      })
+      .returning();
+
+    syncLogId = syncLog.id;
+
+    try {
+      const objects = await listAllObjects(PROMPTS_BUCKET, prefix);
+      const existingPrompts = await db
+        .select({ minioKey: promptsTable.minioKey })
+        .from(promptsTable)
+        .where(eq(promptsTable.userId, options.userId));
+      
+      const existingKeys = new Set(existingPrompts.map((p: any) => p.minioKey));
+
+      const inputs = objects.filter((obj) => !obj.name.endsWith("_output.json"));
+      const outputs = objects.filter((obj) => obj.name.endsWith("_output.json"));
+
+      const schema = await import("@/db/schema");
+
+      for (const obj of inputs) {
+        filesProcessed++;
+        if (existingKeys.has(obj.name)) {
+          filesSkipped++;
+          continue;
+        }
+
+        try {
+          const promptData = await fetchPrompt(obj.name);
+          if (!promptData) continue;
+
+          const processed = processPrompt(promptData, obj.name);
+          affectedDates.add(processed.timestamp.toISOString().split("T")[0]);
+          
+          const [newPrompt] = await db
+            .insert(promptsTable)
+            .values({
+              ...processed,
+              userId: options.userId,
+              searchVector: sql`to_tsvector('english', ${processed.promptText} || ' ' || ${
+                processed.responseText ?? ""
+              })`,
+            })
+            .returning();
+
+          const suggestedTags = classifyPrompt(processed.promptText);
+          for (const tagName of suggestedTags) {
+            let [tag] = await db
+              .select()
+              .from(schema.tags)
+              .where(eq(schema.tags.name, tagName))
+              .limit(1);
+
+            if (!tag) {
+              [tag] = await db
+                .insert(schema.tags)
+                .values({ name: tagName })
+                .onConflictDoNothing()
+                .returning();
+              
+              if (!tag) {
+                [tag] = await db
+                  .select()
+                  .from(schema.tags)
+                  .where(eq(schema.tags.name, tagName))
+                  .limit(1);
+              }
+            }
+
+            if (tag) {
+              await db
+                .insert(schema.promptTags)
+                .values({
+                  promptId: newPrompt.id,
+                  tagId: tag.id,
+                })
+                .onConflictDoNothing();
+            }
+          }
+
+          filesAdded++;
+        } catch (error) {
+          errors.push(`Error processing input ${obj.name}: ${error}`);
+        }
+      }
+
+      for (const obj of outputs) {
+        filesProcessed++;
+        try {
+          const promptData = await fetchPrompt(obj.name);
+          if (!promptData) continue;
+
+          const processed = processPrompt(promptData, obj.name);
+          if (processed.isOutput && processed.inputHash) {
+            const inputKey = obj.name.replace("_output.json", ".json");
+            const [existing] = await db
+              .select()
+              .from(promptsTable)
+              .where(and(eq(promptsTable.minioKey, inputKey), eq(promptsTable.userId, options.userId)))
+              .limit(1);
+
+            if (existing) {
+              affectedDates.add(existing.timestamp.toISOString().split("T")[0]);
+              await db
+                .update(promptsTable)
+                .set({
+                  responseText: processed.responseText,
+                  responseLength: processed.responseLength,
+                  tokenEstimateResponse: processed.tokenEstimateResponse,
+                  wordCountResponse: processed.wordCountResponse,
+                  searchVector: sql`to_tsvector('english', ${existing.promptText} || ' ' || ${
+                    processed.responseText ?? ""
+                  })`,
+                  updatedAt: new Date(),
+                })
+                .where(eq(promptsTable.id, existing.id));
+              filesAdded++;
+            } else {
+              filesSkipped++;
+            }
+          }
+        } catch (error) {
+          errors.push(`Error processing output ${obj.name}: ${error}`);
+        }
+      }
+
+      await db
+        .update(syncLogTable)
+        .set({
+          status: "completed",
+          completedAt: new Date(),
+          filesProcessed,
+          filesAdded,
+          filesSkipped,
+        })
+        .where(eq(syncLogTable.id, syncLog.id));
+
+      for (const date of affectedDates) {
+        await updateDailyAnalytics(date);
+      }
+    } catch (error) {
+      await db
+        .update(syncLogTable)
+        .set({
+          status: "failed",
+          completedAt: new Date(),
+          filesProcessed,
+          filesAdded,
+          filesSkipped,
+          errorMessage: String(error),
+        })
+        .where(eq(syncLogTable.id, syncLog.id));
+      throw error;
+    }
+  } catch (error) {
+    errors.push(`Sync failed: ${error}`);
+  }
+
+  return {
+    success: errors.length === 0,
+    filesProcessed,
+    filesAdded,
+    filesSkipped,
+    errors,
+    duration: Date.now() - startTime,
+    syncLogId,
+  };
+}
+
+
+  const prefix = `${options.userToken}/`;
+  let syncLogId: string | undefined;
+  const affectedDates = new Set<string>();
 
   try {
     const { db, promptsTable, syncLogTable } = await getDb();
@@ -315,6 +546,7 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
           if (!promptData) continue;
 
           const processed = processPrompt(promptData, obj.name);
+          affectedDates.add(processed.timestamp.toISOString().split("T")[0]);
           const [newPrompt] = await db
             .insert(promptsTable)
             .values({

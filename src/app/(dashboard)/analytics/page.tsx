@@ -50,68 +50,68 @@ async function getAnalytics(userId: string | null) {
       : sql`project_name is not null`;
 
     const [stats, dailyStats, projectStats, typeStats, recentPrompts] = await Promise.all([
-    // Overall stats - filtered by user
-    db
-      .select({
-        totalPrompts: sql<number>`count(*)`,
-        totalTokens: sql<number>`coalesce(sum(token_estimate), 0)`,
-        totalChars: sql<number>`coalesce(sum(prompt_length), 0)`,
-        uniqueProjects: sql<number>`count(distinct project_name)`,
-        avgPromptLength: sql<number>`avg(prompt_length)`,
-      })
-      .from(schema.prompts)
-      .where(userFilter),
+      // Overall stats - filtered by user
+      db
+        .select({
+          totalPrompts: sql<number>`count(*)`,
+          totalTokens: sql<number>`coalesce(sum(token_estimate), 0)`,
+          totalChars: sql<number>`coalesce(sum(prompt_length), 0)`,
+          uniqueProjects: sql<number>`count(distinct project_name)`,
+          avgPromptLength: sql<number>`avg(prompt_length)`,
+        })
+        .from(schema.prompts)
+        .where(userFilter),
 
-    // Daily stats for last 30 days (or all time if less data) - filtered by user
-    db
-      .select({
-        date: sql<string>`to_char(timestamp, 'YYYY-MM-DD')`,
-        count: sql<number>`count(*)`,
-        tokens: sql<number>`coalesce(sum(token_estimate), 0)`,
-      })
-      .from(schema.prompts)
-      .where(userFilter)
-      .groupBy(sql`to_char(timestamp, 'YYYY-MM-DD')`)
-      .orderBy(sql`to_char(timestamp, 'YYYY-MM-DD')`)
-      .limit(30),
+      // Daily stats for last 30 days (or all time if less data) - filtered by user
+      db
+        .select({
+          date: sql<string>`to_char(timestamp, 'YYYY-MM-DD')`,
+          count: sql<number>`count(*)`,
+          tokens: sql<number>`coalesce(sum(token_estimate), 0)`,
+        })
+        .from(schema.prompts)
+        .where(userFilter)
+        .groupBy(sql`to_char(timestamp, 'YYYY-MM-DD')`)
+        .orderBy(sql`to_char(timestamp, 'YYYY-MM-DD')`)
+        .limit(30),
 
-    // Top projects - filtered by user
-    db
-      .select({
-        project: schema.prompts.projectName,
-        count: sql<number>`count(*)`,
-        tokens: sql<number>`coalesce(sum(token_estimate), 0)`,
-      })
-      .from(schema.prompts)
-      .where(userProjectFilter)
-      .groupBy(schema.prompts.projectName)
-      .orderBy(desc(sql`count(*)`))
-      .limit(10),
+      // Top projects - filtered by user
+      db
+        .select({
+          project: schema.prompts.projectName,
+          count: sql<number>`count(*)`,
+          tokens: sql<number>`coalesce(sum(token_estimate), 0)`,
+        })
+        .from(schema.prompts)
+        .where(userProjectFilter)
+        .groupBy(schema.prompts.projectName)
+        .orderBy(desc(sql`count(*)`))
+        .limit(10),
 
-    // Prompt types distribution - filtered by user
-    db
-      .select({
-        type: schema.prompts.promptType,
-        count: sql<number>`count(*)`,
-      })
-      .from(schema.prompts)
-      .where(userFilter)
-      .groupBy(schema.prompts.promptType),
+      // Prompt types distribution - filtered by user
+      db
+        .select({
+          type: schema.prompts.promptType,
+          count: sql<number>`count(*)`,
+        })
+        .from(schema.prompts)
+        .where(userFilter)
+        .groupBy(schema.prompts.promptType),
 
-    // Recent activity (last 5 prompts) - filtered by user
-    db
-      .select({
-        id: schema.prompts.id,
-        timestamp: schema.prompts.timestamp,
-        projectName: schema.prompts.projectName,
-        promptLength: schema.prompts.promptLength,
-        promptType: schema.prompts.promptType,
-      })
-      .from(schema.prompts)
-      .where(userFilter)
-      .orderBy(desc(schema.prompts.timestamp))
-      .limit(5),
-  ]);
+      // Recent activity (last 5 prompts) - filtered by user
+      db
+        .select({
+          id: schema.prompts.id,
+          timestamp: schema.prompts.timestamp,
+          projectName: schema.prompts.projectName,
+          promptLength: schema.prompts.promptLength,
+          promptType: schema.prompts.promptType,
+        })
+        .from(schema.prompts)
+        .where(userFilter)
+        .orderBy(desc(schema.prompts.timestamp))
+        .limit(5),
+    ]);
 
     await client.end();
 
