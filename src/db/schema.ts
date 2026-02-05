@@ -10,8 +10,15 @@ import {
   primaryKey,
   index,
   boolean,
+  customType,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
+
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 // Users table
 export const users = pgTable(
@@ -66,21 +73,15 @@ export const prompts = pgTable(
     projectName: varchar("project_name", { length: 255 }),
     promptType: varchar("prompt_type", { length: 50 }),
 
-    // Analytics fields
+    userId: uuid("user_id").references(() => users.id),
     tokenEstimate: integer("token_estimate"),
     wordCount: integer("word_count"),
     tokenEstimateResponse: integer("token_estimate_response"),
     wordCountResponse: integer("word_count_response"),
-
-    // Sync tracking
     syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 
-    // User reference (nullable for migration purposes)
-    userId: uuid("user_id").references(() => users.id),
-
-    // Full-text search vector (managed via SQL)
-    // Note: TSVECTOR with GENERATED ALWAYS AS requires raw SQL migration
+    searchVector: tsvector("search_vector"),
   },
   (table) => [
     index("idx_prompts_timestamp").on(table.timestamp),
@@ -88,6 +89,7 @@ export const prompts = pgTable(
     index("idx_prompts_type").on(table.promptType),
     index("idx_prompts_minio_key").on(table.minioKey),
     index("idx_prompts_user").on(table.userId),
+    index("idx_prompts_search_vector").using("gin", table.searchVector),
   ]
 );
 
