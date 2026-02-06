@@ -92,38 +92,21 @@ export async function processUpload(
     const tagCache = new Map<string, string>();
     if (allTagNames.size > 0) {
       const tagNameArray = [...allTagNames];
-      const existingTags = await db
+
+      // Insert all tags (ignoring conflicts for existing ones)
+      await db
+        .insert(schema.tags)
+        .values(tagNameArray.map((name) => ({ name })))
+        .onConflictDoNothing();
+
+      // Fetch all required tags in a single query
+      const allTags = await db
         .select()
         .from(schema.tags)
         .where(inArray(schema.tags.name, tagNameArray));
 
-      for (const tag of existingTags) {
+      for (const tag of allTags) {
         tagCache.set(tag.name, tag.id);
-      }
-
-      const missingTagNames = tagNameArray.filter((name) => !tagCache.has(name));
-      if (missingTagNames.length > 0) {
-        const inserted = await db
-          .insert(schema.tags)
-          .values(missingTagNames.map((name) => ({ name })))
-          .onConflictDoNothing()
-          .returning();
-
-        for (const tag of inserted) {
-          tagCache.set(tag.name, tag.id);
-        }
-
-        // Re-fetch any that hit conflict (already existed but weren't in our initial query)
-        const stillMissing = missingTagNames.filter((name) => !tagCache.has(name));
-        if (stillMissing.length > 0) {
-          const refetched = await db
-            .select()
-            .from(schema.tags)
-            .where(inArray(schema.tags.name, stillMissing));
-          for (const tag of refetched) {
-            tagCache.set(tag.name, tag.id);
-          }
-        }
       }
     }
 

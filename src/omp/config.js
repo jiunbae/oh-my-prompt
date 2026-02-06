@@ -124,7 +124,7 @@ function loadConfig() {
 function saveConfig(config) {
   const configPath = getConfigPath();
   ensureDir(path.dirname(configPath));
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 function getConfigSummary(config) {
