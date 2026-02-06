@@ -83,9 +83,14 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
   const promptReview = analyzePrompt(prompt.promptText);
 
   // Parse the prompt to create a simple message structure
-  const messages = [
+  const messages: Array<{
+    role: "user" | "assistant" | "system";
+    content: string;
+    timestamp: Date;
+    tokens: number;
+  }> = [
     {
-      role: "user" as const,
+      role: "user",
       content: prompt.promptText,
       timestamp: prompt.timestamp,
       tokens: prompt.tokenEstimate ?? Math.ceil(prompt.promptLength / 4),
@@ -94,7 +99,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
 
   if (prompt.responseText) {
     messages.push({
-      role: "assistant" as const,
+      role: "assistant",
       content: prompt.responseText,
       timestamp: prompt.updatedAt ?? prompt.timestamp,
       tokens: prompt.tokenEstimateResponse ?? Math.ceil((prompt.responseLength ?? 0) / 4),
