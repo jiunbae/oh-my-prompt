@@ -2,6 +2,9 @@
   "name": "oh-my-prompt",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "omp": "bin/omp"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -16,6 +19,7 @@
     "setup": "docker compose up -d && sleep 5 && pnpm db:push"
   },
   "dependencies": {
+    "better-sqlite3": "^11.6.0",
     "@radix-ui/react-slot": "^1.2.4",
     "@t3-oss/env-nextjs": "^0.13.10",
     "@tanstack/react-query": "^5.90.20",
@@ -40,6 +44,7 @@
     "recharts": "^3.7.0",
     "superjson": "^2.2.6",
     "tailwind-merge": "^3.4.0",
+    "toml": "^3.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
