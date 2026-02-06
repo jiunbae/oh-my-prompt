@@ -69,10 +69,10 @@ function postJson(url, headers, body) {
       res.on("data", (chunk) => { data += chunk; });
       res.on("end", () => {
         try {
-          const json = JSON.parse(data);
+          const json = data ? JSON.parse(data) : {};
           resolve({ status: res.statusCode, body: json });
         } catch {
-          resolve({ status: res.statusCode, body: data });
+          reject(new Error(`Failed to parse JSON response (status: ${res.statusCode}): ${data.slice(0, 200)}`));
         }
       });
     });

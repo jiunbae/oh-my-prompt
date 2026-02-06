@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { findUserByToken } from "@/services/sync";
 import { processUpload } from "@/services/upload";
 import type { UploadRecord } from "@/services/upload";

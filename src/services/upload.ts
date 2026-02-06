@@ -34,8 +34,8 @@ export interface UploadResult {
 }
 
 function sanitizeEventId(eventId: string): string {
-  // Prevent path traversal: strip directory separators and dot-dot sequences
-  return eventId.replace(/[\/\\]/g, "_").replace(/\.\./g, "_");
+  // Allowlist: only alphanumeric, hyphens, and underscores
+  return eventId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function buildMinioKey(userToken: string, createdAt: string, eventId: string): string {

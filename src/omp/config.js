@@ -93,7 +93,13 @@ function loadConfig() {
   }
 
   const raw = fs.readFileSync(configPath, "utf-8");
-  const parsed = JSON.parse(raw);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.error(`Error parsing config file: ${configPath}. Falling back to defaults.`);
+    parsed = {};
+  }
   const merged = { ...defaultConfig(), ...parsed };
 
   merged.server = { ...defaultConfig().server, ...parsed.server };
