@@ -65,7 +65,7 @@ export async function processUpload(
 
   const postgres = (await import("postgres")).default;
   const { drizzle } = await import("drizzle-orm/postgres-js");
-  const { eq, sql } = await import("drizzle-orm");
+  const { eq, sql, inArray } = await import("drizzle-orm");
   const schema = await import("@/db/schema");
 
   const connectionString = process.env.DATABASE_URL;
@@ -77,6 +77,54 @@ export async function processUpload(
   const db = drizzle(client, { schema });
 
   try {
+    // Pre-build tag cache: collect all unique tags, batch-fetch/insert them
+    const allTagNames = new Set<string>();
+    for (const record of records) {
+      if (record.prompt_text) {
+        for (const tag of classifyPrompt(record.prompt_text)) {
+          allTagNames.add(tag);
+        }
+      }
+    }
+
+    const tagCache = new Map<string, string>();
+    if (allTagNames.size > 0) {
+      const tagNameArray = [...allTagNames];
+      const existingTags = await db
+        .select()
+        .from(schema.tags)
+        .where(inArray(schema.tags.name, tagNameArray));
+
+      for (const tag of existingTags) {
+        tagCache.set(tag.name, tag.id);
+      }
+
+      const missingTagNames = tagNameArray.filter((name) => !tagCache.has(name));
+      if (missingTagNames.length > 0) {
+        const inserted = await db
+          .insert(schema.tags)
+          .values(missingTagNames.map((name) => ({ name })))
+          .onConflictDoNothing()
+          .returning();
+
+        for (const tag of inserted) {
+          tagCache.set(tag.name, tag.id);
+        }
+
+        // Re-fetch any that hit conflict (already existed but weren't in our initial query)
+        const stillMissing = missingTagNames.filter((name) => !tagCache.has(name));
+        if (stillMissing.length > 0) {
+          const refetched = await db
+            .select()
+            .from(schema.tags)
+            .where(inArray(schema.tags.name, stillMissing));
+          for (const tag of refetched) {
+            tagCache.set(tag.name, tag.id);
+          }
+        }
+      }
+    }
+
     for (const record of records) {
       if (!record.event_id || !record.created_at || !record.prompt_text) {
         rejected++;
@@ -131,35 +179,14 @@ export async function processUpload(
           continue;
         }
 
-        // Auto-classify with tags
+        // Auto-classify with pre-cached tags
         const suggestedTags = classifyPrompt(record.prompt_text);
         for (const tagName of suggestedTags) {
-          let [tag] = await db
-            .select()
-            .from(schema.tags)
-            .where(eq(schema.tags.name, tagName))
-            .limit(1);
-
-          if (!tag) {
-            [tag] = await db
-              .insert(schema.tags)
-              .values({ name: tagName })
-              .onConflictDoNothing()
-              .returning();
-
-            if (!tag) {
-              [tag] = await db
-                .select()
-                .from(schema.tags)
-                .where(eq(schema.tags.name, tagName))
-                .limit(1);
-            }
-          }
-
-          if (tag) {
+          const tagId = tagCache.get(tagName);
+          if (tagId) {
             await db
               .insert(schema.promptTags)
-              .values({ promptId: inserted.id, tagId: tag.id })
+              .values({ promptId: inserted.id, tagId })
               .onConflictDoNothing();
           }
         }

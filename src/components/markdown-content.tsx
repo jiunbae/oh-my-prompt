@@ -13,19 +13,29 @@ export function MarkdownContent({ content }: MarkdownContentProps) {
     <div className="prose prose-invert max-w-none prose-pre:p-0 prose-pre:bg-transparent">
       <ReactMarkdown
         components={{
+          pre(props) {
+            const { children } = props;
+            return <>{children}</>;
+          },
           code(props) {
-            const { children, className, ...rest } = props;
+            const { children, className, node, ...rest } = props;
             const match = /language-(\w+)/.exec(className || "");
-            const isInline = !match;
-            return !isInline ? (
-              <SyntaxHighlighter
-                style={vscDarkPlus}
-                language={match[1]}
-                PreTag="div"
-                className="rounded-md border border-zinc-800 my-4"
-              >
-                {String(children).replace(/\n$/, "")}
-              </SyntaxHighlighter>
+            const isBlock = node?.position && String(children).includes("\n") || match;
+            return isBlock ? (
+              match ? (
+                <SyntaxHighlighter
+                  style={vscDarkPlus}
+                  language={match[1]}
+                  PreTag="div"
+                  className="rounded-md border border-zinc-800 my-4"
+                >
+                  {String(children).replace(/\n$/, "")}
+                </SyntaxHighlighter>
+              ) : (
+                <pre className="p-4 rounded-md border border-zinc-800 my-4 bg-zinc-900 overflow-x-auto">
+                  <code {...rest} className={className}>{children}</code>
+                </pre>
+              )
             ) : (
               <code className={`${className || ""} bg-zinc-800 rounded px-1 py-0.5`} {...rest}>
                 {children}
