@@ -62,6 +62,7 @@ function postJson(url, headers, body) {
         "Content-Length": Buffer.byteLength(payload),
         ...headers,
       },
+      timeout: 30000,
     };
 
     const req = transport.request(options, (res) => {
@@ -77,6 +78,10 @@ function postJson(url, headers, body) {
       });
     });
 
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timed out"));
+    });
     req.on("error", reject);
     req.write(payload);
     req.end();

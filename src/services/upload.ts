@@ -168,7 +168,7 @@ export async function processUpload(
         accepted++;
       } catch (error) {
         rejected++;
-        errors.push(`Error processing record ${record.event_id}: ${error}`);
+        errors.push(`Error processing record ${record.event_id}: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
     }
 

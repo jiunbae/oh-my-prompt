@@ -38,7 +38,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse request body
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+
+    if (body === null) {
+      return NextResponse.json(
+        { error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
 
     if (!body.records || !Array.isArray(body.records)) {
       return NextResponse.json(
