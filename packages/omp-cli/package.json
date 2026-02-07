@@ -1,0 +1,15 @@
+{
+  "name": "oh-my-prompt",
+  "version": "0.1.0",
+  "description": "CLI tool for capturing and syncing AI coding prompts",
+  "bin": {
+    "omp": "./bin/omp"
+  },
+  "main": "lib/cli.js",
+  "dependencies": {
+    "better-sqlite3": "^11.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
