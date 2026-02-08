@@ -16,7 +16,9 @@
     "db:studio": "drizzle-kit studio",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "setup": "docker compose up -d && sleep 5 && pnpm db:push"
+    "setup": "docker compose up -d && sleep 5 && pnpm db:push",
+    "build:cli": "bash scripts/build-cli.sh",
+    "verify:cli": "node packages/omp-cli/scripts/verify-build.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.6.0",

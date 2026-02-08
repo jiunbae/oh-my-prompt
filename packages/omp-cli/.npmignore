@@ -1,0 +1,41 @@
+# Development files
+node_modules/
+src/
+__tests__/
+*.test.js
+coverage/
+.nyc_output/
+
+# Config files
+.env
+.env.*
+config.json
+*.local.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# CI
+.github/
+.travis.yml
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+tmp/
+
+# Scripts (keep verify-build.js)

@@ -1,0 +1,83 @@
+name: Publish CLI to npm
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags (e.g., v0.1.0)
+
+permissions:
+  contents: read
+  id-token: write  # For npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Update package.json version
+        run: |
+          cd packages/omp-cli
+          npm version ${{ steps.version.outputs.version }} --no-git-tag-version
+
+      - name: Build CLI package
+        run: |
+          chmod +x scripts/build-cli.sh
+          ./scripts/build-cli.sh
+
+      - name: Verify build
+        run: |
+          cd packages/omp-cli
+          node scripts/verify-build.js
+
+      - name: Create tarball (dry run)
+        run: |
+          cd packages/omp-cli
+          npm pack --dry-run
+
+      - name: Publish to npm
+        run: |
+          cd packages/omp-cli
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            ## Installation
+            ```bash
+            npm install -g oh-my-prompt@${{ steps.version.outputs.version }}
+            ```
+
+            See [CHANGELOG.md](CHANGELOG.md) for details.
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
