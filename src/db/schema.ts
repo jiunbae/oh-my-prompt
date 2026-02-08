@@ -73,6 +73,10 @@ export const prompts = pgTable(
     projectName: varchar("project_name", { length: 255 }),
     promptType: varchar("prompt_type", { length: 50 }),
 
+    // Provenance (optional; populated by clients when available)
+    source: varchar("source", { length: 50 }),
+    sessionId: varchar("session_id", { length: 255 }),
+
     userId: uuid("user_id").references(() => users.id),
     tokenEstimate: integer("token_estimate"),
     wordCount: integer("word_count"),
@@ -91,6 +95,26 @@ export const prompts = pgTable(
     index("idx_prompts_user").on(table.userId),
     index("idx_prompts_search_vector").using("gin", table.searchVector),
   ]
+);
+
+export const promptReviews = pgTable(
+  "prompt_reviews",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(), // 0-100
+    scoreLabel: varchar("score_label", { length: 20 }).notNull(),
+    signals: text("signals").notNull(), // JSON array (stringified)
+    suggestions: text("suggestions").notNull(), // JSON array (stringified)
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("idx_prompt_reviews_prompt_id").on(table.promptId)]
 );
 
 // Tags table
@@ -176,9 +200,17 @@ export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
 
 export const promptsRelations = relations(prompts, ({ one, many }) => ({
   promptTags: many(promptTags),
+  promptReviews: many(promptReviews),
   user: one(users, {
     fields: [prompts.userId],
     references: [users.id],
+  }),
+}));
+
+export const promptReviewsRelations = relations(promptReviews, ({ one }) => ({
+  prompt: one(prompts, {
+    fields: [promptReviews.promptId],
+    references: [prompts.id],
   }),
 }));
 
@@ -218,6 +250,8 @@ export type AllowedEmail = typeof allowedEmails.$inferSelect;
 export type NewAllowedEmail = typeof allowedEmails.$inferInsert;
 export type Prompt = typeof prompts.$inferSelect;
 export type NewPrompt = typeof prompts.$inferInsert;
+export type PromptReview = typeof promptReviews.$inferSelect;
+export type NewPromptReview = typeof promptReviews.$inferInsert;
 export type Tag = typeof tags.$inferSelect;
 export type NewTag = typeof tags.$inferInsert;
 export type PromptTag = typeof promptTags.$inferSelect;
