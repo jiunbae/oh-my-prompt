@@ -1,0 +1,59 @@
+const DEFAULT_PATTERNS = [
+  {
+    name: "api_key_generic",
+    regex: /((?:api|access|secret|token|password)[-_ ]?key\s*[:=]\s*)(["']?)[^\s"']{8,}\2/gi,
+    replace: "$1$2[REDACTED]$2",
+  },
+  {
+    name: "bearer",
+    regex: /(authorization\s*[:=]\s*bearer\s+)[A-Za-z0-9._-]{10,}/gi,
+    replace: "$1[REDACTED]",
+  },
+  { name: "openai", regex: /sk-[A-Za-z0-9]{20,}/g, replace: "[REDACTED]" },
+  { name: "github", regex: /gh[pousr]_[A-Za-z0-9]{20,}/g, replace: "[REDACTED]" },
+  { name: "github_pat", regex: /github_pat_[A-Za-z0-9_]{20,}/g, replace: "[REDACTED]" },
+  { name: "slack", regex: /xox[baprs]-[A-Za-z0-9-]{10,}/g, replace: "[REDACTED]" },
+  { name: "aws_access", regex: /AKIA[0-9A-Z]{16}/g, replace: "[REDACTED]" },
+  {
+    name: "aws_secret",
+    regex: /((?:aws_secret_access_key|aws_secret|secret_access_key)\s*[:=]\s*)(["']?)[A-Za-z0-9/+=]{20,}\2/gi,
+    replace: "$1$2[REDACTED]$2",
+  },
+  { name: "google_api", regex: /AIza[0-9A-Za-z\-_]{35}/g, replace: "[REDACTED]" },
+  { name: "stripe", regex: /(sk|rk|pk)_live_[A-Za-z0-9]{20,}/g, replace: "[REDACTED]" },
+  {
+    name: "jwt",
+    regex: /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+    replace: "[REDACTED]",
+  },
+  {
+    name: "private_key",
+    regex: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+    replace: "[REDACTED_PRIVATE_KEY]",
+  },
+];
+
+function redactText(text, options = {}) {
+  if (!text) return { text: text || "", count: 0 };
+  const mask = options.mask || "[REDACTED]";
+  let output = text;
+  let count = 0;
+
+  DEFAULT_PATTERNS.forEach((pattern) => {
+    output = output.replace(pattern.regex, (match, ...args) => {
+      count += 1;
+      if (pattern.replace) {
+        return typeof pattern.replace === "function"
+          ? pattern.replace(match, ...args)
+          : pattern.replace.replace("[REDACTED]", mask);
+      }
+      return mask;
+    });
+  });
+
+  return { text: output, count };
+}
+
+module.exports = {
+  redactText,
+};
