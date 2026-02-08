@@ -21,7 +21,7 @@ interface ProjectActivityChartProps {
 
 function truncate(label: string, max: number) {
   if (label.length <= max) return label;
-  return label.slice(0, Math.max(0, max - 3)) + "...";
+  return label.slice(0, max - 3) + "...";
 }
 
 export function ProjectActivityChart({ data }: ProjectActivityChartProps) {

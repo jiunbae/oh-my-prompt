@@ -3,6 +3,7 @@ import {
   uuid,
   varchar,
   text,
+  jsonb,
   integer,
   timestamp,
   date,
@@ -108,8 +109,8 @@ export const promptReviews = pgTable(
       .references(() => prompts.id, { onDelete: "cascade" }),
     score: integer("score").notNull(), // 0-100
     scoreLabel: varchar("score_label", { length: 20 }).notNull(),
-    signals: text("signals").notNull(), // JSON array (stringified)
-    suggestions: text("suggestions").notNull(), // JSON array (stringified)
+    signals: jsonb("signals").notNull(), // JSON array
+    suggestions: jsonb("suggestions").notNull(), // JSON array
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

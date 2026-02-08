@@ -1,52 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { getSessionUserId, parseDateRange } from "../_helpers";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
-
-function parseDateRange(searchParams: URLSearchParams) {
-  const now = new Date();
-
-  const fromParam = searchParams.get("from");
-  const toParam = searchParams.get("to");
-
-  const defaultTo = now;
-  const defaultFrom = new Date(now);
-  defaultFrom.setDate(defaultFrom.getDate() - 30);
-
-  const fromParsed = fromParam ? new Date(fromParam) : defaultFrom;
-  const toParsed = toParam ? new Date(toParam) : defaultTo;
-
-  // Treat `to=YYYY-MM-DD` as inclusive and convert to an exclusive boundary.
-  const toExclusive =
-    toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam)
-      ? new Date(toParsed.getTime() + 24 * 60 * 60 * 1000)
-      : toParsed;
-
-  const from = Number.isNaN(fromParsed.getTime()) ? defaultFrom : fromParsed;
-  const to = Number.isNaN(toExclusive.getTime()) ? defaultTo : toExclusive;
-
-  if (from >= to) {
-    const fallbackFrom = new Date(to);
-    fallbackFrom.setDate(fallbackFrom.getDate() - 30);
-    return { from: fallbackFrom, to };
-  }
-
-  return { from, to };
-}
-
-async function getSessionUserId() {
-  const cookieStore = await cookies();
-  const sessionToken = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-
-  if (!sessionToken) return null;
-  const session = parseSessionToken(sessionToken);
-  if (!session) return null;
-
-  return session.userId;
-}
 
 type SignalRow = {
   id: string;
@@ -55,7 +12,10 @@ type SignalRow = {
   present?: boolean;
 };
 
-function safeParseJson<T>(value: string): T | null {
+function safeParseJson<T>(value: unknown): T | null {
+  if (value == null) return null;
+  if (typeof value !== "string") return value as unknown as T;
+
   try {
     return JSON.parse(value) as T;
   } catch {
@@ -138,7 +98,7 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => a[0] - b[0])
       .map(([bucketStart, count]) => ({ bucketStart, count }));
 
-    // Signal coverage + suggestion counts (derived from JSON stored in text columns)
+    // Signal coverage + suggestion counts (derived from JSON stored in jsonb columns)
     const signalMap = new Map<
       string,
       { id: string; label: string; description?: string; presentCount: number }
@@ -202,10 +162,16 @@ export async function GET(request: NextRequest) {
       topSuggestions,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
     // If the table hasn't been created/migrated yet, return a soft "not available"
     // response so the UI can hide the section.
-    if (message.toLowerCase().includes("prompt_reviews") && message.toLowerCase().includes("does not exist")) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      "message" in error &&
+      error.code === "42P01" &&
+      String(error.message).includes("prompt_reviews")
+    ) {
       return NextResponse.json({
         available: false,
         range: { from: from.toISOString(), to: to.toISOString() },
@@ -222,4 +188,3 @@ export async function GET(request: NextRequest) {
     await client.end();
   }
 }
-

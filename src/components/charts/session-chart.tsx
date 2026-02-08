@@ -22,7 +22,7 @@ interface SessionChartProps {
 export function SessionChart({ data }: SessionChartProps) {
   const formattedData = data.map((d) => ({
     ...d,
-    displayDate: new Date(d.date).toLocaleDateString("en-US", {
+    displayDate: new Date(d.date).toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
     }),
@@ -63,4 +63,3 @@ export function SessionChart({ data }: SessionChartProps) {
     </div>
   );
 }
-
