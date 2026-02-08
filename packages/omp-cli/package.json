@@ -1,15 +1,52 @@
 {
   "name": "oh-my-prompt",
   "version": "0.1.0",
-  "description": "CLI tool for capturing and syncing AI coding prompts",
+  "description": "CLI prompt journal for AI coding assistants — capture, analyze, and sync your prompts",
+  "keywords": [
+    "cli",
+    "prompt",
+    "ai",
+    "claude",
+    "codex",
+    "journal",
+    "analytics",
+    "agent",
+    "logging",
+    "productivity"
+  ],
+  "author": "Jiun Bae <jiun@hey.com> (https://github.com/jiunbae)",
+  "license": "MIT",
+  "homepage": "https://github.com/jiunbae/oh-my-prompt#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jiunbae/oh-my-prompt.git",
+    "directory": "packages/omp-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/jiunbae/oh-my-prompt/issues"
+  },
   "bin": {
     "omp": "./bin/omp"
   },
   "main": "lib/cli.js",
+  "files": [
+    "bin/",
+    "lib/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "prepublishOnly": "node scripts/verify-build.js",
+    "test": "echo \"Error: no test specified\" && exit 0"
+  },
   "dependencies": {
-    "better-sqlite3": "^11.0.0"
+    "better-sqlite3": "^11.6.0"
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ]
 }

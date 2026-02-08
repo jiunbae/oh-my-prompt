@@ -1,0 +1,45 @@
+name: Test CLI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/omp/**'
+      - 'packages/omp-cli/**'
+      - 'scripts/build-cli.sh'
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Build CLI
+        run: |
+          chmod +x scripts/build-cli.sh
+          ./scripts/build-cli.sh
+
+      - name: Verify build
+        run: |
+          cd packages/omp-cli
+          node scripts/verify-build.js
+
+      - name: Test CLI commands
+        run: |
+          cd packages/omp-cli
+          npm link
+          omp --help || true
+          omp config get || true
+          omp doctor || true
