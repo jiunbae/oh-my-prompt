@@ -21,6 +21,11 @@ function parseHistoryLine(line) {
     return null;
   }
 
+  const timestamp = entry.timestamp || entry.time || entry.created_at;
+  if (!timestamp) {
+    return null;
+  }
+
   const inputMessages =
     entry["input-messages"] || entry.input_messages || entry.input || entry.prompt;
   const outputMessage =
@@ -37,7 +42,7 @@ function parseHistoryLine(line) {
   if (!promptText && !responseText) return null;
 
   return {
-    timestamp: entry.timestamp || entry.time || entry.created_at || new Date().toISOString(),
+    timestamp,
     source: "codex",
     session_id: entry["thread-id"] || entry.thread_id || entry.session_id || "",
     project: entry.project || "",
@@ -64,16 +69,13 @@ async function importCodexHistory(config, options = {}) {
   }
 
   const lines = fs.readFileSync(historyPath, "utf-8").split("\n").filter(Boolean);
+  const parsed = lines.map(parseHistoryLine);
+  const payloads = parsed.filter(Boolean);
+
   let imported = 0;
-  let skipped = 0;
+  let skipped = parsed.length - payloads.length;
 
-  for (const line of lines) {
-    const payload = parseHistoryLine(line);
-    if (!payload) {
-      skipped += 1;
-      continue;
-    }
-
+  for (const payload of payloads) {
     if (options.dryRun) {
       imported += 1;
       continue;

@@ -103,7 +103,6 @@ function normalizePayload(payload, config) {
           role: baseRecord.role,
           prompt_text: rawPromptText,
           response_text: rawResponseText || "",
-          created_at: baseRecord.created_at,
         })
       );
 

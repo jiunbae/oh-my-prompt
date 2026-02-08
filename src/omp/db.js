@@ -193,4 +193,5 @@ module.exports = {
   openDb,
   nowIso,
   hashContent,
+  getCurrentVersion,
 };
