@@ -1,5 +1,3 @@
-# Example Gitea Actions workflow for CI/CD
-# Rename to deploy.yaml and update the environment variables
 name: Build and Deploy
 
 on:
@@ -8,9 +6,9 @@ on:
       - main
 
 env:
-  REGISTRY: your-registry.example.com  # TODO: Your container registry
+  REGISTRY: registry.jiun.dev
   IMAGE_NAME: prompt-analyzer
-  IAC_REPO: your-username/your-iac-repo  # TODO: Your IaC repository
+  IAC_REPO: jiunbae/IaC
   APP_PATH: kubernetes/apps/prompt-analyzer
 
 jobs:
@@ -18,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout app repo
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up QEMU
@@ -46,18 +44,18 @@ jobs:
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
 
-      - name: Clone IaC repo and update image tag
+      - name: Update IaC repo image tag
         run: |
           git clone https://x-access-token:${{ secrets.IAC_GITHUB_TOKEN }}@github.com/${{ env.IAC_REPO }}.git iac
           cd iac/${{ env.APP_PATH }}
           sed -i "s/newTag: .*/newTag: ${{ gitea.sha }}/" kustomization.yaml
           cat kustomization.yaml
 
-      - name: Commit and push to IaC repo
+      - name: Commit and push IaC change
         run: |
           cd iac
-          git config user.name "CI Bot"
-          git config user.email "ci@example.com"
+          git config user.name "Gitea CI"
+          git config user.email "ci@jiun.dev"
           git add ${{ env.APP_PATH }}/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore(prompt-analyzer): update image tag to ${{ gitea.sha }}"
+          git diff --staged --quiet || git commit -m "chore(oh-my-prompt): update image to ${{ gitea.sha }}"
           git push

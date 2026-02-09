@@ -17,14 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
 
-      - uses: pnpm/action-setup@v3
-        with:
-          version: 8
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build CLI
         run: |
@@ -32,9 +33,7 @@ jobs:
           ./scripts/build-cli.sh
 
       - name: Verify build
-        run: |
-          cd packages/omp-cli
-          node scripts/verify-build.js
+        run: node packages/omp-cli/scripts/verify-build.js
 
       - name: Test CLI commands
         run: |

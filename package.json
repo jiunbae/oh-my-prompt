@@ -2,6 +2,7 @@
   "name": "oh-my-prompt",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.28.0",
   "bin": {
     "omp": "bin/omp"
   },

@@ -3,11 +3,11 @@ name: Publish CLI to npm
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags (e.g., v0.1.0)
+      - 'v*.*.*'
 
 permissions:
-  contents: read
-  id-token: write  # For npm provenance
+  contents: write
+  id-token: write
 
 jobs:
   publish:
@@ -17,19 +17,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for changelog
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 8
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Extract version from tag
         id: version
@@ -49,9 +50,7 @@ jobs:
           ./scripts/build-cli.sh
 
       - name: Verify build
-        run: |
-          cd packages/omp-cli
-          node scripts/verify-build.js
+        run: node packages/omp-cli/scripts/verify-build.js
 
       - name: Create tarball (dry run)
         run: |
@@ -66,7 +65,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ steps.version.outputs.version }}

@@ -1,215 +1,388 @@
-# Oh My Prompt
+<div align="center">
 
-A self-hosted prompt journal and insight dashboard that helps you see how you prompt agents and continuously improve. Currently integrates with Claude Code logs stored in MinIO.
+<br />
 
-## Features
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/%E2%9C%A8_Oh_My_Prompt-ffffff?style=for-the-badge&labelColor=000000&color=000000&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtMTIgMyAtMS45MTIgNS44MTNhMiAyIDAgMCAxLTEuMjc1IDEuMjc1TDMgMTJsNS44MTMgMS45MTJhMiAyIDAgMCAxIDEuMjc1IDEuMjc1TDEyIDIxbDEuOTEyLTUuODEzYTIgMiAwIDAgMSAxLjI3NS0xLjI3NUwyMSAxMmwtNS44MTMtMS45MTJhMiAyIDAgMCAxLTEuMjc1LTEuMjc1TDEyIDMiLz48cGF0aCBkPSJNNSAzdjQiLz48cGF0aCBkPSJNMTkgMTd2NCIvPjxwYXRoIGQ9Ik0zIDVoNCIvPjxwYXRoIGQ9Ik0xNyAxOWg0Ii8+PC9zdmc+" />
+  <source media="(prefers-color-scheme: light)" srcset="https://img.shields.io/badge/%E2%9C%A8_Oh_My_Prompt-000000?style=for-the-badge&labelColor=ffffff&color=ffffff&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwMDAwMDAiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtMTIgMyAtMS45MTIgNS44MTNhMiAyIDAgMCAxLTEuMjc1IDEuMjc1TDMgMTJsNS44MTMgMS45MTJhMiAyIDAgMCAxIDEuMjc1IDEuMjc1TDEyIDIxbDEuOTEyLTUuODEzYTIgMiAwIDAgMSAxLjI3NS0xLjI3NUwyMSAxMmwtNS44MTMtMS45MTJhMiAyIDAgMCAxLTEuMjc1LTEuMjc1TDEyIDMiLz48cGF0aCBkPSJNNSAzdjQiLz48cGF0aCBkPSJNMTkgMTd2NCIvPjxwYXRoIGQ9Ik0zIDVoNCIvPjxwYXRoIGQ9Ik0xNyAxOWg0Ii8+PC9zdmc+" />
+  <img alt="Oh My Prompt" height="48" />
+</picture>
 
-- Prompt journal with search, filters, tags, and detail views
-- Prompt review signals (goal, context, constraints, output format, examples)
-- Insight dashboards with activity, token usage, and prompt quality trends
-- Clear improvement suggestions based on your recent prompts
-- Filter by project, prompt type, and date range
-- Multi-user support with email/password authentication
-- Admin-managed user allowlist
-- Per-user data isolation in MinIO storage
-- Real-time sync from MinIO storage
+<br />
 
-## Tech Stack
+### Your AI coding sessions, captured and analyzed.
 
-- **Frontend**: Next.js 16 (App Router), React, Tailwind CSS
-- **Backend**: Next.js API Routes, tRPC
-- **Database**: PostgreSQL with Drizzle ORM
-- **Storage**: MinIO (S3-compatible object storage)
-- **Auth**: Email/password with bcrypt, session cookies
+A self-hosted prompt journal + CLI that captures every interaction<br />with Claude Code, Codex, and more — then turns them into actionable insights.
 
-## Quick Start
+<br />
 
-### Prerequisites
+[![npm version](https://img.shields.io/npm/v/oh-my-prompt?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/oh-my-prompt)
+[![License](https://img.shields.io/github/license/jiunbae/oh-my-prompt?style=for-the-badge&color=blue)](LICENSE)
+[![Node](https://img.shields.io/node/v/oh-my-prompt?style=for-the-badge&logo=node.js&logoColor=white&color=339933)](https://nodejs.org)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org)
 
-- Node.js 22+
-- pnpm
-- Docker (for local PostgreSQL)
-- MinIO instance (or S3-compatible storage)
+<br />
 
-### Local Development
+**[Getting Started](#-getting-started)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Self-Hosting](#-self-hosting)** · **[Contributing](#-contributing)**
 
-1. Clone the repository:
+<br />
+
+<!-- Replace with actual screenshot -->
+<!-- <img src="docs/assets/dashboard-preview.png" alt="Dashboard Preview" width="800" /> -->
+
+</div>
+
+<br />
+
+## Why?
+
+You write **hundreds of prompts a day** to AI coding agents. But do you actually know which ones work?
+
+**Oh My Prompt** gives you the answer. It captures every prompt, scores its quality, and shows you patterns you'd never notice on your own.
+
+<br />
+
+<table>
+<tr>
+<td width="33%" align="center">
+
+**🎯 Capture**
+
+Shell hooks silently intercept<br/>every prompt you send
+
+</td>
+<td width="33%" align="center">
+
+**📊 Analyze**
+
+Quality scores, token usage,<br/>session patterns, trends
+
+</td>
+<td width="33%" align="center">
+
+**🔄 Sync**
+
+Local SQLite → server API<br/>Works offline, syncs when ready
+
+</td>
+</tr>
+</table>
+
+<br />
+
+## How It Works
+
+```
+  You                    CLI                     Server
+  ───                    ───                     ──────
+
+  claude "fix the bug"
+       │
+       └──── hook ────▶  omp ingest ──▶ SQLite (local)
+                              │
+                              └── omp sync ──▶ POST /api/sync/upload
+                                                      │
+                                               ┌──────┴──────┐
+                                               │  PostgreSQL  │
+                                               │  MinIO       │
+                                               │  Analytics   │
+                                               └──────────────┘
+                                                      │
+                                               prompt.jiun.dev
+                                          (dashboard, charts, insights)
+```
+
+<br />
+
+## 🚀 Getting Started
+
 ```bash
-git clone https://github.com/your-username/oh-my-prompt.git
+# Install
+npm install -g oh-my-prompt
+
+# Setup (interactive wizard)
+omp setup
+
+# Verify
+omp doctor
+```
+
+That's it. Now use Claude Code or Codex normally — prompts are captured automatically.
+
+```bash
+claude "Refactor this function to use async/await"
+#        ↑ captured silently in the background
+```
+
+<br />
+
+## 📟 CLI
+
+<details>
+<summary><b>omp setup</b> — Interactive configuration wizard</summary>
+
+```bash
+$ omp setup
+
+  ✨ Oh My Prompt Setup
+
+  ? Server URL: https://prompt.jiun.dev
+  ? API Token: ********-****-****-****-************
+  ? Device name: jiun-mbp
+  ? Install Claude Code hook? Yes
+  ? Install Codex hook? Yes
+
+  ✓ Config saved to ~/.omp/config.json
+  ✓ Database initialized
+  ✓ Claude Code hook installed
+  ✓ Codex hook installed
+  ✓ Server connection verified
+
+  You're all set! Prompts will be captured automatically.
+```
+</details>
+
+<details>
+<summary><b>omp analyze</b> — Score prompt quality</summary>
+
+```bash
+$ omp analyze abc123
+
+  Score: 85/100 (Good)
+
+  Signals:
+    ✓ Goal         Clear objective stated
+    ✓ Context      Background information provided
+    ✗ Constraints  No specific constraints
+    ✓ Output       Expected format described
+    ✗ Examples     No examples included
+
+  Suggestions:
+    → Add specific constraints or requirements
+    → Include examples of expected output
+```
+</details>
+
+<details>
+<summary><b>omp stats</b> — View statistics</summary>
+
+```bash
+$ omp stats --group-by week
+
+  Overall: 1,234 prompts · 450 avg length · 600 avg tokens
+
+  ┌──────────┬───────┬─────────┬───────────┐
+  │ Week     │ Count │ Avg Len │ Avg Tokens│
+  ├──────────┼───────┼─────────┼───────────┤
+  │ 2026-W05 │   120 │     420 │       580 │
+  │ 2026-W06 │   145 │     480 │       620 │
+  │ 2026-W07 │   198 │     510 │       650 │
+  └──────────┴───────┴─────────┴───────────┘
+```
+</details>
+
+<details>
+<summary><b>All commands</b></summary>
+
+| Command | Description |
+|:--------|:------------|
+| `omp setup` | Interactive configuration wizard |
+| `omp install [claude\|codex\|all]` | Install capture hooks |
+| `omp uninstall [claude\|codex\|all]` | Remove capture hooks |
+| `omp status` | Show config and hook status |
+| `omp doctor` | Validate setup, diagnose issues |
+| `omp sync` | Sync local prompts to server |
+| `omp sync status` | Show sync history |
+| `omp stats [--group-by day\|week]` | View statistics |
+| `omp report [--since DATE]` | Detailed text report |
+| `omp analyze <id\|--file\|--stdin>` | Prompt quality analysis |
+| `omp export [--format json\|jsonl\|csv]` | Export prompts |
+| `omp import codex-history` | Import from Codex |
+| `omp config get\|set\|validate` | Manage configuration |
+| `omp db migrate` | Run database migrations |
+
+</details>
+
+<br />
+
+## 📊 Dashboard
+
+The self-hosted web dashboard turns raw prompts into insights.
+
+<table>
+<tr>
+<td width="50%">
+
+**Prompt Journal**
+- Full-text search across all prompts
+- Filter by project, type, date, tags
+- Quality signals on every prompt
+- Markdown + syntax highlighting
+
+</td>
+<td width="50%">
+
+**Analytics**
+- Activity heatmap
+- Token usage trends
+- Quality score tracking
+- Project breakdown
+- Session analysis
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="50%">
+
+**Multi-User**
+- Email/password auth
+- Admin-managed allowlist
+- Per-user data isolation
+- Individual API tokens
+
+</td>
+<td width="50%">
+
+**Security**
+- No client credentials needed
+- bcrypt password hashing
+- httpOnly secure cookies
+- Non-root container
+
+</td>
+</tr>
+</table>
+
+<!-- Screenshot gallery — uncomment when screenshots are available
+<details>
+<summary><b>Screenshots</b></summary>
+<br />
+<img src="docs/assets/prompts-list.png" width="400" /> <img src="docs/assets/analytics.png" width="400" />
+<img src="docs/assets/prompt-detail.png" width="400" /> <img src="docs/assets/quality-score.png" width="400" />
+</details>
+-->
+
+<br />
+
+## 🏗 Self-Hosting
+
+### Quick Start
+
+```bash
+git clone https://github.com/jiunbae/oh-my-prompt.git
 cd oh-my-prompt
+
+docker compose up -d          # Start PostgreSQL
+pnpm install && pnpm db:push  # Install deps + migrate
+pnpm dev                      # http://localhost:3000
 ```
-
-2. Install dependencies:
-```bash
-pnpm install
-```
-
-3. Set up environment variables:
-```bash
-cp .env.example .env.local
-# Edit .env.local with your configuration
-```
-
-4. Start PostgreSQL:
-```bash
-docker-compose up -d
-```
-
-5. Run database migrations:
-```bash
-pnpm db:push
-```
-
-6. Create initial admin user:
-```bash
-ADMIN_EMAIL=admin@example.com ADMIN_NAME="Admin" npx tsx scripts/migrate-to-multiuser.ts
-```
-
-7. Start the development server:
-```bash
-pnpm dev
-```
-
-8. Open http://localhost:3000
-
-## Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `MINIO_ENDPOINT` | MinIO server endpoint (without protocol) | Yes |
-| `MINIO_ACCESS_KEY` | MinIO access key | Yes |
-| `MINIO_SECRET_KEY` | MinIO secret key | Yes |
-| `MINIO_BUCKET` | MinIO bucket name | Yes |
-| `MINIO_USE_SSL` | Use SSL for MinIO connection | No (default: true) |
-
-## Project Structure
-
-```
-src/
-├── app/                    # Next.js App Router pages
-│   ├── (dashboard)/       # Protected dashboard routes
-│   │   ├── admin/         # Admin panel (allowlist)
-│   │   ├── analytics/     # Insights page
-│   │   ├── prompts/       # Prompts list and detail
-│   │   └── settings/      # Settings page
-│   ├── api/               # API routes
-│   │   ├── admin/         # Admin API (allowlist management)
-│   │   ├── auth/          # Auth API (login, register, logout)
-│   │   └── sync/          # MinIO sync API
-│   ├── login/             # Login page
-│   └── register/          # Registration page
-├── components/            # React components
-├── contexts/              # React contexts (user state)
-├── db/                    # Database schema
-├── lib/                   # Utility libraries
-├── services/              # Business logic (sync, etc.)
-└── middleware.ts          # Auth middleware
-```
-
-## Multi-User System
-
-### User Flow
-
-1. **Admin adds email to allowlist** via Admin Panel (`/admin/allowlist`)
-2. **User registers** at `/register` with their allowed email
-3. **User logs in** at `/login`
-4. **User sees only their own data** (prompts, analytics)
-
-### Data Isolation
-
-Each user has a unique token that prefixes their MinIO path:
-```
-bucket/
-  {user_token}/
-    2024/
-      01/
-        15/
-          {hash}.json
-```
-
-### Syncing Prompts
-
-Users can sync their Claude Code prompts (current supported source) using the backup script:
-```bash
-USER_TOKEN=your-user-token node scripts/backup-claude-sessions.mjs
-```
-
-Or trigger sync via API:
-```bash
-curl -X POST https://your-domain/api/sync \
-  -H "X-User-Token: your-user-token" \
-  -H "Content-Type: application/json" \
-  -d '{"type": "full"}'
-```
-
-## Deployment
 
 ### Docker
 
 ```bash
-# Build
-docker build -t oh-my-prompt:latest .
+docker build -t oh-my-prompt .
 
-# Run
 docker run -p 3000:3000 \
-  -e DATABASE_URL=postgresql://user:pass@host:5432/db \
-  -e MINIO_ENDPOINT=minio.example.com \
-  -e MINIO_ACCESS_KEY=your-key \
-  -e MINIO_SECRET_KEY=your-secret \
-  -e MINIO_BUCKET=oh-my-prompt \
-  oh-my-prompt:latest
+  -e DATABASE_URL=postgresql://user:pass@host:5432/prompts \
+  oh-my-prompt
 ```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|:---------|:--------:|:------------|
+| `DATABASE_URL` | **Yes** | PostgreSQL connection string |
+| `MINIO_ENDPOINT` | No | MinIO/S3 endpoint (without protocol) |
+| `MINIO_ACCESS_KEY` | No | MinIO access key |
+| `MINIO_SECRET_KEY` | No | MinIO secret key |
+| `MINIO_BUCKET` | No | Bucket name (default: `oh-my-prompt`) |
+| `MINIO_USE_SSL` | No | Use SSL (default: `true`) |
 
 ### Kubernetes
 
-Example manifests are provided in `k8s/`. Update the placeholder values:
-- `k8s/deployment.yaml` - Container image
-- `k8s/configmap.yaml` - MinIO endpoint
-- `k8s/ingress.yaml` - Your domain
+See the [IaC manifests](https://github.com/jiunbae/IaC/tree/main/kubernetes/apps/oh-my-prompt) for production deployment with ArgoCD.
 
-Create secrets for sensitive values:
+### Connect CLI → Server
+
 ```bash
-kubectl create secret generic oh-my-prompt-secrets \
-  --from-literal=DATABASE_URL=postgresql://... \
-  --from-literal=MINIO_ACCESS_KEY=... \
-  --from-literal=MINIO_SECRET_KEY=...
+omp config set server.url https://your-domain.com
+omp config set server.token YOUR_TOKEN
+omp sync  # verify connection
 ```
 
-## API Endpoints
+<br />
 
-### Authentication
+## 🏛 Architecture
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/auth/register` | POST | Register new user (requires allowlisted email) |
-| `/api/auth/login` | POST | Login with email/password |
-| `/api/auth/logout` | POST | Logout (clear session) |
-| `/api/auth/me` | GET | Get current user info |
+```
+oh-my-prompt/
+├── src/app/                    Next.js 16 App Router
+│   ├── (dashboard)/            Protected pages (prompts, analytics, admin)
+│   └── api/                    REST API (auth, sync, analytics)
+├── src/components/             React + Recharts + Shadcn/ui
+├── src/db/                     Drizzle ORM schema (PostgreSQL)
+├── src/services/               Business logic (upload, sync, classify)
+├── src/omp/                    CLI source (Node.js + SQLite)
+├── packages/omp-cli/           Standalone npm package
+└── .gitea/workflows/           Gitea CI/CD (Docker build + k8s deploy)
+```
 
-### Admin
+<table>
+<tr>
+<td><b>Frontend</b></td>
+<td>Next.js 16 · React 19 · Tailwind CSS 4 · Recharts</td>
+</tr>
+<tr>
+<td><b>Backend</b></td>
+<td>Next.js API Routes · tRPC · Zod</td>
+</tr>
+<tr>
+<td><b>Database</b></td>
+<td>PostgreSQL · Drizzle ORM</td>
+</tr>
+<tr>
+<td><b>Storage</b></td>
+<td>MinIO (S3-compatible)</td>
+</tr>
+<tr>
+<td><b>CLI</b></td>
+<td>Node.js · better-sqlite3 · zero runtime deps</td>
+</tr>
+<tr>
+<td><b>Infra</b></td>
+<td>Docker · Kubernetes · ArgoCD · Gitea CI</td>
+</tr>
+</table>
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/admin/allowlist` | GET | List allowed emails |
-| `/api/admin/allowlist` | POST | Add email to allowlist |
-| `/api/admin/allowlist` | DELETE | Remove email from allowlist |
+<br />
 
-### Sync
+## 🤝 Contributing
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sync` | POST | Trigger MinIO sync (supports `X-User-Token` header) |
+```bash
+git clone https://github.com/jiunbae/oh-my-prompt.git
+cd oh-my-prompt
+pnpm install
+pnpm dev          # Web dashboard
+pnpm build:cli    # Build CLI package
+```
 
-## Security Notes
+1. Fork → 2. Branch (`feat/thing`) → 3. Commit → 4. PR
 
-- Passwords hashed with bcrypt (12 rounds)
-- Session cookies: `httpOnly`, `secure` (production), `sameSite: lax`
-- Database queries use parameterized statements (Drizzle ORM)
-- User data isolated by user_id in all queries
-- Container runs as non-root user
-- Admin routes protected by isAdmin flag
+<br />
 
-## License
+## 📄 License
 
-MIT
+[MIT](LICENSE) — [Jiun Bae](https://github.com/jiunbae)
+
+<div align="center">
+
+<br />
+
+**[GitHub](https://github.com/jiunbae/oh-my-prompt)** · **[npm](https://www.npmjs.com/package/oh-my-prompt)** · **[Issues](https://github.com/jiunbae/oh-my-prompt/issues)**
+
+<sub>Built for developers who talk to AI all day.</sub>
+
+</div>
