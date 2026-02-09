@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" fill="none">
+  <defs>
+    <linearGradient id="sparkle-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="50%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="prompt-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6d28d9"/>
+      <stop offset="100%" style="stop-color:#4f46e5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Sparkle icon -->
+  <g transform="translate(20, 16)">
+    <!-- Main sparkle -->
+    <path d="M64 8 L56.5 38.5 C55.5 42.5 52.5 45.5 48.5 46.5 L18 54 L48.5 61.5 C52.5 62.5 55.5 65.5 56.5 69.5 L64 100 L71.5 69.5 C72.5 65.5 75.5 62.5 79.5 61.5 L110 54 L79.5 46.5 C75.5 45.5 72.5 42.5 71.5 38.5 Z" fill="url(#sparkle-grad)"/>
+    <!-- Small sparkle top-right -->
+    <path d="M100 4 L97 15 C96.6 16.6 95.4 17.8 93.8 18.2 L83 21 L93.8 23.8 C95.4 24.2 96.6 25.4 97 27 L100 38 L103 27 C103.4 25.4 104.6 24.2 106.2 23.8 L117 21 L106.2 18.2 C104.6 17.8 103.4 16.6 103 15 Z" fill="url(#sparkle-grad)" opacity="0.7"/>
+    <!-- Small sparkle bottom-left -->
+    <path d="M24 72 L21.5 81 C21.2 82.2 20.2 83.2 19 83.5 L10 86 L19 88.5 C20.2 88.8 21.2 89.8 21.5 91 L24 100 L26.5 91 C26.8 89.8 27.8 88.8 29 88.5 L38 86 L29 83.5 C27.8 83.2 26.8 82.2 26.5 81 Z" fill="url(#sparkle-grad)" opacity="0.5"/>
+  </g>
+
+  <!-- Terminal prompt bracket -->
+  <g transform="translate(148, 32)">
+    <rect x="0" y="0" width="472" height="96" rx="12" fill="#eef2ff" opacity="0.6"/>
+    <rect x="0" y="0" width="472" height="96" rx="12" stroke="url(#sparkle-grad)" stroke-width="1.5" fill="none" opacity="0.3"/>
+
+    <!-- Prompt chevron -->
+    <text x="20" y="62" font-family="ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace" font-size="36" font-weight="700" fill="#6366f1">&#x276F;</text>
+
+    <!-- "Oh My Prompt" text -->
+    <text x="52" y="62" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="42" font-weight="800" letter-spacing="-0.5">
+      <tspan fill="#1e1b4b">Oh My </tspan><tspan fill="url(#prompt-grad)">Prompt</tspan>
+    </text>
+
+    <!-- Cursor blink -->
+    <rect x="372" y="32" width="3" height="36" rx="1" fill="#6366f1" opacity="0.8">
+      <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.2s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+</svg>

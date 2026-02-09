@@ -3,9 +3,9 @@
 <br />
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/%E2%9C%A8_Oh_My_Prompt-ffffff?style=for-the-badge&labelColor=000000&color=000000&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmZmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtMTIgMyAtMS45MTIgNS44MTNhMiAyIDAgMCAxLTEuMjc1IDEuMjc1TDMgMTJsNS44MTMgMS45MTJhMiAyIDAgMCAxIDEuMjc1IDEuMjc1TDEyIDIxbDEuOTEyLTUuODEzYTIgMiAwIDAgMSAxLjI3NS0xLjI3NUwyMSAxMmwtNS44MTMtMS45MTJhMiAyIDAgMCAxLTEuMjc1LTEuMjc1TDEyIDMiLz48cGF0aCBkPSJNNSAzdjQiLz48cGF0aCBkPSJNMTkgMTd2NCIvPjxwYXRoIGQ9Ik0zIDVoNCIvPjxwYXRoIGQ9Ik0xNyAxOWg0Ii8+PC9zdmc+" />
-  <source media="(prefers-color-scheme: light)" srcset="https://img.shields.io/badge/%E2%9C%A8_Oh_My_Prompt-000000?style=for-the-badge&labelColor=ffffff&color=ffffff&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMwMDAwMDAiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtMTIgMyAtMS45MTIgNS44MTNhMiAyIDAgMCAxLTEuMjc1IDEuMjc1TDMgMTJsNS44MTMgMS45MTJhMiAyIDAgMCAxIDEuMjc1IDEuMjc1TDEyIDIxbDEuOTEyLTUuODEzYTIgMiAwIDAgMSAxLjI3NS0xLjI3NUwyMSAxMmwtNS44MTMtMS45MTJhMiAyIDAgMCAxLTEuMjc1LTEuMjc1TDEyIDMiLz48cGF0aCBkPSJNNSAzdjQiLz48cGF0aCBkPSJNMTkgMTd2NCIvPjxwYXRoIGQ9Ik0zIDVoNCIvPjxwYXRoIGQ9Ik0xNyAxOWg0Ii8+PC9zdmc+" />
-  <img alt="Oh My Prompt" height="48" />
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg" />
+  <img alt="Oh My Prompt" src="docs/assets/logo-dark.svg" width="540" />
 </picture>
 
 <br />
@@ -88,7 +88,7 @@ Local SQLite → server API<br/>Works offline, syncs when ready
                                                │  Analytics   │
                                                └──────────────┘
                                                       │
-                                               prompt.jiun.dev
+                                               your-server.com
                                           (dashboard, charts, insights)
 ```
 
@@ -126,7 +126,7 @@ $ omp setup
 
   ✨ Oh My Prompt Setup
 
-  ? Server URL: https://prompt.jiun.dev
+  ? Server URL: https://your-server.com
   ? API Token: ********-****-****-****-************
   ? Device name: jiun-mbp
   ? Install Claude Code hook? Yes
