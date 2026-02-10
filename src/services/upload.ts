@@ -1,4 +1,3 @@
-import { getMinioClient, PROMPTS_BUCKET, isMinioConfigured } from "@/lib/minio";
 import { logger } from "@/lib/logger";
 import { env } from "@/env";
 import { classifyPrompt, updateDailyAnalytics } from "./sync";
@@ -38,25 +37,13 @@ function sanitizeEventId(eventId: string): string {
   return eventId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-function buildMinioKey(userToken: string, createdAt: string, eventId: string): string {
+function buildEventKey(userToken: string, createdAt: string, eventId: string): string {
   const date = new Date(createdAt);
   const yyyy = date.getUTCFullYear();
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(date.getUTCDate()).padStart(2, "0");
   const safeId = sanitizeEventId(eventId);
   return `${userToken}/${yyyy}/${mm}/${dd}/${safeId}.json`;
-}
-
-function recordToMinioFormat(record: UploadRecord) {
-  return {
-    timestamp: record.created_at,
-    working_directory: record.cwd || "unknown",
-    prompt_length: record.prompt_length,
-    prompt: record.prompt_text,
-    response: record.response_text || undefined,
-    response_length: record.response_length || undefined,
-    type: record.response_text ? undefined : "input",
-  };
 }
 
 export async function processUpload(
@@ -72,7 +59,7 @@ export async function processUpload(
 
   const postgres = (await import("postgres")).default;
   const { drizzle } = await import("drizzle-orm/postgres-js");
-  const { eq, sql, inArray } = await import("drizzle-orm");
+  const { sql, inArray } = await import("drizzle-orm");
   const schema = await import("@/db/schema");
 
   const client = postgres(env.DATABASE_URL);
@@ -117,19 +104,10 @@ export async function processUpload(
         continue;
       }
 
-      const minioKey = buildMinioKey(userToken, record.created_at, record.event_id);
+      const eventKey = buildEventKey(userToken, record.created_at, record.event_id);
       const dateStr = new Date(record.created_at).toISOString().split("T")[0];
 
       try {
-        // Write to MinIO
-        if (isMinioConfigured()) {
-          const minioData = JSON.stringify(recordToMinioFormat(record));
-          const buffer = Buffer.from(minioData, "utf-8");
-          await getMinioClient().putObject(PROMPTS_BUCKET, minioKey, buffer, buffer.length, {
-            "Content-Type": "application/json",
-          });
-        }
-
         // Insert into PostgreSQL
         const promptType = record.prompt_text.includes("<task-notification>")
           ? "task_notification"
@@ -140,7 +118,7 @@ export async function processUpload(
         const [inserted] = await db
           .insert(schema.prompts)
           .values({
-            minioKey,
+            eventKey,
             timestamp: new Date(record.created_at),
             workingDirectory: record.cwd || "unknown",
             promptLength: record.prompt_length,
@@ -156,7 +134,7 @@ export async function processUpload(
             wordCountResponse: record.word_count_response || undefined,
             searchVector: sql`to_tsvector('english', ${record.prompt_text} || ' ' || ${record.response_text ?? ""})`,
           })
-          .onConflictDoNothing({ target: schema.prompts.minioKey })
+          .onConflictDoNothing({ target: schema.prompts.eventKey })
           .returning();
 
         if (!inserted) {

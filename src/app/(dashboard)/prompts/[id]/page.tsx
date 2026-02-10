@@ -109,7 +109,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
   return (
     <PromptDetail
       id={prompt.id}
-      sessionId={prompt.minioKey}
+      sessionId={prompt.eventKey}
       timestamp={prompt.timestamp}
       projectName={prompt.projectName}
       workingDirectory={prompt.workingDirectory}
