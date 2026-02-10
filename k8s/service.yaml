@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: oh-my-prompt-service
-  namespace: oh-my-prompt
+  name: prompt-analyzer-service
+  namespace: prompt-analyzer
 spec:
   selector:
-    app: oh-my-prompt
+    app: prompt-analyzer
   ports:
     - protocol: TCP
       port: 80
@@ -16,7 +16,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: prompt-db-service
-  namespace: oh-my-prompt
+  namespace: prompt-analyzer
 spec:
   selector:
     app: prompt-db
@@ -24,4 +24,18 @@ spec:
     - protocol: TCP
       port: 5432
       targetPort: 5432
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: prompt-analyzer
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
   type: ClusterIP

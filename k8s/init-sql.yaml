@@ -2,10 +2,37 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: init-sql
-  namespace: oh-my-prompt
+  namespace: prompt-analyzer
 data:
   init.sql: |
-    -- Create prompts table
+    -- NOTE: This is a reference schema only.
+    -- Actual migrations are handled by drizzle via docker-entrypoint.sh
+    -- This file documents the final schema after all migrations (0000-0002).
+
+    -- Users table
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email VARCHAR(255) NOT NULL UNIQUE,
+      password_hash VARCHAR(255) NOT NULL,
+      token UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+      name VARCHAR(100),
+      is_admin BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_login_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    CREATE INDEX IF NOT EXISTS idx_users_token ON users(token);
+
+    -- Allowed emails table (admin allowlist)
+    CREATE TABLE IF NOT EXISTS allowed_emails (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email VARCHAR(255) NOT NULL UNIQUE,
+      added_by UUID REFERENCES users(id),
+      added_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    -- Prompts table
     CREATE TABLE IF NOT EXISTS prompts (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       event_key VARCHAR(255) NOT NULL UNIQUE,
@@ -13,21 +40,32 @@ data:
       working_directory VARCHAR(500),
       prompt_length INTEGER NOT NULL,
       prompt_text TEXT NOT NULL,
+      response_text TEXT,
+      response_length INTEGER,
       project_name VARCHAR(255),
       prompt_type VARCHAR(50),
+      source VARCHAR(50),
+      session_id VARCHAR(255),
+      device_name VARCHAR(255),
+      user_id UUID REFERENCES users(id),
       token_estimate INTEGER,
       word_count INTEGER,
+      token_estimate_response INTEGER,
+      word_count_response INTEGER,
       synced_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      search_vector tsvector
     );
 
-    -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_prompts_timestamp ON prompts(timestamp);
     CREATE INDEX IF NOT EXISTS idx_prompts_project ON prompts(project_name);
     CREATE INDEX IF NOT EXISTS idx_prompts_type ON prompts(prompt_type);
     CREATE INDEX IF NOT EXISTS idx_prompts_event_key ON prompts(event_key);
+    CREATE INDEX IF NOT EXISTS idx_prompts_user ON prompts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_prompts_session_id ON prompts(session_id);
+    CREATE INDEX IF NOT EXISTS idx_prompts_search_vector ON prompts USING gin(search_vector);
 
-    -- Create tags table
+    -- Tags table
     CREATE TABLE IF NOT EXISTS tags (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       name VARCHAR(100) NOT NULL UNIQUE,
@@ -35,14 +73,14 @@ data:
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Create prompt_tags junction table
+    -- Prompt tags junction table
     CREATE TABLE IF NOT EXISTS prompt_tags (
       prompt_id UUID NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
       tag_id UUID NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
       PRIMARY KEY (prompt_id, tag_id)
     );
 
-    -- Create analytics_daily table
+    -- Analytics daily table
     CREATE TABLE IF NOT EXISTS analytics_daily (
       date DATE PRIMARY KEY,
       prompt_count INTEGER DEFAULT 0,

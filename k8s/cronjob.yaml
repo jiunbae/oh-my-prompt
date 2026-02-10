@@ -1,11 +1,11 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: oh-my-prompt-sync
-  namespace: oh-my-prompt
+  name: prompt-analyzer-sync
+  namespace: prompt-analyzer
 spec:
-  schedule: "*/10 * * * *"  # Every 10 minutes (configurable)
-  concurrencyPolicy: Forbid  # Don't run if previous job still running
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
@@ -20,14 +20,14 @@ spec:
             - name: SYNC_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: oh-my-prompt-secrets
+                  name: prompt-analyzer-secrets
                   key: SYNC_TOKEN
             command:
             - /bin/sh
             - -c
             - |
               curl -X POST \
-                "http://oh-my-prompt-service.oh-my-prompt.svc.cluster.local/api/sync" \
+                "http://prompt-analyzer-service.prompt-analyzer.svc.cluster.local/api/sync" \
                 -H "Content-Type: application/json" \
                 -H "X-User-Token: ${SYNC_TOKEN}" \
                 -d '{"type":"full","syncType":"cron"}' \

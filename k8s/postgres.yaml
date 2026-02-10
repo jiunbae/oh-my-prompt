@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: prompt-db
-  namespace: oh-my-prompt
+  namespace: prompt-analyzer
   labels:
     app: prompt-db
 spec:
@@ -22,14 +22,11 @@ spec:
             - containerPort: 5432
           env:
             - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: prompt-db-secret
-                  key: POSTGRES_USER
+              value: "prompt"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: prompt-db-secret
+                  name: prompt-analyzer-secrets
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: "prompts"
@@ -52,7 +49,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: prompt-db-pvc
-  namespace: oh-my-prompt
+  namespace: prompt-analyzer
 spec:
   accessModes:
     - ReadWriteOnce

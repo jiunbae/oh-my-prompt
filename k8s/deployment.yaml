@@ -1,30 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: oh-my-prompt
-  namespace: oh-my-prompt
+  name: prompt-analyzer
+  namespace: prompt-analyzer
   labels:
-    app: oh-my-prompt
+    app: prompt-analyzer
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: oh-my-prompt
+      app: prompt-analyzer
   template:
     metadata:
       labels:
-        app: oh-my-prompt
+        app: prompt-analyzer
     spec:
+      imagePullSecrets:
+        - name: registry-creds
       containers:
-        - name: oh-my-prompt
-          image: your-registry.example.com/oh-my-prompt:latest  # TODO: Replace with your registry
+        - name: prompt-analyzer
+          image: registry.jiun.dev/prompt-analyzer:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 3000
           envFrom:
             - configMapRef:
-                name: oh-my-prompt-config
+                name: prompt-analyzer-config
             - secretRef:
-                name: oh-my-prompt-secrets
+                name: prompt-analyzer-secrets
           resources:
             requests:
               memory: "256Mi"
@@ -36,11 +39,11 @@ spec:
             httpGet:
               path: /
               port: 3000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
             periodSeconds: 30
           readinessProbe:
             httpGet:
               path: /
               port: 3000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10

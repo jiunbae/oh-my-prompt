@@ -1,24 +1,24 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: oh-my-prompt-ingress
-  namespace: oh-my-prompt
+  name: prompt-analyzer-ingress
+  namespace: prompt-analyzer
   annotations:
-    kubernetes.io/ingress.class: nginx
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
+  ingressClassName: traefik
   tls:
     - hosts:
-        - prompt.example.com  # TODO: Replace with your domain
-      secretName: oh-my-prompt-tls
+        - prompt.jiun.dev
+      secretName: prompt-analyzer-tls
   rules:
-    - host: prompt.example.com  # TODO: Replace with your domain
+    - host: prompt.jiun.dev
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: oh-my-prompt-service
+                name: prompt-analyzer-service
                 port:
                   number: 80
