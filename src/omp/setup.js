@@ -158,6 +158,30 @@ function normalizeUrl(url) {
   return url.replace(/\/$/, "");
 }
 
+async function cliLogin(serverUrl, email, password, autoRegister = false, name = undefined) {
+  const url = `${serverUrl}/api/auth/cli-login`;
+  const body = JSON.stringify({ email, password, autoRegister, name });
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+
+  const data = await res.json();
+
+  if (res.ok && data.success) {
+    return { ok: true, token: data.token, registered: !!data.registered, user: data.user };
+  }
+
+  return {
+    ok: false,
+    status: res.status,
+    code: data.code || null,
+    error: data.error || "Authentication failed",
+  };
+}
+
 // --- Main wizard ---
 
 async function runSetup(options) {
@@ -222,20 +246,124 @@ async function runSetup(options) {
     }
     config.server.url = serverUrl;
 
-    // --- Step 2: Token ---
+    // --- Step 2: Authentication ---
     const existingToken = config.server.token;
     let token;
     if (options.token) {
       token = options.token;
     } else if (interactive) {
-      printStep(output, 2, totalSteps, "Server Token");
-      output.write("  Paste your authentication token (will not be echoed).\n");
-      token = await prompter.askMasked("Token", existingToken ? true : false);
-      if (!token && existingToken) {
-        token = existingToken;
-        printResult(output, "->", "Keeping existing token.");
+      printStep(output, 2, totalSteps, "Authentication");
+      output.write("  How would you like to authenticate?\n");
+      output.write("    1. Login with email & password (recommended)\n");
+      output.write("    2. Paste existing token\n");
+      const authChoice = await prompter.ask("Choice", "1");
+
+      if (authChoice === "1") {
+        // Login flow - ask email first
+        const email = await prompter.ask("Email");
+        if (!email) {
+          output.write("  Email is required.\n\n");
+          result.ok = false;
+          return result;
+        }
+
+        // First, try login with password
+        const password = await prompter.askMasked("Password (press Enter if new account)");
+
+        if (password) {
+          // Existing account - try to login
+          output.write("  Authenticating... ");
+          const loginResult = await cliLogin(serverUrl, email, password);
+
+          if (loginResult.ok) {
+            token = loginResult.token;
+            output.write("OK\n");
+            printResult(output, "->", `Logged in as ${loginResult.user.email}`);
+            output.write("\n");
+          } else if (loginResult.code === "USER_NOT_FOUND") {
+            // Account doesn't exist - offer to register with this password
+            output.write("account not found.\n");
+            const doRegister = await prompter.confirm("Create a new account with this email?", true);
+            if (doRegister) {
+              let regPassword = password;
+              if (regPassword.length < 8) {
+                output.write("  Password must be at least 8 characters.\n");
+                regPassword = await prompter.askMasked("Password (min 8 chars)");
+              }
+              const confirmPw = await prompter.askMasked("Confirm password");
+              if (regPassword !== confirmPw) {
+                output.write("  Passwords do not match.\n\n");
+                result.ok = false;
+                return result;
+              }
+              const regName = await prompter.ask("Name (optional)");
+              output.write("  Registering... ");
+              const regResult = await cliLogin(serverUrl, email, regPassword, true, regName || undefined);
+              if (regResult.ok) {
+                token = regResult.token;
+                output.write("OK\n");
+                printResult(output, "->", `Account created for ${regResult.user.email}`);
+                output.write("\n");
+              } else {
+                output.write("FAILED\n");
+                printResult(output, "!", regResult.error);
+                output.write("\n");
+                result.ok = false;
+                return result;
+              }
+            } else {
+              output.write("\n");
+              result.ok = false;
+              return result;
+            }
+          } else {
+            output.write("FAILED\n");
+            printResult(output, "!", loginResult.error);
+            output.write("\n");
+            result.ok = false;
+            return result;
+          }
+        } else {
+          // No password entered - new account registration flow
+          output.write("\n  Creating a new account for " + email + "\n");
+          const regPassword = await prompter.askMasked("Set password (min 8 chars)");
+          if (!regPassword || regPassword.length < 8) {
+            output.write("  Password must be at least 8 characters.\n\n");
+            result.ok = false;
+            return result;
+          }
+          const confirmPw = await prompter.askMasked("Confirm password");
+          if (regPassword !== confirmPw) {
+            output.write("  Passwords do not match.\n\n");
+            result.ok = false;
+            return result;
+          }
+          const regName = await prompter.ask("Name (optional)");
+          output.write("  Registering... ");
+          const regResult = await cliLogin(serverUrl, email, regPassword, true, regName || undefined);
+          if (regResult.ok) {
+            token = regResult.token;
+            output.write("OK\n");
+            printResult(output, "->", `Account created for ${regResult.user.email}`);
+            output.write("\n");
+          } else {
+            output.write("FAILED\n");
+            printResult(output, "!", regResult.error);
+            output.write("\n");
+            result.ok = false;
+            return result;
+          }
+        }
+      } else {
+        // Manual token paste (original flow)
+        output.write("  Paste your authentication token (will not be echoed).\n");
+        token = await prompter.askMasked("Token", existingToken ? true : false);
+        if (!token && existingToken) {
+          token = existingToken;
+          printResult(output, "->", "Keeping existing token.");
+        }
+        output.write("\n");
       }
-      output.write("\n");
     } else {
       token = existingToken;
     }

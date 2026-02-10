@@ -4,21 +4,32 @@ const { openDb, nowIso } = require("./db");
 const { createSyncLog, finishSyncLog, getSyncState, updateSyncState, getDeviceId, getUserToken } = require("./sync-log");
 
 function fetchRows(db, since, lastId) {
-  const params = [];
-  let whereClause = "";
-  if (since) {
-    if (lastId) {
-      whereClause = "WHERE created_at > ? OR (created_at = ? AND id > ?)";
-      const iso = new Date(since).toISOString();
-      params.push(iso, iso, lastId);
-    } else {
-      whereClause = "WHERE created_at > ?";
-      params.push(new Date(since).toISOString());
-    }
+  if (!since) {
+    return db
+      .prepare("SELECT * FROM prompts ORDER BY created_at ASC, id ASC")
+      .all();
+  }
+
+  const iso = new Date(since).toISOString();
+  // Fetch new rows OR rows updated after last sync (e.g. response added later)
+  if (lastId) {
+    return db
+      .prepare(
+        `SELECT * FROM prompts
+         WHERE (created_at > ? OR (created_at = ? AND id > ?))
+            OR (updated_at > ? AND response_text IS NOT NULL AND created_at <= ?)
+         ORDER BY created_at ASC, id ASC`
+      )
+      .all(iso, iso, lastId, iso, iso);
   }
   return db
-    .prepare(`SELECT * FROM prompts ${whereClause} ORDER BY created_at ASC, id ASC`)
-    .all(...params);
+    .prepare(
+      `SELECT * FROM prompts
+       WHERE created_at > ?
+          OR (updated_at > ? AND response_text IS NOT NULL AND created_at <= ?)
+       ORDER BY created_at ASC, id ASC`
+    )
+    .all(iso, iso, iso);
 }
 
 function rowToUploadRecord(row) {

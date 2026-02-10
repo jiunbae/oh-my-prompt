@@ -63,7 +63,7 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle>API Token</CardTitle>
             <CardDescription>
-              Your personal token for MinIO uploads and prompt capture hooks (Claude Code supported)
+              Your personal token for prompt sync and capture hooks (Claude Code supported)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -115,16 +115,23 @@ export default function SettingsPage() {
                   </Button>
                 </div>
                 <div className="bg-zinc-800/50 rounded-lg p-4 text-sm text-zinc-400">
-                  <p className="font-medium text-zinc-300 mb-2">Prompt Capture Hook (Claude Code)</p>
+                  <p className="font-medium text-zinc-300 mb-2">Quick Setup (Recommended)</p>
                   <p className="mb-2">
-                    Use this token when configuring your prompt capture hook to upload prompts:
+                    Run the CLI setup wizard to automatically configure your prompt capture hook:
                   </p>
                   <pre className="bg-zinc-900 p-3 rounded text-xs overflow-x-auto">
-{`# In your prompt capture hook script (Claude Code):
-export OH_MY_PROMPT_TOKEN="${user.token}"
-export OH_MY_PROMPT_ENDPOINT="${minioConfig?.endpoint || "loading..."}"
-export OH_MY_PROMPT_BUCKET="${minioConfig?.bucket || "loading..."}"`}
+{`omp setup`}
                   </pre>
+                  {minioConfig?.endpoint && (
+                    <>
+                      <p className="font-medium text-zinc-300 mb-2 mt-4">Manual Configuration</p>
+                      <pre className="bg-zinc-900 p-3 rounded text-xs overflow-x-auto">
+{`export OH_MY_PROMPT_TOKEN="${user.token}"
+export OH_MY_PROMPT_ENDPOINT="${minioConfig.endpoint}"
+export OH_MY_PROMPT_BUCKET="${minioConfig.bucket}"`}
+                      </pre>
+                    </>
+                  )}
                 </div>
 
                 {/* Regenerate Token */}
@@ -187,7 +194,7 @@ export OH_MY_PROMPT_BUCKET="${minioConfig?.bucket || "loading..."}"`}
           <CardHeader>
             <CardTitle>Data Sync</CardTitle>
             <CardDescription>
-              Sync prompts from MinIO storage to the database
+              Sync prompts to the server
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

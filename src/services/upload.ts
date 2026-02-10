@@ -1,7 +1,7 @@
 import { getMinioClient, PROMPTS_BUCKET, isMinioConfigured } from "@/lib/minio";
 import { logger } from "@/lib/logger";
 import { env } from "@/env";
-import { classifyPrompt, updateDailyAnalytics } from "./sync";
+import { updateDailyAnalytics } from "./sync";
 
 export interface UploadRecord {
   event_id: string;
@@ -63,6 +63,7 @@ export async function processUpload(
   records: UploadRecord[],
   userId: string,
   userToken: string,
+  deviceId?: string,
 ): Promise<UploadResult> {
   let accepted = 0;
   let duplicates = 0;
@@ -72,44 +73,13 @@ export async function processUpload(
 
   const postgres = (await import("postgres")).default;
   const { drizzle } = await import("drizzle-orm/postgres-js");
-  const { eq, sql, inArray } = await import("drizzle-orm");
+  const { eq, sql } = await import("drizzle-orm");
   const schema = await import("@/db/schema");
 
   const client = postgres(env.DATABASE_URL);
   const db = drizzle(client, { schema });
 
   try {
-    // Pre-build tag cache: collect all unique tags, batch-fetch/insert them
-    const allTagNames = new Set<string>();
-    for (const record of records) {
-      if (record.prompt_text) {
-        for (const tag of classifyPrompt(record.prompt_text)) {
-          allTagNames.add(tag);
-        }
-      }
-    }
-
-    const tagCache = new Map<string, string>();
-    if (allTagNames.size > 0) {
-      const tagNameArray = [...allTagNames];
-
-      // Insert all tags (ignoring conflicts for existing ones)
-      await db
-        .insert(schema.tags)
-        .values(tagNameArray.map((name) => ({ name })))
-        .onConflictDoNothing();
-
-      // Fetch all required tags in a single query
-      const allTags = await db
-        .select()
-        .from(schema.tags)
-        .where(inArray(schema.tags.name, tagNameArray));
-
-      for (const tag of allTags) {
-        tagCache.set(tag.name, tag.id);
-      }
-    }
-
     for (const record of records) {
       if (!record.event_id || !record.created_at || !record.prompt_text) {
         rejected++;
@@ -121,13 +91,17 @@ export async function processUpload(
       const dateStr = new Date(record.created_at).toISOString().split("T")[0];
 
       try {
-        // Write to MinIO
+        // Write to MinIO (non-blocking — failure doesn't prevent DB insert)
         if (isMinioConfigured()) {
-          const minioData = JSON.stringify(recordToMinioFormat(record));
-          const buffer = Buffer.from(minioData, "utf-8");
-          await getMinioClient().putObject(PROMPTS_BUCKET, minioKey, buffer, buffer.length, {
-            "Content-Type": "application/json",
-          });
+          try {
+            const minioData = JSON.stringify(recordToMinioFormat(record));
+            const buffer = Buffer.from(minioData, "utf-8");
+            await getMinioClient().putObject(PROMPTS_BUCKET, minioKey, buffer, buffer.length, {
+              "Content-Type": "application/json",
+            });
+          } catch (minioError) {
+            logger.warn({ error: minioError, eventId: record.event_id }, "MinIO write failed, continuing with DB insert");
+          }
         }
 
         // Insert into PostgreSQL
@@ -150,13 +124,25 @@ export async function processUpload(
             projectName: record.project || null,
             promptType,
             userId,
+            source: record.source || undefined,
+            sessionId: record.session_id || undefined,
+            deviceName: deviceId || undefined,
             tokenEstimate: record.token_estimate || Math.ceil(record.prompt_length / 4),
             wordCount: record.word_count || record.prompt_text.split(/\s+/).filter(Boolean).length,
             tokenEstimateResponse: record.token_estimate_response || undefined,
             wordCountResponse: record.word_count_response || undefined,
             searchVector: sql`to_tsvector('english', ${record.prompt_text} || ' ' || ${record.response_text ?? ""})`,
           })
-          .onConflictDoNothing({ target: schema.prompts.minioKey })
+          .onConflictDoUpdate({
+            target: schema.prompts.minioKey,
+            set: {
+              responseText: sql`COALESCE(EXCLUDED.response_text, ${schema.prompts.responseText})`,
+              responseLength: sql`COALESCE(EXCLUDED.response_length, ${schema.prompts.responseLength})`,
+              tokenEstimateResponse: sql`COALESCE(EXCLUDED.token_estimate_response, ${schema.prompts.tokenEstimateResponse})`,
+              wordCountResponse: sql`COALESCE(EXCLUDED.word_count_response, ${schema.prompts.wordCountResponse})`,
+              updatedAt: sql`now()`,
+            },
+          })
           .returning();
 
         if (!inserted) {
@@ -164,17 +150,8 @@ export async function processUpload(
           continue;
         }
 
-        // Auto-classify with pre-cached tags
-        const suggestedTags = classifyPrompt(record.prompt_text);
-        for (const tagName of suggestedTags) {
-          const tagId = tagCache.get(tagName);
-          if (tagId) {
-            await db
-              .insert(schema.promptTags)
-              .values({ promptId: inserted.id, tagId })
-              .onConflictDoNothing();
-          }
-        }
+        // Check if this was an update (response added) vs a fresh insert
+        const isUpdate = inserted.syncedAt !== null && inserted.syncedAt !== undefined;
 
         affectedDates.add(dateStr);
         accepted++;

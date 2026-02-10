@@ -12,7 +12,6 @@ const { ingestPayload, replayQueue } = require("./ingest");
 const { getQueueStats } = require("./queue");
 const { loadState } = require("./state");
 const { getStats } = require("./stats");
-const { getReport, formatReportText } = require("./report");
 const { exportData } = require("./export");
 const { syncToServer, syncToObjectStore } = require("./sync");
 const { getSyncStatus } = require("./sync-log");
@@ -163,8 +162,119 @@ async function handleInstall(options) {
   return installed;
 }
 
+function askConfirm(question, defaultYes = false) {
+  const readline = require("readline");
+  const hint = defaultYes ? "Y/n" : "y/N";
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(`  > ${question} [${hint}]: `, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      if (!trimmed) return resolve(defaultYes);
+      resolve(trimmed === "y" || trimmed === "yes");
+    });
+  });
+}
+
 async function handleUninstall(options) {
-  const config = loadConfig();
+  const {
+    getConfigDir,
+    getConfigPath,
+    getDefaultSqlitePath,
+  } = require("./paths");
+
+  const isAll = options.all || options.cli === "all";
+  const isFull = isAll && !options["hooks-only"];
+  const interactive = process.stdin.isTTY && !options.yes && !options.y;
+
+  // If --all flag: full uninstall (hooks + config + data)
+  if (isFull) {
+    const configDir = getConfigDir();
+    const dbPath = getDefaultSqlitePath();
+    const dbExists = fs.existsSync(dbPath);
+    const configExists = fs.existsSync(getConfigPath());
+
+    let removeDb = true;
+
+    if (interactive) {
+      console.log("\n  Oh My Prompt - Full Uninstall");
+      console.log("  ==============================\n");
+      console.log("  This will remove:");
+      console.log("    - Claude Code hook (~/.claude/hooks/prompt-logger.sh)");
+      console.log("    - Codex hook (~/.config/oh-my-prompt/hooks/)");
+      if (configExists) console.log("    - Configuration (~/.config/oh-my-prompt/config.json)");
+      if (dbExists) console.log("    - Local database (~/.config/oh-my-prompt/omp.db)");
+      console.log("    - All data in " + configDir);
+      console.log("");
+
+      const proceed = await askConfirm("Are you sure you want to remove everything?", false);
+      if (!proceed) {
+        console.log("\n  Uninstall cancelled.\n");
+        return [];
+      }
+
+      if (dbExists) {
+        removeDb = await askConfirm("Also delete local prompt database (omp.db)?", false);
+      }
+    }
+
+    console.log("");
+
+    // Remove hooks
+    const removed = [];
+    try {
+      const hookPath = uninstallClaudeHook();
+      if (hookPath) {
+        removed.push({ cli: "claude", path: hookPath });
+        console.log("  Removed Claude Code hook: " + hookPath);
+      }
+    } catch { /* ignore */ }
+
+    try {
+      const codexResult = uninstallCodexHook();
+      if (codexResult.scriptPath || codexResult.removed) {
+        removed.push({ cli: "codex", path: codexResult.scriptPath });
+        console.log("  Removed Codex hook: " + (codexResult.scriptPath || ""));
+      }
+    } catch { /* ignore */ }
+
+    // Remove config dir contents
+    const configDir2 = getConfigDir();
+    if (fs.existsSync(configDir2)) {
+      const entries = fs.readdirSync(configDir2, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(configDir2, entry.name);
+        // Skip database if user chose to keep it
+        if (!removeDb && entry.name === "omp.db") continue;
+        if (entry.isDirectory()) {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(fullPath);
+        }
+      }
+      // Remove dir itself if empty
+      try {
+        const remaining = fs.readdirSync(configDir2);
+        if (remaining.length === 0) fs.rmdirSync(configDir2);
+      } catch { /* ignore */ }
+      console.log("  Removed config directory: " + configDir2);
+    }
+
+    if (!removeDb && dbExists) {
+      console.log("  Kept local database: " + dbPath);
+    }
+
+    console.log("\n  Uninstall complete. Run 'omp setup' to reconfigure.\n");
+    return removed;
+  }
+
+  // Original behavior: remove specific hooks only
+  let config;
+  try {
+    config = loadConfig();
+  } catch {
+    config = require("./config").defaultConfig();
+  }
   const targets = resolveCliList(options.cli);
   const removed = [];
 
@@ -188,7 +298,7 @@ async function handleUninstall(options) {
   }
 
   if (options["remove-config"]) {
-    const configPath = require("./paths").getConfigPath();
+    const configPath = getConfigPath();
     if (fs.existsSync(configPath)) fs.unlinkSync(configPath);
   } else {
     saveConfig(config);
@@ -374,59 +484,6 @@ function handleStats(options) {
   }
 }
 
-function handleReport(options) {
-  const config = loadConfig();
-  const report = getReport(config, { since: options.since, until: options.until });
-
-  if (options.json || options.format === "json") {
-    printJson(report);
-    return;
-  }
-
-  console.log(formatReportText(report));
-}
-
-async function handleAnalyze(options, positional) {
-  const config = loadConfig();
-  let text = "";
-
-  if (options.file) {
-    text = fs.readFileSync(path.resolve(options.file), "utf-8");
-  } else if (options.stdin || !process.stdin.isTTY) {
-    text = await readStdin();
-  } else if (positional[0]) {
-    const db = openDb(config.storage.sqlite.path);
-    const row = db
-      .prepare("SELECT prompt_text FROM prompts WHERE id = ?")
-      .get(positional[0]);
-    db.close();
-    text = row ? row.prompt_text : "";
-  }
-
-  if (!text) {
-    console.error("No prompt text provided.");
-    process.exitCode = 2;
-    return;
-  }
-
-  const { analyzePrompt } = require("./insights");
-  const review = analyzePrompt(text);
-
-  if (options.json) {
-    printJson(review);
-  } else {
-    console.log(`Score: ${review.score} (${review.scoreLabel})`);
-    console.log("Signals:");
-    review.signals.forEach((signal) => {
-      console.log(`- ${signal.label}: ${signal.present ? "present" : "missing"}`);
-    });
-    if (review.suggestions.length) {
-      console.log("Suggestions:");
-      review.suggestions.forEach((s) => console.log(`- ${s}`));
-    }
-  }
-}
-
 function handleExport(options) {
   const config = loadConfig();
   const result = exportData(config, {
@@ -600,10 +657,24 @@ async function main() {
       break;
     }
     case "uninstall": {
+      if (options.help) {
+        console.log("Usage: omp uninstall [OPTIONS]");
+        console.log("");
+        console.log("Remove Oh My Prompt hooks and data.");
+        console.log("");
+        console.log("Options:");
+        console.log("  --cli <targets>    Comma-separated: claude,codex (default: auto-detect)");
+        console.log("  --all              Full uninstall: remove hooks, config, and data");
+        console.log("  --hooks-only       With --all: only remove hooks, keep config and data");
+        console.log("  --remove-config    Remove config file (without --all)");
+        console.log("  --yes, -y          Skip confirmation prompts");
+        console.log("  --json             Output results as JSON");
+        break;
+      }
       const removed = await handleUninstall(options);
       if (options.json) {
         printJson({ removed });
-      } else {
+      } else if (!options.all) {
         removed.forEach((item) => console.log(`Removed ${item.cli} hook at ${item.path}`));
       }
       break;
@@ -613,12 +684,6 @@ async function main() {
       break;
     case "stats":
       handleStats(options);
-      break;
-    case "report":
-      handleReport(options);
-      break;
-    case "analyze":
-      await handleAnalyze(options, positional);
       break;
     case "export":
       handleExport(options);
@@ -679,7 +744,7 @@ async function main() {
     default:
       console.log("Oh My Prompt CLI");
       console.log(
-        "Commands: setup, install, uninstall, status, stats, report, analyze, export, sync, ingest, config, import, db, doctor"
+        "Commands: setup, install, uninstall, status, stats, export, sync, ingest, config, import, db, doctor"
       );
       console.log("Use --help with each command for options.");
       process.exitCode = 2;

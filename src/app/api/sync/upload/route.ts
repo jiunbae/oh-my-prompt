@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { records } = parseResult.data;
+    const { records, deviceId } = parseResult.data;
 
     if (records.length === 0) {
       return NextResponse.json({
@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
       records as UploadRecord[],
       user.id,
       user.token,
+      deviceId,
     );
 
     return NextResponse.json(result, {

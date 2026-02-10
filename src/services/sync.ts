@@ -197,30 +197,6 @@ async function getDb() {
   return { db, promptsTable, syncLogTable };
 }
 
-export function classifyPrompt(text: string): string[] {
-  const tags: string[] = [];
-  const lowercase = text.toLowerCase();
-
-  const rules = [
-    { tag: "debugging", keywords: ["error", "fix", "bug", "crash", "fails", "investigate"] },
-    { tag: "refactoring", keywords: ["refactor", "cleanup", "improve", "optimize", "rewrite"] },
-    { tag: "feature", keywords: ["add", "implement", "new", "feature", "create"] },
-    { tag: "testing", keywords: ["test", "jest", "vitest", "unit", "e2e", "coverage"] },
-    { tag: "database", keywords: ["sql", "db", "query", "migration", "drizzle", "postgres"] },
-    { tag: "frontend", keywords: ["ui", "component", "react", "css", "tailwind", "layout"] },
-    { tag: "api", keywords: ["trpc", "endpoint", "rest", "route", "handler"] },
-    { tag: "documentation", keywords: ["doc", "readme", "comment", "guide"] },
-  ];
-
-  for (const rule of rules) {
-    if (rule.keywords.some((kw) => lowercase.includes(kw))) {
-      tags.push(rule.tag);
-    }
-  }
-
-  return tags;
-}
-
 export async function updateDailyAnalytics(dateStr: string) {
   const { db } = await getDb();
   const schema = await import("@/db/schema");
@@ -309,8 +285,6 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
       const inputs = objects.filter((obj) => !obj.name.endsWith("_output.json"));
       const outputs = objects.filter((obj) => obj.name.endsWith("_output.json"));
 
-      const schema = await import("@/db/schema");
-
       for (const obj of inputs) {
         filesProcessed++;
         if (existingKeys.has(obj.name)) {
@@ -325,7 +299,7 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
           const processed = processPrompt(promptData, obj.name);
           affectedDates.add(processed.timestamp.toISOString().split("T")[0]);
           
-          const [newPrompt] = await db
+          await db
             .insert(promptsTable)
             .values({
               ...processed,
@@ -333,43 +307,7 @@ export async function syncAll(options: SyncOptions): Promise<SyncResult> {
               searchVector: sql`to_tsvector('english', ${processed.promptText} || ' ' || ${
                 processed.responseText ?? ""
               })`,
-            })
-            .returning();
-
-          const suggestedTags = classifyPrompt(processed.promptText);
-          for (const tagName of suggestedTags) {
-            let [tag] = await db
-              .select()
-              .from(schema.tags)
-              .where(eq(schema.tags.name, tagName))
-              .limit(1);
-
-            if (!tag) {
-              [tag] = await db
-                .insert(schema.tags)
-                .values({ name: tagName })
-                .onConflictDoNothing()
-                .returning();
-              
-              if (!tag) {
-                [tag] = await db
-                  .select()
-                  .from(schema.tags)
-                  .where(eq(schema.tags.name, tagName))
-                  .limit(1);
-              }
-            }
-
-            if (tag) {
-              await db
-                .insert(schema.promptTags)
-                .values({
-                  promptId: newPrompt.id,
-                  tagId: tag.id,
-                })
-                .onConflictDoNothing();
-            }
-          }
+            });
 
           filesAdded++;
         } catch (error) {

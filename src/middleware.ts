@@ -8,6 +8,7 @@ const publicRoutes = [
   "/login",
   "/register",
   "/api/auth/login",
+  "/api/auth/cli-login",
   "/api/auth/register",
   "/api/auth/logout",
   "/api/config/minio",
@@ -59,7 +60,7 @@ export function middleware(request: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  // Parse session token
+  // Parse session token (supports signed "payload.signature" format)
   let session: {
     userId: string;
     email: string;
@@ -68,7 +69,10 @@ export function middleware(request: NextRequest) {
   } | null = null;
 
   try {
-    const data = Buffer.from(sessionToken, "base64").toString("utf-8");
+    const dotIndex = sessionToken.lastIndexOf(".");
+    const encoded = dotIndex !== -1 ? sessionToken.slice(0, dotIndex) : sessionToken;
+    const encoding = dotIndex !== -1 ? "base64url" : "base64";
+    const data = Buffer.from(encoded, encoding).toString("utf-8");
     const parsed = JSON.parse(data);
 
     if (parsed.userId && parsed.email && parsed.token) {

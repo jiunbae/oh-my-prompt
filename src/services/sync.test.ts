@@ -1,26 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { extractProjectName, detectPromptType, estimateTokens, classifyPrompt } from "./sync";
+import { extractProjectName, detectPromptType, estimateTokens } from "./sync";
 
 describe("sync services", () => {
-  describe("classifyPrompt", () => {
-    it("should classify debugging prompts", () => {
-      const text = "Fix this error in the login flow";
-      expect(classifyPrompt(text)).toContain("debugging");
-    });
-
-    it("should classify multiple categories", () => {
-      const text = "Add a new feature to the database query logic";
-      const tags = classifyPrompt(text);
-      expect(tags).toContain("feature");
-      expect(tags).toContain("database");
-    });
-
-    it("should return empty array for unrelated text", () => {
-      const text = "Just saying hello";
-      expect(classifyPrompt(text)).toEqual([]);
-    });
-  });
-
   describe("extractProjectName", () => {
     it("should extract project name from a standard workspace path", () => {
       const path = "/Users/username/workspace/my-awesome-project/src/main.ts";

@@ -44,9 +44,13 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-zinc-950 p-4">
       <Card className="w-full max-w-sm bg-zinc-900 border-zinc-800">
         <CardHeader className="text-center">
-          <CardTitle className="text-xl text-zinc-100">
-            Oh My Prompt
-          </CardTitle>
+          <div className="flex justify-center mb-2">
+            <img
+              src="/logo-dark.svg"
+              alt="Oh My Prompt"
+              className="h-10 w-auto"
+            />
+          </div>
           <p className="text-sm text-zinc-400 mt-1">
             Sign in to your prompt journal
           </p>

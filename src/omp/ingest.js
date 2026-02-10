@@ -1,7 +1,6 @@
 const fs = require("fs");
 const crypto = require("crypto");
 const { openDb, nowIso, hashContent } = require("./db");
-const { analyzePrompt } = require("./insights");
 const { enqueuePayload, getQueueStats } = require("./queue");
 const { updateState } = require("./state");
 const { redactText } = require("./redact");
@@ -29,7 +28,7 @@ function estimateTokens(text) {
 
 function normalizePayload(payload, config) {
   const timestamp = payload.timestamp ? new Date(payload.timestamp).toISOString() : nowIso();
-  const promptText = payload.text || payload.prompt_text || "";
+  const promptText = payload.text || payload.prompt_text || payload.prompt || "";
   const responseText = payload.response_text || null;
   const captureResponse =
     typeof payload.capture_response === "boolean"
@@ -147,27 +146,6 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
   );
 }
 
-function upsertReview(db, promptId, promptText) {
-  const review = analyzePrompt(promptText);
-  const stmt = db.prepare(`
-    INSERT INTO prompt_reviews (prompt_id, score, signals_json, suggestions_json, created_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(prompt_id) DO UPDATE SET
-      score = excluded.score,
-      signals_json = excluded.signals_json,
-      suggestions_json = excluded.suggestions_json,
-      created_at = excluded.created_at
-  `);
-  stmt.run(
-    promptId,
-    review.score,
-    JSON.stringify(review.signals),
-    JSON.stringify(review.suggestions),
-    nowIso()
-  );
-  return review;
-}
-
 function ingestPayload(rawPayload, config) {
   const payload = typeof rawPayload === "string" ? parsePayload(rawPayload) : rawPayload;
   if (!payload) {
@@ -206,9 +184,6 @@ function ingestPayload(rawPayload, config) {
         .prepare("SELECT id FROM prompts WHERE event_id = ? LIMIT 1")
         .get(record.event_id);
       return { ok: true, id: existing?.id || record.id, updated: false, deduped: true };
-    }
-    if (record.role === "user") {
-      upsertReview(db, record.id, record.prompt_text);
     }
     updateState({ lastCapture: record.created_at });
     return { ok: true, id: record.id, updated: false };

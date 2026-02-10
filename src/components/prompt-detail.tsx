@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonDetail } from "@/components/ui/skeleton";
 import { MarkdownContent } from "@/components/markdown-content";
 import { useRouter } from "next/navigation";
-import type { PromptReview } from "@/lib/prompt-insights";
 
 interface Tag {
   id: string;
@@ -35,7 +34,6 @@ interface PromptDetailProps {
   outputTokens: number;
   tags?: Tag[];
   isLoading?: boolean;
-  review?: PromptReview;
 }
 
 function formatDate(date: Date): string {
@@ -80,19 +78,12 @@ export function PromptDetail({
   outputTokens,
   tags = [],
   isLoading = false,
-  review,
 }: PromptDetailProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const totalTokens = inputTokens + outputTokens;
-  const scoreVariant =
-    review?.scoreLabel === "Strong"
-      ? "success"
-      : review?.scoreLabel === "Good"
-        ? "secondary"
-        : "warning";
 
   const handleDelete = async () => {
     if (!confirm("Are you sure you want to delete this prompt? This action cannot be undone.")) {
@@ -220,76 +211,18 @@ export function PromptDetail({
         </div>
       </div>
 
-      {review && (
-        <Card className="border-zinc-800 bg-zinc-900/60">
-          <CardHeader className="border-b border-zinc-800">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm text-zinc-400">Prompt Review</p>
-                <p className="text-lg font-semibold text-zinc-100">
-                  Score {review.score} / 100
-                </p>
-              </div>
-              <Badge variant={scoreVariant}>{review.scoreLabel}</Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-zinc-200">Signal Coverage</p>
-                <div className="space-y-2">
-                  {review.signals.map((signal) => (
-                    <div key={signal.id} className="flex items-center justify-between text-sm">
-                      <span className="text-zinc-300">{signal.label}</span>
-                      <span className={signal.present ? "text-green-400" : "text-zinc-500"}>
-                        {signal.present ? "Present" : "Missing"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-zinc-200">Prompt Stats</p>
-                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 text-sm text-zinc-400">
-                  <div className="flex items-center justify-between">
-                    <span>Words</span>
-                    <span className="text-zinc-200">{review.wordCount}</span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span>Characters</span>
-                    <span className="text-zinc-200">{review.charCount}</span>
-                  </div>
-                </div>
-                {review.suggestions.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-zinc-200">Suggested Improvements</p>
-                    <div className="space-y-2">
-                      {review.suggestions.map((suggestion, index) => (
-                        <div
-                          key={`${suggestion}-${index}`}
-                          className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 text-sm text-zinc-300"
-                        >
-                          {suggestion}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader className="border-b border-zinc-800">
           <div className="flex flex-wrap items-center gap-4 text-sm">
             {sessionId && (
               <div className="flex items-center gap-2 text-zinc-400">
                 <span className="font-medium text-zinc-300">Session:</span>
-                <code className="rounded bg-zinc-800 px-2 py-0.5 text-xs">
-                  {sessionId}
-                </code>
+                <Link
+                  href={`/sessions/${sessionId}`}
+                  className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  View full session
+                </Link>
               </div>
             )}
             <div className="flex items-center gap-2 text-zinc-400">

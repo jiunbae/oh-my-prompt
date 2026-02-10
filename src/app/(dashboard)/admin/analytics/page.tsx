@@ -1,32 +1,68 @@
-import { cookies } from "next/headers";
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useUser } from "@/contexts/user-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { TokenUsageChart } from "@/components/charts/token-usage-chart";
 import { ProjectActivityChart } from "@/components/charts/project-activity-chart";
 import { SessionChart } from "@/components/charts/session-chart";
-import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
-import { getAnalytics, formatNumber } from "@/lib/analytics";
 
-// Force dynamic rendering - don't pre-render at build time
-export const dynamic = "force-dynamic";
-
-/**
- * Get current user from session cookie
- */
-async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const sessionToken = cookieStore.get(AUTH_COOKIE_NAME)?.value;
-
-  if (!sessionToken) {
-    return null;
-  }
-
-  return parseSessionToken(sessionToken);
+interface UserOption {
+  id: string;
+  name: string | null;
+  email: string;
 }
 
+interface UserSummaryRow {
+  id: string;
+  name: string | null;
+  email: string;
+  totalPrompts: number;
+  totalTokens: number;
+  uniqueProjects: number;
+  lastActivity: string | null;
+  prompts30d: number;
+}
 
-function formatDate(date: Date): string {
+interface AnalyticsData {
+  stats: {
+    totalPrompts: number;
+    totalTokens: number;
+    totalChars: number;
+    uniqueProjects: number;
+    avgPromptLength: number;
+  };
+  dailyStats: Array<{ date: string; count: number; tokens: number }>;
+  projectStats: Array<{ project: string | null; count: number; tokens: number }>;
+  typeStats: Array<{ type: string | null; count: number }>;
+  recentPrompts: Array<{
+    id: string;
+    timestamp: string;
+    projectName: string | null;
+    promptLength: number;
+    promptType: string | null;
+  }>;
+  projectActivity: Array<{ project: string; count: number }>;
+  sessions: {
+    summary: {
+      sessions: number;
+      avgPromptsPerSession: number;
+      avgSessionMinutes: number;
+    };
+    perDay: Array<{ date: string; sessions: number }>;
+  };
+}
+
+function formatNumber(num: number): string {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+  if (num >= 1000) return (num / 1000).toFixed(1) + "K";
+  return num.toString();
+}
+
+function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -35,31 +71,124 @@ function formatDate(date: Date): string {
   }).format(new Date(date));
 }
 
-export default async function AnalyticsPage() {
-  // Get current user from session
-  const user = await getCurrentUser();
-  const userId = user?.userId ?? null;
+function formatRelativeDate(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
-  const data = await getAnalytics(userId);
+export default function AdminAnalyticsPage() {
+  const { user, loading: userLoading } = useUser();
+  const router = useRouter();
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [users, setUsers] = useState<UserOption[]>([]);
+  const [userSummary, setUserSummary] = useState<UserSummaryRow[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string>("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  if (!data) {
+  const fetchAnalytics = useCallback(
+    async (userId?: string) => {
+      try {
+        setLoading(true);
+        setError("");
+        const params = userId && userId !== "all" ? `?userId=${userId}` : "";
+        const res = await fetch(`/api/admin/analytics${params}`);
+
+        if (res.ok) {
+          const data = await res.json();
+          setAnalytics(data.analytics);
+          setUsers(data.users);
+          setUserSummary(data.userSummary);
+        } else if (res.status === 403) {
+          router.push("/prompts");
+        } else {
+          const data = await res.json();
+          setError(data.error || "Failed to fetch analytics");
+        }
+      } catch {
+        setError("Failed to fetch analytics");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [router]
+  );
+
+  useEffect(() => {
+    if (!userLoading && !user?.isAdmin) {
+      router.push("/prompts");
+      return;
+    }
+    if (!userLoading && user?.isAdmin) {
+      fetchAnalytics();
+    }
+  }, [userLoading, user, router, fetchAnalytics]);
+
+  const handleUserChange = (userId: string) => {
+    setSelectedUserId(userId);
+    fetchAnalytics(userId);
+  };
+
+  if (userLoading || loading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-100" />
+      </div>
+    );
+  }
+
+  if (error) {
     return (
       <div className="p-6">
-        <p className="text-zinc-400">Unable to load analytics. Check database connection.</p>
+        <p className="text-red-400">{error}</p>
+      </div>
+    );
+  }
+
+  if (!analytics) {
+    return (
+      <div className="p-6">
+        <p className="text-zinc-400">Unable to load analytics.</p>
       </div>
     );
   }
 
   const { stats, dailyStats, projectStats, typeStats, recentPrompts, projectActivity, sessions } =
-    data;
+    analytics;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Insights</h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          See how you prompt and where to improve
-        </p>
+      {/* Header + Filter */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-100">Admin Insights</h1>
+          <p className="text-sm text-zinc-400 mt-1">
+            {selectedUserId === "all"
+              ? "Analytics across all users"
+              : `Filtered by ${users.find((u) => u.id === selectedUserId)?.name || users.find((u) => u.id === selectedUserId)?.email || "user"}`}
+          </p>
+        </div>
+        <select
+          value={selectedUserId}
+          onChange={(e) => handleUserChange(e.target.value)}
+          className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">All Users</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name || u.email}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Stats Cards */}
@@ -118,42 +247,37 @@ export default async function AnalyticsPage() {
         </Card>
       </div>
 
-      {/* Daily Activity Chart */}
+      {/* Charts */}
       <div className="grid md:grid-cols-2 gap-6">
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-lg text-zinc-100">
-              Activity Heatmap
-            </CardTitle>
+            <CardTitle className="text-lg text-zinc-100">Activity Heatmap</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityHeatmap 
-              data={dailyStats.map(d => ({ 
-                date: d.date, 
-                count: Number(d.count ?? 0) 
-              }))} 
+            <ActivityHeatmap
+              data={dailyStats.map((d) => ({
+                date: d.date,
+                count: Number(d.count ?? 0),
+              }))}
             />
           </CardContent>
         </Card>
 
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
-            <CardTitle className="text-lg text-zinc-100">
-              Token Usage
-            </CardTitle>
+            <CardTitle className="text-lg text-zinc-100">Token Usage</CardTitle>
           </CardHeader>
           <CardContent>
-            <TokenUsageChart 
-              data={dailyStats.map(d => ({ 
-                date: d.date, 
-                tokens: Number(d.tokens ?? 0) 
-              }))} 
+            <TokenUsageChart
+              data={dailyStats.map((d) => ({
+                date: d.date,
+                tokens: Number(d.tokens ?? 0),
+              }))}
             />
           </CardContent>
         </Card>
       </div>
 
-      {/* Projects / Sessions */}
       <div className="grid lg:grid-cols-2 gap-6">
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
@@ -213,8 +337,83 @@ export default async function AnalyticsPage() {
         </Card>
       </div>
 
+      {/* User Leaderboard */}
+      {selectedUserId === "all" && userSummary.length > 0 && (
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardHeader>
+            <CardTitle className="text-lg text-zinc-100">User Leaderboard</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-800">
+                    <th className="px-3 py-2 text-left text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                      User
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                      Total Prompts
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                      Est. Tokens
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                      Projects
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                      30d Prompts
+                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                      Last Active
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {userSummary.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                      onClick={() => handleUserChange(row.id)}
+                    >
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-xs font-medium text-white shrink-0">
+                            {row.name?.[0]?.toUpperCase() || row.email[0].toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-zinc-100 font-medium truncate">
+                              {row.name || row.email.split("@")[0]}
+                            </p>
+                            <p className="text-zinc-500 text-xs truncate">{row.email}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-right text-zinc-300">
+                        {formatNumber(row.totalPrompts)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-zinc-300">
+                        {formatNumber(row.totalTokens)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-zinc-300">
+                        {row.uniqueProjects}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <Badge variant="secondary">{row.prompts30d}</Badge>
+                      </td>
+                      <td className="px-3 py-3 text-right text-zinc-400 text-xs">
+                        {formatRelativeDate(row.lastActivity)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Top Projects + Prompt Types */}
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Top Projects */}
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
             <CardTitle className="text-lg text-zinc-100">Top Projects</CardTitle>
@@ -225,9 +424,7 @@ export default async function AnalyticsPage() {
                 <div key={project.project || i} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-zinc-500 text-sm w-4">{i + 1}.</span>
-                    <span className="text-zinc-200 font-medium">
-                      {project.project}
-                    </span>
+                    <span className="text-zinc-200 font-medium">{project.project}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-zinc-400 text-sm">
@@ -244,7 +441,6 @@ export default async function AnalyticsPage() {
           </CardContent>
         </Card>
 
-        {/* Prompt Types */}
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
             <CardTitle className="text-lg text-zinc-100">Prompt Types</CardTitle>
@@ -321,6 +517,9 @@ export default async function AnalyticsPage() {
                 </Badge>
               </div>
             ))}
+            {recentPrompts.length === 0 && (
+              <p className="text-zinc-500 text-center py-4">No recent activity</p>
+            )}
           </div>
         </CardContent>
       </Card>

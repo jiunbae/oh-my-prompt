@@ -8,6 +8,13 @@
       "when": 1770034581620,
       "tag": "0000_dizzy_quasar",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1770686937120,
+      "tag": "0001_youthful_longshot",
+      "breakpoints": true
     }
   ]
 }

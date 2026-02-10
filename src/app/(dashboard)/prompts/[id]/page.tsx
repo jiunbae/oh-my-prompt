@@ -6,7 +6,6 @@ import { eq, and } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
-import { analyzePrompt } from "@/lib/prompt-insights";
 
 // Force dynamic rendering - don't pre-render at build time
 export const dynamic = "force-dynamic";
@@ -57,9 +56,9 @@ interface PromptDetailPageProps {
 export default async function PromptDetailPage({ params }: PromptDetailPageProps) {
   const resolvedParams = await params;
 
-  // Get current user from session
+  // Get current user from session — admins can view any prompt
   const user = await getCurrentUser();
-  const userId = user?.userId ?? null;
+  const userId = user?.isAdmin ? null : (user?.userId ?? null);
 
   const prompt = await getPrompt(resolvedParams.id, userId);
 
@@ -80,7 +79,6 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
   });
 
   const tags = promptWithTags?.promptTags.map(pt => pt.tag) ?? [];
-  const promptReview = analyzePrompt(prompt.promptText);
 
   // Parse the prompt to create a simple message structure
   const messages: Array<{
@@ -109,7 +107,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
   return (
     <PromptDetail
       id={prompt.id}
-      sessionId={prompt.minioKey}
+      sessionId={prompt.sessionId ?? undefined}
       timestamp={prompt.timestamp}
       projectName={prompt.projectName}
       workingDirectory={prompt.workingDirectory}
@@ -118,7 +116,6 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
       outputTokens={prompt.tokenEstimateResponse ?? 0}
       promptType={prompt.promptType}
       tags={tags}
-      review={promptReview}
     />
   );
 }
