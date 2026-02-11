@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useRef, useCallback } from "react";
+
 interface ActivityData {
   date: string;
   count: number;
@@ -9,29 +11,81 @@ interface ActivityHeatmapProps {
   data: ActivityData[];
 }
 
+interface TooltipState {
+  visible: boolean;
+  x: number;
+  y: number;
+  date: string;
+  count: number;
+  dayOfWeek: string;
+}
+
+function formatTooltipDate(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00Z");
+  return d.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function getDayOfWeek(dateStr: string): string {
+  return new Date(dateStr + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "short" });
+}
+
 export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [tooltip, setTooltip] = useState<TooltipState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    date: "",
+    count: 0,
+    dayOfWeek: "",
+  });
+
+  const handleMouseEnter = useCallback(
+    (e: React.MouseEvent, day: { date: string; count: number; inRange: boolean }) => {
+      if (!day.inRange || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const tileRect = (e.target as HTMLElement).getBoundingClientRect();
+      setTooltip({
+        visible: true,
+        x: tileRect.left - rect.left + tileRect.width / 2,
+        y: tileRect.top - rect.top - 4,
+        date: day.date,
+        count: day.count,
+        dayOfWeek: getDayOfWeek(day.date),
+      });
+    },
+    []
+  );
+
+  const handleMouseLeave = useCallback(() => {
+    setTooltip((prev) => ({ ...prev, visible: false }));
+  }, []);
+
   if (data.length === 0) {
     return <p className="text-sm text-muted-foreground text-center py-4">No activity data</p>;
   }
 
   const countMap = new Map(data.map((d) => [d.date, d.count]));
   const maxCount = Math.max(...data.map((d) => d.count), 1);
+  const totalPrompts = data.reduce((sum, d) => sum + d.count, 0);
+  const activeDays = data.filter((d) => d.count > 0).length;
 
-  // Build full calendar grid: fill from the earliest date to the latest, then
-  // pad so columns start on Sunday and end on Saturday (GitHub style).
+  // Build full calendar grid
   const sortedDates = [...data].sort((a, b) => a.date.localeCompare(b.date));
   const startDate = new Date(sortedDates[0].date + "T12:00:00Z");
   const endDate = new Date(sortedDates[sortedDates.length - 1].date + "T12:00:00Z");
 
-  // Pad start to Sunday of that week
   const gridStart = new Date(startDate);
   gridStart.setUTCDate(gridStart.getUTCDate() - gridStart.getUTCDay());
 
-  // Pad end to Saturday of that week
   const gridEnd = new Date(endDate);
   gridEnd.setUTCDate(gridEnd.getUTCDate() + (6 - gridEnd.getUTCDay()));
 
-  // Build all days in grid
   const days: Array<{ date: string; count: number; inRange: boolean }> = [];
   const cursor = new Date(gridStart);
   while (cursor <= gridEnd) {
@@ -44,17 +98,15 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
-  // Group into weeks (columns)
   const weeks: typeof days[] = [];
   for (let i = 0; i < days.length; i += 7) {
     weeks.push(days.slice(i, i + 7));
   }
 
-  // Month labels: find the first occurrence of each month across weeks
+  // Month labels
   const monthLabels: Array<{ label: string; colIndex: number }> = [];
   let lastMonth = "";
   weeks.forEach((week, colIdx) => {
-    // Use the first day of the week that's in range, or the first day
     const refDay = week.find((d) => d.inRange) ?? week[0];
     const month = new Date(refDay.date + "T12:00:00Z").toLocaleDateString("en-US", { month: "short" });
     if (month !== lastMonth) {
@@ -75,7 +127,32 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
   };
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 relative" ref={containerRef}>
+      {/* Tooltip */}
+      {tooltip.visible && (
+        <div
+          className="absolute z-50 pointer-events-none"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+            transform: "translate(-50%, -100%)",
+          }}
+        >
+          <div className="bg-foreground text-background rounded-md px-2.5 py-1.5 text-xs shadow-lg whitespace-nowrap">
+            <p className="font-medium">
+              {tooltip.count === 0
+                ? "No prompts"
+                : `${tooltip.count} prompt${tooltip.count !== 1 ? "s" : ""}`}
+            </p>
+            <p className="text-background/70 text-[10px]">{formatTooltipDate(tooltip.date)}</p>
+          </div>
+          {/* Arrow */}
+          <div
+            className="w-2 h-2 bg-foreground rotate-45 mx-auto -mt-1"
+          />
+        </div>
+      )}
+
       {/* Month labels row */}
       <div className="flex">
         <div className="w-8 shrink-0" />
@@ -91,7 +168,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
         </div>
       </div>
 
-      {/* Grid: 7 rows × N columns */}
+      {/* Grid: 7 rows x N columns */}
       <div className="flex">
         {/* Day-of-week labels */}
         <div className="flex flex-col gap-[3px] w-8 shrink-0">
@@ -109,8 +186,11 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
               {week.map((day) => (
                 <div
                   key={day.date}
-                  className={`w-[13px] h-[13px] rounded-sm ${getColor(day.count, day.inRange)} transition-colors hover:ring-1 hover:ring-foreground/30`}
-                  title={day.inRange ? `${day.date}: ${day.count} prompts` : ""}
+                  className={`w-[13px] h-[13px] rounded-sm ${getColor(day.count, day.inRange)} transition-colors ${
+                    day.inRange ? "hover:ring-1 hover:ring-foreground/40 cursor-pointer" : ""
+                  }`}
+                  onMouseEnter={(e) => handleMouseEnter(e, day)}
+                  onMouseLeave={handleMouseLeave}
                 />
               ))}
             </div>
@@ -120,7 +200,9 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
 
       {/* Legend */}
       <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
-        <span>{data.length} days of activity</span>
+        <span>
+          {totalPrompts.toLocaleString()} prompts in {activeDays} active day{activeDays !== 1 ? "s" : ""}
+        </span>
         <div className="flex items-center gap-1">
           <span>Less</span>
           <div className="w-[10px] h-[10px] rounded-sm bg-secondary/50 dark:bg-secondary/30" />
