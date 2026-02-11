@@ -65,14 +65,40 @@ export async function processUpload(
       const dateStr = new Date(record.created_at).toISOString().split("T")[0];
 
       try {
-        // Insert into PostgreSQL
+        // Check if event_key already exists
+        const [existing] = await db
+          .select({ id: schema.prompts.id })
+          .from(schema.prompts)
+          .where(sql`${schema.prompts.eventKey} = ${eventKey}`)
+          .limit(1);
+
         const promptType = processed.promptText.includes("<task-notification>")
           ? "task_notification"
           : processed.promptText.includes("<system-reminder>")
             ? "system"
             : "user_input";
 
-        const [inserted] = await db
+        if (existing) {
+          // Update response if provided (upsert behavior)
+          if (processed.responseText) {
+            await db
+              .update(schema.prompts)
+              .set({
+                responseText: processed.responseText,
+                responseLength: processed.responseLength,
+                tokenEstimateResponse: processed.tokenEstimateResponse,
+                wordCountResponse: processed.wordCountResponse,
+                updatedAt: sql`now()`,
+              })
+              .where(sql`${schema.prompts.id} = ${existing.id}`);
+            affectedDates.add(dateStr);
+          }
+          duplicates++;
+          continue;
+        }
+
+        // Insert new record
+        await db
           .insert(schema.prompts)
           .values({
             eventKey,
@@ -93,26 +119,7 @@ export async function processUpload(
             tokenEstimateResponse: processed.tokenEstimateResponse,
             wordCountResponse: processed.wordCountResponse,
             searchVector: sql`to_tsvector('english', ${processed.promptText} || ' ' || ${processed.responseText ?? ""})`,
-          })
-          .onConflictDoUpdate({
-            target: schema.prompts.eventKey,
-            set: {
-              responseText: sql`COALESCE(EXCLUDED.response_text, ${schema.prompts.responseText})`,
-              responseLength: sql`COALESCE(EXCLUDED.response_length, ${schema.prompts.responseLength})`,
-              tokenEstimateResponse: sql`COALESCE(EXCLUDED.token_estimate_response, ${schema.prompts.tokenEstimateResponse})`,
-              wordCountResponse: sql`COALESCE(EXCLUDED.word_count_response, ${schema.prompts.wordCountResponse})`,
-              updatedAt: sql`now()`,
-            },
-          })
-          .returning();
-
-        if (!inserted) {
-          duplicates++;
-          continue;
-        }
-
-        // Check if this was an update (response added) vs a fresh insert
-        const isUpdate = inserted.syncedAt !== null && inserted.syncedAt !== undefined;
+          });
 
         affectedDates.add(dateStr);
         accepted++;

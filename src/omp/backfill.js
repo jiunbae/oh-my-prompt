@@ -14,32 +14,41 @@ const SYSTEM_PREFIXES = [
   "Stop hook feedback:",
 ];
 
+function stripSystemTags(text) {
+  // Remove <system-reminder>...</system-reminder> blocks that hooks inject
+  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "").trim();
+}
+
 function isRealUserMessage(entry) {
   if ((entry.type || entry.role) !== "user") return false;
   const content = entry.message?.content || entry.content;
   if (typeof content !== "string") return false;
-  const trimmed = content.trim();
-  if (!trimmed) return false;
+  const stripped = stripSystemTags(content.trim());
+  if (!stripped) return false;
 
   for (const prefix of SYSTEM_PREFIXES) {
-    if (trimmed.startsWith(prefix)) return false;
+    if (stripped.startsWith(prefix)) return false;
   }
-  if (trimmed === "[Request interrupted by user]") return false;
+  if (stripped === "[Request interrupted by user]") return false;
   // CLI header (starts with whitespace + "Claude Code" or unicode box chars)
-  if (/^\s*(Claude Code|[\u2590\u259B])/.test(trimmed)) return false;
+  if (/^\s*(Claude Code|[\u2590\u259B])/.test(stripped)) return false;
 
   return true;
 }
 
 function extractText(content) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
+  let text;
+  if (typeof content === "string") {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
       .filter((b) => b.type === "text")
       .map((b) => b.text)
       .join("\n");
+  } else {
+    return "";
   }
-  return "";
+  return stripSystemTags(text);
 }
 
 function parseTranscript(lines) {
@@ -83,14 +92,15 @@ function parseTranscript(lines) {
   }));
 }
 
-function buildEventId(sessionId, userText) {
+function buildEventId(sessionId, userText, timestamp, turnIndex) {
   return hashContent(
     JSON.stringify({
       source: "claude-code",
       session_id: sessionId,
       role: "user",
       prompt_text: userText,
-      response_text: "",
+      timestamp: timestamp || "",
+      turn_index: turnIndex ?? "",
     })
   );
 }
@@ -146,14 +156,15 @@ function backfillTranscripts(config, options = {}) {
     let skipped = 0;
     let duplicates = 0;
 
-    for (const turn of turns) {
+    for (let turnIdx = 0; turnIdx < turns.length; turnIdx++) {
+      const turn = turns[turnIdx];
       if (!turn.userText.trim()) {
         skipped++;
         continue;
       }
 
       const sessionId = filename;
-      const eventId = buildEventId(sessionId, turn.userText);
+      const eventId = buildEventId(sessionId, turn.userText, turn.timestamp, turnIdx);
 
       const payload = {
         timestamp: turn.timestamp || new Date().toISOString(),

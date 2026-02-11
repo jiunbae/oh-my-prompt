@@ -125,6 +125,7 @@ async function syncToServer(config, options = {}) {
   let totalAccepted = 0;
   let totalDuplicates = 0;
   let totalRejected = 0;
+  let totalSkipped = 0;
   let chunks = 0;
   const errors = [];
 
@@ -139,8 +140,14 @@ async function syncToServer(config, options = {}) {
       records = records.map((r) => postprocessUploadRecord(r, config));
       records = records.filter((r) => r.prompt_text && r.prompt_text.trim().length > 0);
 
+      if (records.length === 0) {
+        totalSkipped += chunk.length;
+        chunks++;
+        continue;
+      }
+
       if (options.dryRun) {
-        totalAccepted += chunk.length;
+        totalAccepted += records.length;
         chunks++;
         continue;
       }
@@ -175,7 +182,7 @@ async function syncToServer(config, options = {}) {
     // Only advance sync state if the server actually accepted records
     // This prevents permanently skipping records when the server is temporarily down
     const lastRow = rows[rows.length - 1];
-    if (!options.dryRun && lastRow?.created_at && (totalAccepted > 0 || totalDuplicates > 0)) {
+    if (!options.dryRun && lastRow?.created_at && (totalAccepted > 0 || totalDuplicates > 0 || totalSkipped > 0)) {
       updateSyncState(config, lastRow.created_at, lastRow.id);
     }
 
