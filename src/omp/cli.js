@@ -17,9 +17,74 @@ const { syncToServer, postJson } = require("./sync");
 const { getSyncStatus, updateSyncState } = require("./sync-log");
 const { openDb } = require("./db");
 
+// ---------------------------------------------------------------------------
+// Version & Help
+// ---------------------------------------------------------------------------
+
+function getVersion() {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")
+    );
+    return pkg.version;
+  } catch {
+    return "dev";
+  }
+}
+
+function printHelp() {
+  const v = getVersion();
+  console.log(`
+  oh-my-prompt v${v}
+  CLI prompt journal for AI coding assistants
+
+  USAGE
+    omp <command> [options]
+
+  COMMANDS
+    setup              Interactive setup wizard
+    install            Install hooks for Claude Code / Codex
+    uninstall          Remove hooks (--all for full cleanup)
+    status             Show current configuration and hook status
+    doctor             Diagnose common issues
+
+    sync               Upload local records to server
+    sync status        Show sync checkpoint and recent runs
+    sync flush         Delete all server-side records (destructive)
+
+    backfill           Import from Claude transcripts / Codex history
+    import             Import from external sources
+    ingest             Ingest a raw JSON payload (used by hooks)
+
+    stats              Show prompt statistics
+    export             Export records (json, csv, jsonl)
+
+    config get [key]   Read config value (omit key for full dump)
+    config set <k> <v> Write config value
+    config validate    Validate configuration
+
+    db migrate         Run database migrations
+    db flush           Delete all local records (destructive)
+
+  GLOBAL OPTIONS
+    --help, -h         Show help for any command
+    --version, -v      Print version
+    --json             Machine-readable JSON output
+
+  EXAMPLES
+    omp setup                          # First-time setup
+    omp status                         # Check everything is working
+    omp sync                           # Upload to server
+    omp backfill --claude-only         # Import Claude transcripts
+    omp stats --since 2025-01-01       # Stats from date
+    omp export --format csv --out .    # Export as CSV
+
+  https://github.com/jiunbae/oh-my-prompt
+`);
+}
+
 function parseArgs(argv) {
   const args = [...argv];
-  const command = args.shift();
   const options = {};
   const positional = [];
 
@@ -38,11 +103,18 @@ function parseArgs(argv) {
         options[key] = next;
         i += 1;
       }
+    } else if (arg === "-v") {
+      options.version = true;
+    } else if (arg === "-h") {
+      options.help = true;
+    } else if (arg === "-y") {
+      options.yes = true;
     } else {
       positional.push(arg);
     }
   }
 
+  const command = positional.shift() || null;
   return { command, options, positional };
 }
 
@@ -563,7 +635,7 @@ async function handleSyncFlush(options) {
   if (!serverUrl || !serverToken) {
     console.error(
       "Server not configured. Set server.url and server.token:\n" +
-        "  omp config set server.url https://your-server.example.com\n" +
+        "  omp config set server.url https://prompt.jiun.dev\n" +
         "  omp config set server.token YOUR_TOKEN"
     );
     process.exitCode = 1;
@@ -639,23 +711,39 @@ async function handleIngest(options) {
 async function main() {
   const { command, options, positional } = parseArgs(process.argv.slice(2));
 
+  // Global flags: --version, --help (before any command)
+  if (options.version || options.v) {
+    console.log(getVersion());
+    return;
+  }
+  if (!command || command === "help" || options.help || options.h) {
+    if (!command || command === "help") {
+      printHelp();
+      return;
+    }
+    // Fall through to per-command --help below
+  }
+
   switch (command) {
     case "setup": {
-      if (options.help) {
-        console.log("Usage: omp setup [OPTIONS]");
-        console.log("");
-        console.log("Interactive setup wizard for Oh My Prompt.");
-        console.log("");
-        console.log("Options:");
-        console.log("  --server <url>    Server URL (default: https://your-server.example.com)");
-        console.log("  --token <token>   Authentication token");
-        console.log("  --device <name>   Device name (default: hostname)");
-        console.log("  --hooks <targets> Comma-separated: claude,codex,all,none");
-        console.log("  --no-hooks        Skip hook installation");
-        console.log("  --skip-validate   Skip server token validation");
-        console.log("  --yes, -y         Non-interactive mode, accept all defaults");
-        console.log("  --dry-run         Show what would be done without making changes");
-        console.log("  --json            Output results as JSON");
+      if (options.help || options.h) {
+        console.log(`
+  omp setup — Interactive setup wizard
+
+  USAGE
+    omp setup [options]
+
+  OPTIONS
+    --server <url>    Server URL
+    --token <token>   Authentication token
+    --device <name>   Device name (default: hostname)
+    --hooks <targets> Comma-separated: claude,codex,all,none
+    --no-hooks        Skip hook installation
+    --skip-validate   Skip server token validation
+    --yes, -y         Non-interactive mode, accept all defaults
+    --dry-run         Show what would be done without changes
+    --json            Output as JSON
+`);
         break;
       }
       const { runSetup } = require("./setup");
@@ -664,6 +752,23 @@ async function main() {
       break;
     }
     case "install": {
+      if (options.help || options.h) {
+        console.log(`
+  omp install — Install hooks for Claude Code / Codex
+
+  USAGE
+    omp install [options]
+
+  OPTIONS
+    --cli <targets>           Comma-separated: claude,codex,all (default: auto-detect)
+    --server <url>            Server URL
+    --token <token>           Authentication token
+    --sqlite-path <path>      Custom SQLite database path
+    --capture-response <bool> Enable response capture (default: true)
+    --json                    Output as JSON
+`);
+        break;
+      }
       const installed = await handleInstall(options);
       if (options.json) {
         printJson({ installed });
@@ -686,18 +791,21 @@ async function main() {
       break;
     }
     case "uninstall": {
-      if (options.help) {
-        console.log("Usage: omp uninstall [OPTIONS]");
-        console.log("");
-        console.log("Remove Oh My Prompt hooks and data.");
-        console.log("");
-        console.log("Options:");
-        console.log("  --cli <targets>    Comma-separated: claude,codex (default: auto-detect)");
-        console.log("  --all              Full uninstall: remove hooks, config, and data");
-        console.log("  --hooks-only       With --all: only remove hooks, keep config and data");
-        console.log("  --remove-config    Remove config file (without --all)");
-        console.log("  --yes, -y          Skip confirmation prompts");
-        console.log("  --json             Output results as JSON");
+      if (options.help || options.h) {
+        console.log(`
+  omp uninstall — Remove hooks and data
+
+  USAGE
+    omp uninstall [options]
+
+  OPTIONS
+    --cli <targets>    Comma-separated: claude,codex (default: auto-detect)
+    --all              Full uninstall: remove hooks, config, and data
+    --hooks-only       With --all: only remove hooks, keep config and data
+    --remove-config    Remove config file (without --all)
+    --yes, -y          Skip confirmation prompts
+    --json             Output as JSON
+`);
         break;
       }
       const removed = await handleUninstall(options);
@@ -708,46 +816,183 @@ async function main() {
       }
       break;
     }
-    case "status":
+    case "status": {
+      if (options.help || options.h) {
+        console.log(`
+  omp status — Show configuration and hook status
+
+  USAGE
+    omp status [options]
+
+  OPTIONS
+    --json    Output as JSON
+`);
+        break;
+      }
       handleStatus(options);
       break;
-    case "stats":
+    }
+    case "stats": {
+      if (options.help || options.h) {
+        console.log(`
+  omp stats — Show prompt statistics
+
+  USAGE
+    omp stats [options]
+
+  OPTIONS
+    --since <date>      Filter from date (YYYY-MM-DD)
+    --until <date>      Filter to date (YYYY-MM-DD)
+    --group-by <field>  Group by: day, project, source
+    --json              Output as JSON
+`);
+        break;
+      }
       handleStats(options);
       break;
-    case "export":
+    }
+    case "export": {
+      if (options.help || options.h) {
+        console.log(`
+  omp export — Export prompt records
+
+  USAGE
+    omp export [options]
+
+  OPTIONS
+    --format <fmt>   Output format: json, csv, jsonl (default: json)
+    --since <date>   Filter from date (YYYY-MM-DD)
+    --until <date>   Filter to date (YYYY-MM-DD)
+    --out <path>     Write to file (default: stdout)
+    --json           Output metadata as JSON
+`);
+        break;
+      }
       handleExport(options);
       break;
-    case "sync":
+    }
+    case "sync": {
       if (positional[0] === "status") {
+        if (options.help || options.h) {
+          console.log(`
+  omp sync status — Show sync checkpoint and recent runs
+
+  USAGE
+    omp sync status [options]
+
+  OPTIONS
+    --limit <n>   Number of recent entries (default: 5)
+    --json        Output as JSON
+`);
+          break;
+        }
         handleSyncStatus(options);
       } else if (positional[0] === "flush") {
         await handleSyncFlush(options);
       } else {
+        if (options.help || options.h) {
+          console.log(`
+  omp sync — Upload local records to server
+
+  USAGE
+    omp sync [options]
+
+  SUBCOMMANDS
+    omp sync status    Show sync checkpoint and recent runs
+    omp sync flush     Delete ALL server-side records (destructive)
+
+  OPTIONS
+    --force            Override sync lock
+    --dry-run          Show what would be uploaded
+    --since <date>     Only sync records after date
+    --chunk-size <n>   Records per request (default: 500)
+    --lock-ttl <ms>    Lock timeout in ms
+    --json             Output as JSON
+`);
+          break;
+        }
         await handleSync(options);
       }
       break;
-    case "ingest":
+    }
+    case "ingest": {
+      if (options.help || options.h) {
+        console.log(`
+  omp ingest — Ingest a raw JSON payload (used by hooks)
+
+  USAGE
+    omp ingest [options]
+    echo '{"prompt":"..."}' | omp ingest
+
+  OPTIONS
+    --replay     Replay queued payloads
+    --stdin      Read from stdin
+    --json       Output as JSON
+`);
+        break;
+      }
       await handleIngest(options);
       break;
-    case "config":
+    }
+    case "config": {
+      if (options.help || options.h) {
+        console.log(`
+  omp config — Read and write configuration
+
+  USAGE
+    omp config get [key]        Read value (omit key for full dump)
+    omp config set <key> <val>  Write value (dot-notation: server.url)
+    omp config validate         Validate configuration
+
+  OPTIONS
+    --json    Output as JSON
+
+  EXAMPLES
+    omp config get server.url
+    omp config set server.token abc123
+    omp config validate
+`);
+        break;
+      }
       handleConfig(options, positional);
       break;
-    case "import":
+    }
+    case "import": {
+      if (options.help || options.h) {
+        console.log(`
+  omp import — Import from external sources
+
+  USAGE
+    omp import codex-history [options]
+
+  OPTIONS
+    --path <file>   Custom history file path
+    --dry-run       Show what would be imported
+    --json          Output as JSON
+`);
+        break;
+      }
       await handleImport(options, positional);
       break;
+    }
     case "backfill": {
-      if (options.help) {
-        console.log("Usage: omp backfill [OPTIONS]");
-        console.log("");
-        console.log("Scan Claude Code transcripts and Codex history, ingest into omp.db.");
-        console.log("Reads Claude JSONL from ~/.claude/projects/*/ and Codex from ~/.codex/history.jsonl");
-        console.log("");
-        console.log("Options:");
-        console.log("  --path <file>   Process a single transcript file (Claude only)");
-        console.log("  --claude-only   Only backfill Claude Code transcripts");
-        console.log("  --codex-only    Only backfill Codex history");
-        console.log("  --dry-run       Show what would be imported without writing");
-        console.log("  --json          Output results as JSON");
+      if (options.help || options.h) {
+        console.log(`
+  omp backfill — Import from Claude transcripts and Codex history
+
+  USAGE
+    omp backfill [options]
+
+  Scans ~/.claude/projects/ for JSONL transcripts and
+  ~/.codex/history.jsonl for Codex prompts.
+
+  OPTIONS
+    --path <file>     Process a single transcript file (Claude only)
+    --claude-only     Only backfill Claude Code transcripts
+    --codex-only      Only backfill Codex history
+    --dry-run         Show what would be imported without writing
+    --json            Output as JSON
+`);
         break;
       }
       const { backfillTranscripts, backfillCodex } = require("./backfill");
@@ -790,6 +1035,23 @@ async function main() {
     }
     case "db": {
       const action = positional[0];
+      if (options.help || options.h || !action) {
+        console.log(`
+  omp db — Database management
+
+  USAGE
+    omp db <subcommand> [options]
+
+  SUBCOMMANDS
+    migrate    Run database migrations
+    flush      Delete ALL local records and reset sync state
+
+  OPTIONS
+    --yes, -y   Skip confirmation (flush only)
+    --json      Output as JSON
+`);
+        break;
+      }
       if (action === "migrate") {
         const { migrateDatabase } = require("./migrate");
         const config = loadConfig();
@@ -802,16 +1064,6 @@ async function main() {
         break;
       }
       if (action === "flush") {
-        if (options.help) {
-          console.log("Usage: omp db flush [--yes]");
-          console.log("");
-          console.log("Delete ALL local records and reset sync state.");
-          console.log("");
-          console.log("Options:");
-          console.log("  --yes, -y   Skip confirmation prompt");
-          console.log("  --json      Output results as JSON");
-          break;
-        }
         const config = loadConfig();
         if (!options.yes && !options.y) {
           console.log("This will delete ALL local records and reset sync state.");
@@ -833,11 +1085,26 @@ async function main() {
         }
         break;
       }
-      console.error("Usage: omp db <migrate|flush>");
+      console.error(`Unknown subcommand: omp db ${action}`);
+      console.error("Run 'omp db --help' for available subcommands.");
       process.exitCode = 2;
       break;
     }
     case "doctor": {
+      if (options.help || options.h) {
+        console.log(`
+  omp doctor — Diagnose common issues
+
+  USAGE
+    omp doctor [options]
+
+  Checks hooks, config, database, and server connectivity.
+
+  OPTIONS
+    --json    Output as JSON
+`);
+        break;
+      }
       const { runDoctor } = require("./doctor");
       const config = loadConfig();
       const report = runDoctor(config);
@@ -858,11 +1125,8 @@ async function main() {
       break;
     }
     default:
-      console.log("Oh My Prompt CLI");
-      console.log(
-        "Commands: setup, install, uninstall, status, stats, export, sync, ingest, config, import, backfill, db, doctor"
-      );
-      console.log("Use --help with each command for options.");
+      console.error(`Unknown command: ${command}`);
+      console.error("Run 'omp --help' for available commands.");
       process.exitCode = 2;
   }
 }

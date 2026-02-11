@@ -231,7 +231,7 @@ async function runSetup(options) {
     }
 
     // --- Step 1: Server URL ---
-    const defaultUrl = config.server.url || "https://your-server.example.com";
+    const defaultUrl = config.server.url || "https://prompt.jiun.dev";
     let serverUrl;
     if (options.server) {
       serverUrl = normalizeUrl(options.server);
@@ -648,10 +648,14 @@ async function runSetup(options) {
     if (options.json) {
       process.stdout.write(JSON.stringify(result, null, 2) + "\n");
     } else if (interactive) {
-      output.write("  Setup complete! Try these commands:\n");
+      output.write("  Setup complete! Try these commands:\n\n");
+      output.write("    omp backfill    - Import existing Claude/Codex prompts\n");
+      output.write("    omp sync        - Upload prompts to server\n");
       output.write("    omp status      - View current configuration\n");
-      output.write("    omp sync        - Sync prompts to server\n");
       output.write("    omp doctor      - Check system health\n");
+      output.write("\n");
+      output.write("  Tip: Run 'omp backfill' first to import your previous prompts,\n");
+      output.write("  then 'omp sync' to upload them to the server.\n");
       output.write("\n");
     }
 

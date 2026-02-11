@@ -106,7 +106,7 @@ async function syncToServer(config, options = {}) {
   if (!serverUrl || !serverToken) {
     throw new Error(
       "Server not configured. Set server.url and server.token:\n" +
-      "  omp config set server.url https://your-server.example.com\n" +
+      "  omp config set server.url https://prompt.jiun.dev\n" +
       "  omp config set server.token YOUR_TOKEN"
     );
   }

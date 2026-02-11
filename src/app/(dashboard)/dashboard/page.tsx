@@ -181,7 +181,7 @@ export default async function DashboardPage() {
                 <Link key={s.sessionId} href={`/sessions/${s.sessionId}`} className="block">
                   <div className="flex items-center justify-between py-3 hover:bg-accent/50 -mx-2 px-2 rounded transition-colors">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-foreground truncate">{s.firstPrompt || "Empty session"}</p>
+                      <p className="text-sm text-foreground line-clamp-1 whitespace-pre-line">{s.firstPrompt || "Empty session"}</p>
                       <div className="flex items-center gap-2 mt-1">
                         {s.projectName && <Badge variant="secondary" className="text-[10px]">{s.projectName}</Badge>}
                         {s.source && <Badge variant="outline" className="text-[10px]">{s.source}</Badge>}

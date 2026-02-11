@@ -54,7 +54,7 @@ export function SessionCard({
     <Link href={`/sessions/${sessionId}`} className="block">
       <Card className="transition-colors hover:bg-accent/50 cursor-pointer">
         <CardContent className="p-4">
-          <p className="text-sm text-foreground line-clamp-2 mb-3">
+          <p className="text-sm text-foreground line-clamp-2 whitespace-pre-line mb-3">
             {firstPrompt || "Empty prompt"}
           </p>
 
