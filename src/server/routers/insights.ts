@@ -59,7 +59,7 @@ export const insightsRouter = createTRPCRouter({
 
       await cacheInsight(ctx.user.id, input.type, result, {
         dataHash: hashData(processorInput),
-        ttlHours: ext.name.includes("weekly") ? 168 : 24,
+        ttlHours: ext.cacheTtlHours ?? 24,
       });
 
       return result;
