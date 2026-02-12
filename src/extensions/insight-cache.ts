@@ -66,26 +66,27 @@ export async function cacheInsight(
   const ttl = options.ttlHours ?? 24;
   const expiresAt = new Date(Date.now() + ttl * 60 * 60 * 1000);
 
-  // Delete old insights of same type for this user
-  await db
-    .delete(schema.aiInsights)
-    .where(
-      and(
-        eq(schema.aiInsights.userId, userId),
-        eq(schema.aiInsights.insightType, insightType),
-      ),
-    );
+  // Atomic delete+insert in a transaction to prevent race conditions
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(schema.aiInsights)
+      .where(
+        and(
+          eq(schema.aiInsights.userId, userId),
+          eq(schema.aiInsights.insightType, insightType),
+        ),
+      );
 
-  // Insert new
-  await db.insert(schema.aiInsights).values({
-    userId,
-    insightType,
-    parameters: options.parameters || {},
-    dataHash: options.dataHash,
-    result: result as unknown as Record<string, unknown>,
-    model: options.model,
-    tokensUsed: options.tokensUsed,
-    expiresAt,
+    await tx.insert(schema.aiInsights).values({
+      userId,
+      insightType,
+      parameters: options.parameters || {},
+      dataHash: options.dataHash,
+      result: result as unknown as Record<string, unknown>,
+      model: options.model,
+      tokensUsed: options.tokensUsed,
+      expiresAt,
+    });
   });
 }
 

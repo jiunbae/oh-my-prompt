@@ -235,7 +235,7 @@ ${question}
   } catch (error) {
     console.error("Ask data API error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to process your question" },
       { status: 500 },
     );
   }

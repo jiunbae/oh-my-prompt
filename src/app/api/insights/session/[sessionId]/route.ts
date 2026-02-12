@@ -62,7 +62,7 @@ export async function GET(
   } catch (error) {
     console.error("Session story API error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      { error: "Failed to generate session story" },
       { status: 500 },
     );
   }

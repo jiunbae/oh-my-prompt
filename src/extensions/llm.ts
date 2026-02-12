@@ -5,9 +5,16 @@ import type { LLMConfig } from "./types";
  * Users bring their own API key via environment variables.
  */
 
+const VALID_PROVIDERS = new Set(["anthropic", "openai", "ollama", "custom"]);
+
 export function getLLMConfig(): LLMConfig | null {
   const provider = process.env.OMP_LLM_PROVIDER;
   if (!provider) return null;
+
+  if (!VALID_PROVIDERS.has(provider)) {
+    console.error(`Invalid OMP_LLM_PROVIDER: "${provider}". Valid: ${[...VALID_PROVIDERS].join(", ")}`);
+    return null;
+  }
 
   return {
     provider: provider as LLMConfig["provider"],

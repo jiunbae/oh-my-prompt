@@ -51,7 +51,8 @@ async function getSessionPrompts(
         eq(schema.prompts.sessionId, sessionId),
       ),
     )
-    .orderBy(asc(schema.prompts.timestamp));
+    .orderBy(asc(schema.prompts.timestamp))
+    .limit(200);
 
   return prompts;
 }
@@ -246,15 +247,38 @@ ${JSON.stringify(context, null, 2)}
       llmConfig,
     );
 
-    const parsed = JSON.parse(response.content);
+    // Strip markdown code fences if present
+    let content = response.content.trim();
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      content = jsonMatch[1].trim();
+    }
+
+    const parsed = JSON.parse(content);
+
+    const fallback = buildFallbackResult(sessionId, prompts);
 
     return {
-      title: parsed.title || `Session: ${context.project || sessionId.slice(0, 8)}`,
-      summary: parsed.summary || "Unable to generate summary.",
-      highlights: parsed.highlights || [],
-      recommendations: parsed.recommendations || [],
-      trends: parsed.trends || [],
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.7,
+      title: typeof parsed.title === "string" ? parsed.title : fallback.title,
+      summary: typeof parsed.summary === "string" ? parsed.summary : fallback.summary,
+      highlights: Array.isArray(parsed.highlights)
+        ? parsed.highlights.filter(
+            (h: unknown): h is InsightHighlight =>
+              typeof h === "object" && h !== null && "label" in h && "value" in h,
+          )
+        : fallback.highlights,
+      recommendations: Array.isArray(parsed.recommendations)
+        ? parsed.recommendations.filter((r: unknown): r is string => typeof r === "string")
+        : fallback.recommendations,
+      trends: Array.isArray(parsed.trends)
+        ? parsed.trends.filter(
+            (t: unknown) =>
+              typeof t === "object" && t !== null && "metric" in t && "direction" in t,
+          )
+        : undefined,
+      confidence: typeof parsed.confidence === "number"
+        ? Math.max(0, Math.min(1, parsed.confidence))
+        : 0.7,
       generatedAt: new Date().toISOString(),
     };
   } catch (error) {

@@ -133,6 +133,7 @@ export async function processUpload(
               ? {
                   qualityScore: heuristic.qualityScore,
                   topicTags: heuristic.topicTags,
+                  enrichedAt: new Date(),
                 }
               : {}),
           });
