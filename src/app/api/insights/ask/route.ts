@@ -10,6 +10,91 @@ import { eq, and, gte, sql, desc } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
+type LooseRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is LooseRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function clampConfidence(value: unknown, fallback = 0.5): number {
+  if (typeof value !== "number" || Number.isNaN(value)) return fallback;
+  return Math.max(0, Math.min(1, value));
+}
+
+function extractJsonContent(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function normalizeInsightResult(parsed: unknown): InsightResult {
+  const fallback: InsightResult = {
+    title: "Query Result",
+    summary: "Unable to generate response.",
+    highlights: [],
+    trends: [],
+    recommendations: [],
+    confidence: 0.5,
+    generatedAt: new Date().toISOString(),
+  };
+
+  if (!isRecord(parsed)) return fallback;
+
+  const highlights = Array.isArray(parsed.highlights)
+    ? parsed.highlights
+      .filter(
+        (h): h is { label: string; value: string | number } =>
+          isRecord(h) &&
+          typeof h.label === "string" &&
+          (typeof h.value === "string" || typeof h.value === "number"),
+      )
+      .slice(0, 12)
+    : [];
+
+  const trends = Array.isArray(parsed.trends)
+    ? parsed.trends
+      .filter(
+        (t): t is {
+          metric: string;
+          direction: "up" | "down" | "stable";
+          magnitude: number;
+          explanation: string;
+        } =>
+          isRecord(t) &&
+          typeof t.metric === "string" &&
+          (t.direction === "up" || t.direction === "down" || t.direction === "stable") &&
+          typeof t.magnitude === "number" &&
+          Number.isFinite(t.magnitude) &&
+          typeof t.explanation === "string",
+      )
+      .map((t) => ({
+        ...t,
+        magnitude: Math.max(0, Math.min(100, t.magnitude)),
+      }))
+      .slice(0, 10)
+    : [];
+
+  const recommendations = Array.isArray(parsed.recommendations)
+    ? parsed.recommendations
+      .filter((r): r is string => typeof r === "string")
+      .slice(0, 8)
+    : [];
+
+  return {
+    title: typeof parsed.title === "string" && parsed.title.trim()
+      ? parsed.title
+      : fallback.title,
+    summary: typeof parsed.summary === "string" && parsed.summary.trim()
+      ? parsed.summary
+      : fallback.summary,
+    highlights,
+    trends,
+    recommendations,
+    confidence: clampConfidence(parsed.confidence, fallback.confidence),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 function getDb() {
   if (!_db) {
@@ -213,23 +298,15 @@ ${question}
       llmConfig,
     );
 
-    let parsed;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(response.content);
+      parsed = JSON.parse(extractJsonContent(response.content));
     } catch {
       console.error("Failed to parse LLM response:", response.content.slice(0, 200));
       return NextResponse.json({ error: "Failed to parse response from AI model." }, { status: 502 });
     }
 
-    const result: InsightResult = {
-      title: parsed.title || "Query Result",
-      summary: parsed.summary || "Unable to generate response.",
-      highlights: parsed.highlights || [],
-      trends: parsed.trends || [],
-      recommendations: parsed.recommendations || [],
-      confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
-      generatedAt: new Date().toISOString(),
-    };
+    const result = normalizeInsightResult(parsed);
 
     return NextResponse.json(result);
   } catch (error) {
