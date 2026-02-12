@@ -102,10 +102,11 @@ export async function cleanExpiredInsights(): Promise<number> {
 /** Get all cached insights for a user */
 export async function getUserInsights(
   userId: string,
-): Promise<Array<{ type: string; result: InsightResult; generatedAt: Date }>> {
+): Promise<Array<{ id: string; type: string; result: InsightResult; generatedAt: Date }>> {
   const db = getDb();
   const rows = await db
     .select({
+      id: schema.aiInsights.id,
       type: schema.aiInsights.insightType,
       result: schema.aiInsights.result,
       generatedAt: schema.aiInsights.generatedAt,
@@ -120,6 +121,7 @@ export async function getUserInsights(
     .orderBy(sql`generated_at DESC`);
 
   return rows.map((r) => ({
+    id: r.id,
     type: r.type,
     result: r.result as InsightResult,
     generatedAt: r.generatedAt,

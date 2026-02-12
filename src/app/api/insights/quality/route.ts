@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
-import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "@/db/schema";
 import { sql, eq, and } from "drizzle-orm";
 import { handler as enrichHandler } from "@/extensions/prompt-quality/processor";
+
+let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
+function getDb() {
+  if (!db) {
+    const client = postgres(process.env.DATABASE_URL!);
+    db = drizzle(client, { schema });
+  }
+  return db;
+}
 
 async function getSessionUserId(): Promise<string | null> {
   const cookieStore = await cookies();
@@ -26,13 +35,7 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    return NextResponse.json({ error: "Database not configured" }, { status: 500 });
-  }
-
-  const client = postgres(connectionString);
-  const db = drizzle(client, { schema });
+  const db = getDb();
 
   try {
     const [
@@ -101,7 +104,7 @@ export async function GET() {
     }
 
     // Build topic array
-    const topTopics = (topicRows as Array<{ tag: string; count: number }>).map(
+    const topTopics = (topicRows as unknown as Array<{ tag: string; count: number }>).map(
       (r) => ({ tag: r.tag, count: Number(r.count) }),
     );
 
@@ -118,8 +121,6 @@ export async function GET() {
       { error: "Failed to load quality insights" },
       { status: 500 },
     );
-  } finally {
-    await client.end();
   }
 }
 

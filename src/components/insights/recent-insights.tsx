@@ -27,6 +27,7 @@ interface InsightResult {
 }
 
 interface CachedInsight {
+  id: string;
   type: string;
   result: InsightResult;
   generatedAt: string;
@@ -64,7 +65,7 @@ function InsightCard({ insight }: { insight: CachedInsight }) {
             </p>
           </div>
           <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
-            {new Date(insight.generatedAt).toLocaleDateString()}
+            {new Date(insight.generatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
           </span>
         </div>
 
@@ -164,8 +165,8 @@ export function RecentInsights() {
 
         {!loading && !error && insights.length > 0 && (
           <div className="space-y-3">
-            {insights.map((insight, i) => (
-              <InsightCard key={`${insight.type}-${i}`} insight={insight} />
+            {insights.map((insight) => (
+              <InsightCard key={insight.id} insight={insight} />
             ))}
           </div>
         )}

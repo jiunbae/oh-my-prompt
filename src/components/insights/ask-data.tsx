@@ -150,7 +150,7 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
           Confidence: {Math.round(result.confidence * 100)}%
         </Badge>
         <span>
-          Generated {new Date(result.generatedAt).toLocaleString()}
+          Generated {new Date(result.generatedAt).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
         </span>
       </div>
     </div>

@@ -16,6 +16,7 @@ import type {
 } from "@/extensions/types";
 
 interface CachedInsight {
+  id: string;
   type: string;
   result: InsightResult;
   generatedAt: string;
