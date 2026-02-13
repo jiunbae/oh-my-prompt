@@ -87,6 +87,11 @@ export const prompts = pgTable(
     syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 
+    // Enrichment fields (Phase 3)
+    qualityScore: integer("quality_score"),
+    topicTags: text("topic_tags").array(),
+    enrichedAt: timestamp("enriched_at", { withTimezone: true }),
+
     searchVector: tsvector("search_vector"),
   },
   (table) => [
@@ -122,6 +127,33 @@ export const promptTags = pgTable(
       .references(() => tags.id, { onDelete: "cascade" }),
   },
   (table) => [primaryKey({ columns: [table.promptId, table.tagId] })]
+);
+
+// AI-generated insights cache
+export const aiInsights = pgTable(
+  "ai_insights",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    insightType: varchar("insight_type", { length: 100 }).notNull(),
+    parameters: jsonb("parameters").notNull().default({}),
+    dataHash: varchar("data_hash", { length: 64 }).notNull(),
+    result: jsonb("result").notNull(),
+    model: varchar("model", { length: 100 }),
+    tokensUsed: integer("tokens_used"),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("idx_ai_insights_user_type").on(table.userId, table.insightType),
+    index("idx_ai_insights_expires").on(table.expiresAt),
+  ]
 );
 
 // Daily aggregations table
@@ -182,3 +214,5 @@ export type Tag = typeof tags.$inferSelect;
 export type NewTag = typeof tags.$inferInsert;
 export type PromptTag = typeof promptTags.$inferSelect;
 export type AnalyticsDaily = typeof analyticsDaily.$inferSelect;
+export type AiInsight = typeof aiInsights.$inferSelect;
+export type NewAiInsight = typeof aiInsights.$inferInsert;

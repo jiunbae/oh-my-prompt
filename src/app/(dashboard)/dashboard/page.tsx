@@ -1,11 +1,12 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MiniActivityChart } from "@/components/charts/mini-activity-chart";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
 import { getDashboardData } from "@/lib/dashboard";
 import { formatNumber } from "@/lib/analytics";
+import { InsightCards } from "@/components/insights/insight-cards";
 
 export const dynamic = "force-dynamic";
 
@@ -200,66 +201,13 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* AI Insights Placeholders */}
+      {/* AI Insights */}
       <div>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-purple-400" />
           AI Insights
         </h2>
-        <div className="grid md:grid-cols-3 gap-4">
-          <Card className="border-dashed">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Prompt Quality</CardTitle>
-                <Badge variant="secondary">Coming Soon</Badge>
-              </div>
-              <CardDescription>
-                AI analysis of your prompt clarity, specificity, and effectiveness
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-4xl font-bold text-muted-foreground/20">-- / 100</div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-dashed">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Suggestions</CardTitle>
-                <Badge variant="secondary">Coming Soon</Badge>
-              </div>
-              <CardDescription>
-                Personalized tips to improve your prompting patterns
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-3 bg-muted/50 rounded" style={{ width: `${100 - i * 15}%` }} />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-dashed">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">Pattern Analysis</CardTitle>
-                <Badge variant="secondary">Coming Soon</Badge>
-              </div>
-              <CardDescription>
-                Workflow patterns and peak productivity hours
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-center py-2">
-                <svg className="h-10 w-10 text-muted-foreground/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        <InsightCards />
       </div>
     </div>
   );

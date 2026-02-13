@@ -3,6 +3,7 @@ import { env } from "@/env";
 import { updateDailyAnalytics } from "./sync";
 import type { UploadRecord, UploadResult } from "./upload-types";
 import { postprocessUploadRecordForDb } from "./upload-postprocess";
+import { computeHeuristicScore } from "@/extensions/prompt-quality/processor";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
 
@@ -11,11 +12,10 @@ function sanitizeEventId(eventId: string): string {
   return eventId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-function buildEventKey(userToken: string, createdAt: string, eventId: string): string {
-  const date = new Date(createdAt);
-  const yyyy = date.getUTCFullYear();
-  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(date.getUTCDate()).padStart(2, "0");
+function buildEventKey(userToken: string, createdAt: Date, eventId: string): string {
+  const yyyy = createdAt.getUTCFullYear();
+  const mm = String(createdAt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(createdAt.getUTCDate()).padStart(2, "0");
   const safeId = sanitizeEventId(eventId);
   return `${userToken}/${yyyy}/${mm}/${dd}/${safeId}.json`;
 }
@@ -56,13 +56,20 @@ export async function processUpload(
         continue;
       }
 
+      const createdAt = new Date(record.created_at);
+      if (Number.isNaN(createdAt.getTime())) {
+        rejected++;
+        errors.push(`Invalid record ${record.event_id}: created_at is not a valid date`);
+        continue;
+      }
+
       const processed = postprocessUploadRecordForDb(record, {
         redactEnabled,
         redactMask,
       });
 
-      const eventKey = buildEventKey(userToken, record.created_at, record.event_id);
-      const dateStr = new Date(record.created_at).toISOString().split("T")[0];
+      const eventKey = buildEventKey(userToken, createdAt, record.event_id);
+      const dateStr = createdAt.toISOString().split("T")[0];
 
       try {
         // Check if event_key already exists
@@ -97,12 +104,20 @@ export async function processUpload(
           continue;
         }
 
+        // Compute heuristic quality score for user_input prompts (fast, no LLM)
+        const isUserInput = promptType === "user_input";
+        const heuristic = isUserInput
+          ? computeHeuristicScore(processed.promptText, {
+              hasContext: !!(record.project || record.cwd),
+            })
+          : null;
+
         // Insert new record
         await db
           .insert(schema.prompts)
           .values({
             eventKey,
-            timestamp: new Date(record.created_at),
+            timestamp: createdAt,
             workingDirectory: record.cwd || "unknown",
             promptLength: processed.promptLength,
             promptText: processed.promptText,
@@ -119,6 +134,14 @@ export async function processUpload(
             tokenEstimateResponse: processed.tokenEstimateResponse,
             wordCountResponse: processed.wordCountResponse,
             searchVector: sql`to_tsvector('english', ${processed.promptText} || ' ' || ${processed.responseText ?? ""})`,
+            // Inline heuristic enrichment for user_input prompts
+            ...(heuristic
+              ? {
+                  qualityScore: heuristic.qualityScore,
+                  topicTags: heuristic.topicTags,
+                  enrichedAt: new Date(),
+                }
+              : {}),
           });
 
         affectedDates.add(dateStr);
