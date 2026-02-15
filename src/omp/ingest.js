@@ -199,8 +199,19 @@ function ingestPayload(rawPayload, config) {
     const insertResult = insertPrompt(db, record);
     if (insertResult.changes === 0) {
       const existing = db
-        .prepare("SELECT id FROM prompts WHERE event_id = ? LIMIT 1")
+        .prepare("SELECT id, response_text FROM prompts WHERE event_id = ? LIMIT 1")
         .get(record.event_id);
+      // Update response_text on existing record if it's missing and the new payload has it
+      if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
+        updatePromptWithResponse(
+          db,
+          existing.id,
+          record.response_text,
+          record.token_estimate_response,
+          record.word_count_response
+        );
+        return { ok: true, id: existing.id, updated: true, deduped: true };
+      }
       return { ok: true, id: existing?.id || record.id, updated: false, deduped: true };
     }
     updateState({ lastCapture: record.created_at });
