@@ -161,7 +161,11 @@ async function startServer(config) {
   generateComposeFile(serveConfig);
 
   console.log("Pulling images...");
-  execSync("docker compose pull", { cwd: SERVE_DIR, stdio: "inherit" });
+  try {
+    execSync("docker compose pull", { cwd: SERVE_DIR, stdio: "inherit" });
+  } catch {
+    console.log("Pull failed (cached images will be used if available).");
+  }
 
   console.log("Starting containers...");
   try {
