@@ -23,7 +23,7 @@ A self-hosted prompt journal + CLI that captures every interaction<br />with Cla
 
 <br />
 
-**[Getting Started](#-getting-started)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Self-Hosting](#-self-hosting)** · **[Contributing](#-contributing)**
+**[Getting Started](#-getting-started)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Local Mode](#-local-dashboard)** · **[Server Deploy](#-server-deployment)** · **[Contributing](#-contributing)**
 
 <br />
 
@@ -73,22 +73,27 @@ Local SQLite → server API<br/>Works offline, syncs when ready
 ## How It Works
 
 ```
-  You                    CLI                     Server
-  ───                    ───                     ──────
+  You                    CLI                      Dashboard
+  ───                    ───                      ─────────
 
   claude "fix the bug"
        │
        └──── hook ────▶  omp ingest ──▶ SQLite (local)
                               │
-                              └── omp sync ──▶ POST /api/sync/upload
-                                                      │
-                                               ┌──────┴──────┐
-                                               │  PostgreSQL  │
-                                               │  Analytics   │
-                                               └──────────────┘
-                                                      │
-                                               your-server.com
-                                          (dashboard, charts, insights)
+                              ├── omp sync ──▶ POST /api/sync/upload
+                              │                       │
+                              │                ┌──────┴──────┐
+                              │                │  PostgreSQL  │
+                              │                └─────────────┘
+                              │                       │
+                              │              ┌────────┴────────┐
+                              │              │ omp serve        │  ← local mode
+                              │              │ localhost:3000   │
+                              │              └─────────────────┘
+                              │                      or
+                              │              ┌─────────────────┐
+                              └──────────────│ your-server.com │  ← server mode
+                                             └─────────────────┘
 ```
 
 <br />
@@ -111,6 +116,31 @@ That's it. Now use Claude Code or Codex normally — prompts are captured automa
 ```bash
 claude "Refactor this function to use async/await"
 #        ↑ captured silently in the background
+```
+
+### Choose Your Mode
+
+Oh My Prompt supports two modes depending on your needs:
+
+| | **Local Mode** | **Server Mode** |
+|:--|:--|:--|
+| **Setup** | `omp serve` | Deploy to your server |
+| **Requires** | Docker | Docker + domain |
+| **Dashboard** | `http://localhost:3000` | `https://your-domain.com` |
+| **Data** | Local only | Multi-device sync |
+| **Best for** | Solo use, privacy | Teams, cross-machine |
+
+**Local Mode** — everything runs on your machine via Docker:
+```bash
+omp serve        # Start dashboard at http://localhost:3000
+omp sync         # Sync captured prompts to local dashboard
+```
+
+**Server Mode** — deploy once, sync from anywhere:
+```bash
+omp config set server.url https://your-domain.com
+omp config set server.token YOUR_TOKEN
+omp sync         # Sync to remote server
 ```
 
 <br />
@@ -192,9 +222,10 @@ $ omp stats --group-by week
 | `omp doctor` | Validate setup, diagnose issues |
 | `omp sync` | Sync local prompts to server |
 | `omp sync status` | Show sync history |
+| `omp backfill` | Import from Claude transcripts / Codex history |
+| `omp serve` | Start local dashboard server (Docker) |
+| `omp serve stop` | Stop local dashboard server |
 | `omp stats [--group-by day\|week]` | View statistics |
-| `omp report [--since DATE]` | Detailed text report |
-| `omp analyze <id\|--file\|--stdin>` | Prompt quality analysis |
 | `omp export [--format json\|jsonl\|csv]` | Export prompts |
 | `omp import codex-history` | Import from Codex |
 | `omp config get\|set\|validate` | Manage configuration |
@@ -266,45 +297,87 @@ The self-hosted web dashboard turns raw prompts into insights.
 
 <br />
 
-## 🏗 Self-Hosting
+## 🏗 Local Dashboard
 
-### Quick Start
+The fastest way to view your data. No server deployment needed — just Docker.
+
+```bash
+# Start (pulls images and runs PostgreSQL + Redis + App)
+omp serve
+
+# Dashboard is now at http://localhost:3000
+# Register an account, then:
+omp config set server.url http://localhost:3000
+omp config set server.token YOUR_TOKEN   # from Settings page
+omp backfill                              # import past transcripts
+omp sync                                  # sync to local dashboard
+```
+
+```bash
+omp serve status    # check container status
+omp serve logs      # tail app logs
+omp serve stop      # stop (data is preserved)
+omp serve           # restart — your data is still there
+```
+
+**Configuration:**
+
+```bash
+omp config set serve.port 3030                # change port (default: 3000)
+omp config set serve.adminEmail you@email.com # auto-seed admin account
+omp config set serve.image my-registry/omp    # custom Docker image
+```
+
+<br />
+
+## 🌐 Server Deployment
+
+For multi-device sync and team use, deploy Oh My Prompt to your own server.
+
+### Docker Compose
 
 ```bash
 git clone https://github.com/jiunbae/oh-my-prompt.git
 cd oh-my-prompt
-
-docker compose up -d          # Start PostgreSQL
-pnpm install && pnpm db:push  # Install deps + migrate
-pnpm dev                      # http://localhost:3000
+docker compose up -d    # Starts PostgreSQL + Redis + App on :3000
 ```
 
-### Docker
+### Docker (standalone)
 
 ```bash
-docker build -t oh-my-prompt .
-
 docker run -p 3000:3000 \
   -e DATABASE_URL=postgresql://user:pass@host:5432/prompts \
-  oh-my-prompt
+  -e SESSION_SECRET=$(openssl rand -hex 32) \
+  -e OMP_ADMIN_EMAIL=you@email.com \
+  registry.jiun.dev/oh-my-prompt:latest
 ```
 
 ### Environment Variables
 
-| Variable | Required | Description |
-|:---------|:--------:|:------------|
-| `DATABASE_URL` | **Yes** | PostgreSQL connection string |
+| Variable | Required | Default | Description |
+|:---------|:--------:|:--------|:------------|
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
+| `SESSION_SECRET` | **Yes** | random | Cookie signing key (`openssl rand -hex 32`) |
+| `REDIS_URL` | No | `redis://localhost:6379` | Redis for caching |
+| `OMP_ADMIN_EMAIL` | No | — | Auto-seed admin email on startup |
+| `NODE_ENV` | No | `production` | Environment mode |
 
 ### Kubernetes
 
-Example k8s manifests are in `k8s/`. Update secrets and ingress for your environment.
+Example manifests in `k8s/`. Update secrets and ingress for your cluster:
 
-### Connect CLI → Server
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/
+```
+
+### Connect CLI to Server
 
 ```bash
 omp config set server.url https://your-domain.com
-omp config set server.token YOUR_TOKEN
-omp sync  # verify connection
+omp config set server.token YOUR_TOKEN   # from Settings page after registration
+omp backfill     # import past Claude/Codex transcripts
+omp sync         # upload to server
 ```
 
 <br />
