@@ -59,6 +59,11 @@ function printHelp() {
     stats              Show prompt statistics
     export             Export records (json, csv, jsonl)
 
+    serve              Start local dashboard server (Docker)
+    serve stop         Stop local dashboard server
+    serve status       Show local server status
+    serve logs         Tail local server logs
+
     config get [key]   Read config value (omit key for full dump)
     config set <k> <v> Write config value
     config validate    Validate configuration
@@ -1122,6 +1127,43 @@ async function main() {
         }
       }
       if (!report.ok) process.exitCode = 1;
+      break;
+    }
+    case "serve": {
+      const action = positional[0] || null;
+      if (options.help || options.h) {
+        console.log(`
+  omp serve — Local dashboard server via Docker
+
+  USAGE
+    omp serve              Start local dashboard
+    omp serve stop         Stop local dashboard
+    omp serve status       Show container status
+    omp serve logs         Tail app logs
+
+  CONFIG
+    omp config set serve.image <image>       Docker image (default: registry.jiun.dev/oh-my-prompt:latest)
+    omp config set serve.port <port>         Local port (default: 3000)
+    omp config set serve.adminEmail <email>  Auto-seeded admin email
+
+  Requires Docker and Docker Compose.
+`);
+        break;
+      }
+      const { startServer, stopServer, showStatus, showLogs } = require("./serve");
+      if (action === "stop") {
+        stopServer();
+      } else if (action === "status") {
+        showStatus();
+      } else if (action === "logs") {
+        showLogs(options.follow || options.f);
+      } else if (!action) {
+        const config = loadConfig();
+        await startServer(config);
+      } else {
+        console.error(`Unknown subcommand: omp serve ${action}`);
+        process.exitCode = 2;
+      }
       break;
     }
     default:
