@@ -90,6 +90,12 @@ export const prompts = pgTable(
 
     // Enrichment fields (Phase 3)
     qualityScore: integer("quality_score"),
+    qualityClarity: integer("quality_clarity"),       // 0-100: Is the goal clear?
+    qualitySpecificity: integer("quality_specificity"), // 0-100: Are requirements specific?
+    qualityContext: integer("quality_context"),         // 0-100: Is background provided?
+    qualityConstraints: integer("quality_constraints"), // 0-100: Are boundaries defined?
+    qualityStructure: integer("quality_structure"),     // 0-100: Is it well-organized?
+    qualityDetails: jsonb("quality_details"),           // Full breakdown with explanations
     topicTags: text("topic_tags").array(),
     enrichedAt: timestamp("enriched_at", { withTimezone: true }),
 

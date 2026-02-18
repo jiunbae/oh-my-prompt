@@ -3,7 +3,8 @@ import { getLLMConfig, callLLM } from "../llm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
-import { sql, eq, and, isNull } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
+import { scorePrompt } from "@/services/quality-scorer";
 
 let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 function getDb() {
@@ -160,7 +161,7 @@ function parseLLMResponse(
 export async function handler(input: ProcessorInput): Promise<InsightResult> {
   const db = getDb();
 
-  // Fetch unenriched prompts for the user
+  // Fetch unenriched prompts OR prompts missing dimension scores (backfill)
     const unenriched = await db
       .select({
         id: schema.prompts.id,
@@ -172,8 +173,8 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
       .where(
         and(
           eq(schema.prompts.userId, input.userId),
-          isNull(schema.prompts.enrichedAt),
           eq(schema.prompts.promptType, "user_input"),
+          sql`(${schema.prompts.enrichedAt} IS NULL OR ${schema.prompts.qualityClarity} IS NULL)`,
         ),
       )
       .limit(200);
@@ -229,12 +230,22 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
             batch.map((p) => p.id),
           );
 
-          // Update database with LLM scores
+          // Update database with LLM scores + heuristic dimensions
+          const batchPromptMap = new Map(batch.map((p) => [p.id, p]));
           for (const score of scores) {
+            const promptData = batchPromptMap.get(score.id);
+            const dims = promptData ? scorePrompt(promptData.promptText) : null;
+            const overallScore = dims?.overall ?? score.quality_score;
             await db
               .update(schema.prompts)
               .set({
-                qualityScore: score.quality_score,
+                qualityScore: overallScore,
+                qualityClarity: dims?.clarity ?? null,
+                qualitySpecificity: dims?.specificity ?? null,
+                qualityContext: dims?.context ?? null,
+                qualityConstraints: dims?.constraints ?? null,
+                qualityStructure: dims?.structure ?? null,
+                qualityDetails: dims ? { method: "llm+heuristic-v1", llmScore: score.quality_score, ...dims } : null,
                 topicTags: score.topic_tags,
                 enrichedAt: new Date(),
               })
@@ -246,7 +257,7 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
               );
 
             totalScored++;
-            totalQuality += score.quality_score;
+            totalQuality += overallScore;
             for (const tag of score.topic_tags) {
               topicCounts[tag] = (topicCounts[tag] || 0) + 1;
             }
@@ -259,10 +270,17 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
               const heuristic = computeHeuristicScore(prompt.promptText, {
                 hasContext: !!(prompt.projectName || prompt.workingDirectory),
               });
+              const dims = scorePrompt(prompt.promptText);
               await db
                 .update(schema.prompts)
                 .set({
-                  qualityScore: heuristic.qualityScore,
+                  qualityScore: dims.overall,
+                  qualityClarity: dims.clarity,
+                  qualitySpecificity: dims.specificity,
+                  qualityContext: dims.context,
+                  qualityConstraints: dims.constraints,
+                  qualityStructure: dims.structure,
+                  qualityDetails: { method: "heuristic-v1", ...dims },
                   topicTags: heuristic.topicTags,
                   enrichedAt: new Date(),
                 })
@@ -274,7 +292,7 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
                 );
 
               totalScored++;
-              totalQuality += heuristic.qualityScore;
+              totalQuality += dims.overall;
               for (const tag of heuristic.topicTags) {
                 topicCounts[tag] = (topicCounts[tag] || 0) + 1;
               }
@@ -287,10 +305,17 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
             const heuristic = computeHeuristicScore(prompt.promptText, {
               hasContext: !!(prompt.projectName || prompt.workingDirectory),
             });
+            const dims = scorePrompt(prompt.promptText);
             await db
               .update(schema.prompts)
               .set({
-                qualityScore: heuristic.qualityScore,
+                qualityScore: dims.overall,
+                qualityClarity: dims.clarity,
+                qualitySpecificity: dims.specificity,
+                qualityContext: dims.context,
+                qualityConstraints: dims.constraints,
+                qualityStructure: dims.structure,
+                qualityDetails: { method: "heuristic-v1", ...dims },
                 topicTags: heuristic.topicTags,
                 enrichedAt: new Date(),
               })
@@ -302,7 +327,7 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
               );
 
             totalScored++;
-            totalQuality += heuristic.qualityScore;
+            totalQuality += dims.overall;
             for (const tag of heuristic.topicTags) {
               topicCounts[tag] = (topicCounts[tag] || 0) + 1;
             }
@@ -314,10 +339,17 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
           const heuristic = computeHeuristicScore(prompt.promptText, {
             hasContext: !!(prompt.projectName || prompt.workingDirectory),
           });
+          const dims = scorePrompt(prompt.promptText);
           await db
             .update(schema.prompts)
             .set({
-              qualityScore: heuristic.qualityScore,
+              qualityScore: dims.overall,
+              qualityClarity: dims.clarity,
+              qualitySpecificity: dims.specificity,
+              qualityContext: dims.context,
+              qualityConstraints: dims.constraints,
+              qualityStructure: dims.structure,
+              qualityDetails: { method: "heuristic-v1", ...dims },
               topicTags: heuristic.topicTags,
               enrichedAt: new Date(),
             })
@@ -329,7 +361,7 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
             );
 
           totalScored++;
-          totalQuality += heuristic.qualityScore;
+          totalQuality += dims.overall;
           for (const tag of heuristic.topicTags) {
             topicCounts[tag] = (topicCounts[tag] || 0) + 1;
           }
