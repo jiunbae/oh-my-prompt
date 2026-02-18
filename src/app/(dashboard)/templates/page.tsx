@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { useUser } from "@/contexts/user-context";
 
 interface TemplateVariable {
   name: string;
@@ -36,6 +37,10 @@ const CATEGORIES = [
   "other",
 ];
 
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function extractVariables(template: string): string[] {
   const matches = template.match(/\{\{\s*(\w+)\s*\}\}/g) || [];
   const names = matches.map((m) => m.replace(/\{\{\s*|\s*\}\}/g, ""));
@@ -43,6 +48,7 @@ function extractVariables(template: string): string[] {
 }
 
 export default function TemplatesPage() {
+  const { user } = useUser();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -189,13 +195,11 @@ export default function TemplatesPage() {
       defaults[v.name] = v.default || "";
     }
     setPreviewValues(defaults);
-    // Render locally
+    // Render locally with escaped regex and replacer callback
     let rendered = t.template;
     for (const [key, val] of Object.entries(defaults)) {
-      rendered = rendered.replace(
-        new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g"),
-        val || `{{${key}}}`
-      );
+      const regex = new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, "g");
+      rendered = rendered.replace(regex, () => val || `{{${key}}}`);
     }
     setPreviewResult(rendered);
   };
@@ -205,10 +209,8 @@ export default function TemplatesPage() {
     setPreviewValues(newValues);
     let rendered = template.template;
     for (const [key, val] of Object.entries(newValues)) {
-      rendered = rendered.replace(
-        new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g"),
-        val || `{{${key}}}`
-      );
+      const regex = new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, "g");
+      rendered = rendered.replace(regex, () => val || `{{${key}}}`);
     }
     setPreviewResult(rendered);
   };
@@ -231,6 +233,8 @@ export default function TemplatesPage() {
       console.error("Use template error:", error);
     }
   };
+
+  const isOwner = (t: Template) => user?.id === t.userId;
 
   return (
     <div className="space-y-6">
@@ -482,25 +486,29 @@ export default function TemplatesPage() {
                     >
                       {copiedId === t.id ? "Copied!" : "Use"}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleEditClick(t)}
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDelete(t.id)}
-                      className="text-red-400 hover:text-red-300"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </Button>
+                    {isOwner(t) && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditClick(t)}
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDelete(t.id)}
+                          className="text-red-400 hover:text-red-300"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
 

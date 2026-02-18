@@ -6,6 +6,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
 import crypto from "crypto";
+import { z } from "zod";
 
 function getDb() {
   const connectionString = process.env.DATABASE_URL;
@@ -21,8 +22,21 @@ async function getSession() {
   return parseSessionToken(sessionToken);
 }
 
+const createShareSchema = z.object({
+  promptId: z.string().uuid("promptId must be a valid UUID"),
+  expiresIn: z
+    .number()
+    .int()
+    .positive()
+    .max(8760) // max 1 year in hours
+    .nullable()
+    .optional()
+    .default(null),
+});
+
 // POST /api/share - Create a share link
 export async function POST(request: NextRequest) {
+  const { db, client } = getDb();
   try {
     const session = await getSession();
     if (!session) {
@@ -30,13 +44,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { promptId, expiresIn } = body; // expiresIn in hours, null = never
-
-    if (!promptId) {
-      return NextResponse.json({ error: "promptId is required" }, { status: 400 });
+    const parsed = createShareSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid payload", details: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
-
-    const { db, client } = getDb();
+    const { promptId, expiresIn } = parsed.data;
 
     // Verify the prompt belongs to the user
     const [prompt] = await db
@@ -51,7 +66,6 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (!prompt) {
-      await client.end();
       return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
     }
 
@@ -70,24 +84,23 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    await client.end();
-
     return NextResponse.json({ shared }, { status: 201 });
   } catch (error) {
     console.error("Share POST error:", error);
     return NextResponse.json({ error: "Failed to create share link" }, { status: 500 });
+  } finally {
+    await client.end();
   }
 }
 
 // GET /api/share - List user's shared links
 export async function GET() {
+  const { db, client } = getDb();
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
-
-    const { db, client } = getDb();
 
     const shares = await db
       .select({
@@ -106,17 +119,18 @@ export async function GET() {
       .where(eq(schema.sharedPrompts.userId, session.userId))
       .orderBy(sql`${schema.sharedPrompts.createdAt} DESC`);
 
-    await client.end();
-
     return NextResponse.json({ shares });
   } catch (error) {
     console.error("Share GET error:", error);
     return NextResponse.json({ error: "Failed to fetch shares" }, { status: 500 });
+  } finally {
+    await client.end();
   }
 }
 
 // DELETE /api/share - Revoke a share link (id in body or query)
 export async function DELETE(request: NextRequest) {
+  const { db, client } = getDb();
   try {
     const session = await getSession();
     if (!session) {
@@ -130,8 +144,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const { db, client } = getDb();
-
     await db
       .update(schema.sharedPrompts)
       .set({ isActive: false })
@@ -142,11 +154,11 @@ export async function DELETE(request: NextRequest) {
         )
       );
 
-    await client.end();
-
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Share DELETE error:", error);
     return NextResponse.json({ error: "Failed to revoke share" }, { status: 500 });
+  } finally {
+    await client.end();
   }
 }

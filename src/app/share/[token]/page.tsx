@@ -21,7 +21,11 @@ interface SharedPromptData {
   sharedAt: Date | null;
 }
 
-async function getSharedPrompt(token: string): Promise<SharedPromptData | null> {
+/**
+ * Read-only fetch: returns shared prompt data WITHOUT incrementing view count.
+ * Used by generateMetadata so crawlers / metadata prefetches don't inflate counts.
+ */
+async function getSharedPromptReadOnly(token: string): Promise<SharedPromptData | null> {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) return null;
 
@@ -29,7 +33,6 @@ async function getSharedPrompt(token: string): Promise<SharedPromptData | null> 
   const db = drizzle(client, { schema });
 
   try {
-    // Find the shared prompt
     const [shared] = await db
       .select()
       .from(schema.sharedPrompts)
@@ -41,18 +44,9 @@ async function getSharedPrompt(token: string): Promise<SharedPromptData | null> 
       )
       .limit(1);
 
-    if (!shared) {
-      await client.end();
-      return null;
-    }
+    if (!shared) return null;
+    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) return null;
 
-    // Check expiry
-    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) {
-      await client.end();
-      return null;
-    }
-
-    // Fetch the prompt
     const [prompt] = await db
       .select({
         id: schema.prompts.id,
@@ -70,18 +64,70 @@ async function getSharedPrompt(token: string): Promise<SharedPromptData | null> 
       .where(eq(schema.prompts.id, shared.promptId))
       .limit(1);
 
-    if (!prompt) {
-      await client.end();
-      return null;
-    }
+    if (!prompt) return null;
 
-    // Increment view count
+    return {
+      ...prompt,
+      sharedAt: shared.createdAt,
+    };
+  } catch (error) {
+    console.error("Error fetching shared prompt (read-only):", error);
+    return null;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Fetch shared prompt AND increment view count.
+ * Used only on actual page render.
+ */
+async function getSharedPromptAndIncrement(token: string): Promise<SharedPromptData | null> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) return null;
+
+  const client = postgres(connectionString);
+  const db = drizzle(client, { schema });
+
+  try {
+    const [shared] = await db
+      .select()
+      .from(schema.sharedPrompts)
+      .where(
+        and(
+          eq(schema.sharedPrompts.shareToken, token),
+          eq(schema.sharedPrompts.isActive, true)
+        )
+      )
+      .limit(1);
+
+    if (!shared) return null;
+    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) return null;
+
+    const [prompt] = await db
+      .select({
+        id: schema.prompts.id,
+        promptText: schema.prompts.promptText,
+        responseText: schema.prompts.responseText,
+        timestamp: schema.prompts.timestamp,
+        projectName: schema.prompts.projectName,
+        source: schema.prompts.source,
+        promptType: schema.prompts.promptType,
+        qualityScore: schema.prompts.qualityScore,
+        tokenEstimate: schema.prompts.tokenEstimate,
+        tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
+      })
+      .from(schema.prompts)
+      .where(eq(schema.prompts.id, shared.promptId))
+      .limit(1);
+
+    if (!prompt) return null;
+
+    // Increment view count only here (page render)
     await db
       .update(schema.sharedPrompts)
       .set({ viewCount: sql`${schema.sharedPrompts.viewCount} + 1` })
       .where(eq(schema.sharedPrompts.id, shared.id));
-
-    await client.end();
 
     return {
       ...prompt,
@@ -89,8 +135,9 @@ async function getSharedPrompt(token: string): Promise<SharedPromptData | null> 
     };
   } catch (error) {
     console.error("Error fetching shared prompt:", error);
-    await client.end();
     return null;
+  } finally {
+    await client.end();
   }
 }
 
@@ -100,7 +147,7 @@ export async function generateMetadata({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const prompt = await getSharedPrompt(token);
+  const prompt = await getSharedPromptReadOnly(token);
 
   if (!prompt) {
     return { title: "Shared Prompt - Oh My Prompt" };
@@ -119,7 +166,7 @@ export default async function SharedPromptPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const prompt = await getSharedPrompt(token);
+  const prompt = await getSharedPromptAndIncrement(token);
 
   if (!prompt) {
     notFound();

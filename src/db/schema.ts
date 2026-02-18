@@ -211,7 +211,8 @@ export const sharedPrompts = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
-    index("idx_shared_token").on(table.shareToken),
+    index("idx_shared_user").on(table.userId),
+    index("idx_shared_prompt").on(table.promptId),
   ]
 );
 

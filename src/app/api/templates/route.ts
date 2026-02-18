@@ -5,6 +5,7 @@ import * as schema from "@/db/schema";
 import { eq, or, and, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { z } from "zod";
 
 function getDb() {
   const connectionString = process.env.DATABASE_URL;
@@ -20,14 +21,39 @@ async function getSession() {
   return parseSessionToken(sessionToken);
 }
 
+const CATEGORIES = [
+  "debugging",
+  "code-review",
+  "feature",
+  "refactoring",
+  "testing",
+  "documentation",
+  "other",
+] as const;
+
+const templateVariableSchema = z.object({
+  name: z.string().min(1).max(100).regex(/^\w+$/, "Variable names must be alphanumeric/underscore only"),
+  default: z.string().max(1000).default(""),
+  description: z.string().max(500).default(""),
+});
+
+const createTemplateSchema = z.object({
+  title: z.string().min(1).max(255),
+  description: z.string().max(2000).nullable().optional(),
+  template: z.string().min(1).max(50000),
+  variables: z.array(templateVariableSchema).max(50).default([]),
+  category: z.enum(CATEGORIES).nullable().optional(),
+  isPublic: z.boolean().default(false),
+});
+
 export async function GET(request: NextRequest) {
+  const { db, client } = getDb();
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    const { db, client } = getDb();
     const url = new URL(request.url);
     const category = url.searchParams.get("category");
 
@@ -48,16 +74,17 @@ export async function GET(request: NextRequest) {
       .where(and(...conditions))
       .orderBy(sql`${schema.promptTemplates.updatedAt} DESC`);
 
-    await client.end();
-
     return NextResponse.json({ templates });
   } catch (error) {
     console.error("Templates GET error:", error);
     return NextResponse.json({ error: "Failed to fetch templates" }, { status: 500 });
+  } finally {
+    await client.end();
   }
 }
 
 export async function POST(request: NextRequest) {
+  const { db, client } = getDb();
   try {
     const session = await getSession();
     if (!session) {
@@ -65,16 +92,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, description, template, variables, category, isPublic } = body;
-
-    if (!title || !template) {
+    const parsed = createTemplateSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Title and template are required" },
+        { error: "Invalid payload", details: parsed.error.flatten() },
         { status: 400 }
       );
     }
-
-    const { db, client } = getDb();
+    const { title, description, template, variables, category, isPublic } = parsed.data;
 
     const [created] = await db
       .insert(schema.promptTemplates)
@@ -83,17 +108,17 @@ export async function POST(request: NextRequest) {
         title,
         description: description || null,
         template,
-        variables: variables || [],
+        variables,
         category: category || null,
-        isPublic: isPublic ?? false,
+        isPublic,
       })
       .returning();
-
-    await client.end();
 
     return NextResponse.json({ template: created }, { status: 201 });
   } catch (error) {
     console.error("Templates POST error:", error);
     return NextResponse.json({ error: "Failed to create template" }, { status: 500 });
+  } finally {
+    await client.end();
   }
 }

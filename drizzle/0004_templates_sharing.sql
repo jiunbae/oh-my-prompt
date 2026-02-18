@@ -24,4 +24,5 @@ CREATE TABLE IF NOT EXISTS shared_prompts (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_shared_token ON shared_prompts (share_token);
+CREATE INDEX IF NOT EXISTS idx_shared_user ON shared_prompts (user_id);
+CREATE INDEX IF NOT EXISTS idx_shared_prompt ON shared_prompts (prompt_id);

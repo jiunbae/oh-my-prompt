@@ -16,9 +16,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const { db, client } = getDb();
   try {
     const { token } = await params;
-    const { db, client } = getDb();
 
     // Find the shared prompt
     const [shared] = await db
@@ -33,7 +33,6 @@ export async function GET(
       .limit(1);
 
     if (!shared) {
-      await client.end();
       return NextResponse.json(
         { error: "Share link not found or has been revoked" },
         { status: 404 }
@@ -42,7 +41,6 @@ export async function GET(
 
     // Check expiry
     if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) {
-      await client.end();
       return NextResponse.json(
         { error: "This share link has expired" },
         { status: 410 }
@@ -68,7 +66,6 @@ export async function GET(
       .limit(1);
 
     if (!prompt) {
-      await client.end();
       return NextResponse.json(
         { error: "The shared prompt no longer exists" },
         { status: 404 }
@@ -80,8 +77,6 @@ export async function GET(
       .update(schema.sharedPrompts)
       .set({ viewCount: sql`${schema.sharedPrompts.viewCount} + 1` })
       .where(eq(schema.sharedPrompts.id, shared.id));
-
-    await client.end();
 
     return NextResponse.json({
       prompt: {
@@ -95,5 +90,7 @@ export async function GET(
       { error: "Failed to fetch shared prompt" },
       { status: 500 }
     );
+  } finally {
+    await client.end();
   }
 }

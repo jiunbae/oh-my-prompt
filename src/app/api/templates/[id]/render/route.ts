@@ -5,6 +5,7 @@ import * as schema from "@/db/schema";
 import { eq, and, or, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { z } from "zod";
 
 function getDb() {
   const connectionString = process.env.DATABASE_URL;
@@ -20,10 +21,19 @@ async function getSession() {
   return parseSessionToken(sessionToken);
 }
 
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const renderBodySchema = z.object({
+  values: z.record(z.string(), z.string()).optional().default({}),
+});
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { db, client } = getDb();
   try {
     const { id } = await params;
     const session = await getSession();
@@ -32,9 +42,14 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { values } = body; // { variableName: value }
-
-    const { db, client } = getDb();
+    const parsed = renderBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid payload", details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+    const { values } = parsed.data;
 
     const [tmpl] = await db
       .select()
@@ -51,7 +66,6 @@ export async function POST(
       .limit(1);
 
     if (!tmpl) {
-      await client.end();
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }
 
@@ -61,19 +75,15 @@ export async function POST(
 
     for (const v of vars) {
       const value = values?.[v.name] ?? v.default ?? "";
-      rendered = rendered.replace(
-        new RegExp(`\\{\\{\\s*${v.name}\\s*\\}\\}`, "g"),
-        value
-      );
+      const regex = new RegExp(`\\{\\{\\s*${escapeRegExp(v.name)}\\s*\\}\\}`, "g");
+      rendered = rendered.replace(regex, () => value);
     }
 
     // Also replace any remaining {{placeholders}} that weren't in the variables list
     if (values) {
       for (const [key, val] of Object.entries(values)) {
-        rendered = rendered.replace(
-          new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "g"),
-          String(val)
-        );
+        const regex = new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, "g");
+        rendered = rendered.replace(regex, () => String(val));
       }
     }
 
@@ -83,11 +93,11 @@ export async function POST(
       .set({ usageCount: sql`${schema.promptTemplates.usageCount} + 1` })
       .where(eq(schema.promptTemplates.id, id));
 
-    await client.end();
-
     return NextResponse.json({ rendered });
   } catch (error) {
     console.error("Templates render error:", error);
     return NextResponse.json({ error: "Failed to render template" }, { status: 500 });
+  } finally {
+    await client.end();
   }
 }
