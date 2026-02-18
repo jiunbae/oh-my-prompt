@@ -36,7 +36,7 @@ export async function refreshDailyAggregations(
       })();
 
     // Aggregate and upsert in a single transaction for consistency
-    await db.transaction(async (tx: typeof db) => {
+    await db.transaction(async (tx) => {
       // Aggregate per-day stats from prompts for this user
       const dailyRows = await tx
         .select({
