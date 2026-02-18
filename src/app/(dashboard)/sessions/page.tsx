@@ -71,17 +71,13 @@ async function getSessions(params: SearchParams, userId: string) {
   }
   if (params.search) {
     const searchMode = params.searchMode || "keyword";
-    if (searchMode === "semantic" || searchMode === "hybrid") {
-      // Set threshold so the % operator uses the GIN trigram index
-      await client`SET pg_trgm.similarity_threshold = 0.1`;
-    }
     if (searchMode === "semantic") {
       conditions.push(
-        sql`${schema.prompts.promptText} % ${params.search}`
+        sql`${schema.prompts.promptText} % ${params.search} AND similarity(${schema.prompts.promptText}, ${params.search}) > 0.1`
       );
     } else if (searchMode === "hybrid") {
       conditions.push(
-        sql`(${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${params.search}) OR ${schema.prompts.promptText} % ${params.search})`
+        sql`(${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${params.search}) OR (${schema.prompts.promptText} % ${params.search} AND similarity(${schema.prompts.promptText}, ${params.search}) > 0.1))`
       );
     } else {
       conditions.push(

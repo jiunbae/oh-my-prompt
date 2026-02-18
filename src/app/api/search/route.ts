@@ -77,8 +77,6 @@ export async function GET(request: NextRequest) {
           LIMIT ${limit}
         `;
       } else if (mode === "semantic") {
-        // Set threshold so the % operator uses the GIN trigram index
-        await client`SET pg_trgm.similarity_threshold = 0.1`;
         rows = await client`
           SELECT
             id,
@@ -91,13 +89,12 @@ export async function GET(request: NextRequest) {
           FROM prompts
           WHERE user_id = ${session.userId}
             AND prompt_text % ${query}
+            AND similarity(prompt_text, ${query}) > 0.1
           ORDER BY similarity(prompt_text, ${query}) DESC
           LIMIT ${limit}
         `;
       } else {
         // hybrid mode: combine keyword and trigram scores
-        // Set threshold so the % operator uses the GIN trigram index
-        await client`SET pg_trgm.similarity_threshold = 0.1`;
         rows = await client`
           SELECT
             id,
@@ -114,7 +111,7 @@ export async function GET(request: NextRequest) {
           WHERE user_id = ${session.userId}
             AND (
               search_vector @@ websearch_to_tsquery('english', ${query})
-              OR prompt_text % ${query}
+              OR (prompt_text % ${query} AND similarity(prompt_text, ${query}) > 0.1)
             )
           ORDER BY score DESC
           LIMIT ${limit}
