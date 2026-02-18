@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
     let rawBody;
     try {
       const rawText = await request.text();
-      if (rawText.length > MAX_BODY_SIZE) {
+      if (Buffer.byteLength(rawText, "utf8") > MAX_BODY_SIZE) {
         return NextResponse.json(
           { error: `Request body too large. Maximum ${MAX_BODY_SIZE / 1024 / 1024}MB.` },
           { status: 413 }
