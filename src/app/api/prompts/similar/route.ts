@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ prompts: [] });
     }
 
-    const tsquery = words.map((w) => w.replace(/'/g, "")).join(" | ");
+    const searchText = words.join(" ");
 
     // Build ownership filter for candidates
     const userFilter = session.isAdmin
@@ -97,18 +97,18 @@ export async function GET(request: NextRequest) {
         timestamp: schema.prompts.timestamp,
         projectName: schema.prompts.projectName,
         promptText: schema.prompts.promptText,
-        rank: sql<number>`ts_rank(${schema.prompts.searchVector}, to_tsquery('english', ${tsquery}))`,
+        rank: sql<number>`ts_rank(${schema.prompts.searchVector}, plainto_tsquery('english', ${searchText}))`,
       })
       .from(schema.prompts)
       .where(
         and(
           ne(schema.prompts.id, id),
-          sql`${schema.prompts.searchVector} @@ to_tsquery('english', ${tsquery})`,
+          sql`${schema.prompts.searchVector} @@ plainto_tsquery('english', ${searchText})`,
           sql`${userFilter}`
         )
       )
       .orderBy(
-        sql`ts_rank(${schema.prompts.searchVector}, to_tsquery('english', ${tsquery})) DESC`
+        sql`ts_rank(${schema.prompts.searchVector}, plainto_tsquery('english', ${searchText})) DESC`
       )
       .limit(limit * 3); // Fetch extra to re-rank with Jaccard
 

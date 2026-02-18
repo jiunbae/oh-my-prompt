@@ -78,7 +78,7 @@ async function getSimilarPrompts(
 
     if (words.length === 0) return [];
 
-    const tsquery = words.map((w) => w.replace(/'/g, "")).join(" | ");
+    const searchText = words.join(" ");
 
     const userFilter = isAdmin
       ? sql`TRUE`
@@ -95,12 +95,12 @@ async function getSimilarPrompts(
       .where(
         and(
           ne(schema.prompts.id, sourcePrompt.id),
-          sql`${schema.prompts.searchVector} @@ to_tsquery('english', ${tsquery})`,
+          sql`${schema.prompts.searchVector} @@ plainto_tsquery('english', ${searchText})`,
           sql`${userFilter}`
         )
       )
       .orderBy(
-        sql`ts_rank(${schema.prompts.searchVector}, to_tsquery('english', ${tsquery})) DESC`
+        sql`ts_rank(${schema.prompts.searchVector}, plainto_tsquery('english', ${searchText})) DESC`
       )
       .limit(15);
 
