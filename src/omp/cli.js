@@ -51,6 +51,9 @@ function printHelp() {
     sync               Upload local records to server
     sync status        Show sync checkpoint and recent runs
     sync flush         Delete all server-side records (destructive)
+    sync auto          Start background auto-sync daemon
+    sync auto stop     Stop auto-sync daemon
+    sync auto status   Show auto-sync daemon status
 
     backfill           Import from Claude transcripts / Codex history
     import             Import from external sources
@@ -214,6 +217,17 @@ async function handleInstall(options) {
   }
 
   saveConfig(config);
+
+  // Start auto-sync daemon if enabled
+  if (config.sync?.auto) {
+    try {
+      const { startDaemon } = require("./auto-sync");
+      startDaemon(config);
+    } catch {
+      // ignore daemon start failure during install
+    }
+  }
+
   return installed;
 }
 
@@ -241,6 +255,14 @@ async function handleUninstall(options) {
   const isAll = options.all || options.cli === "all";
   const isFull = isAll && !options["hooks-only"];
   const interactive = process.stdin.isTTY && !options.yes && !options.y;
+
+  // Stop auto-sync daemon if running
+  try {
+    const { stopDaemon } = require("./auto-sync");
+    stopDaemon();
+  } catch {
+    // ignore daemon stop failure during uninstall
+  }
 
   // If --all flag: full uninstall (hooks + config + data)
   if (isFull) {
@@ -681,6 +703,58 @@ async function handleSyncFlush(options) {
   }
 }
 
+function handleSyncAuto(options, positional) {
+  const { startDaemon, stopDaemon, daemonStatus } = require("./auto-sync");
+  const config = loadConfig();
+  const subAction = positional[0];
+
+  if (subAction === "stop") {
+    const result = stopDaemon();
+    if (options.json) {
+      printJson(result);
+    } else if (result.stopped) {
+      console.log(`Auto-sync daemon stopped (pid ${result.pid}).`);
+    } else {
+      console.log("Auto-sync daemon is not running.");
+    }
+    return;
+  }
+
+  if (subAction === "status") {
+    const status = daemonStatus();
+    if (options.json) {
+      printJson(status);
+    } else {
+      if (status.running) {
+        console.log(`Auto-sync daemon: running (pid ${status.pid})`);
+      } else {
+        console.log("Auto-sync daemon: not running");
+      }
+      console.log(`Last sync: ${status.lastSyncTime || "never"}`);
+      console.log(`PID file: ${status.pidFile}`);
+      console.log(`Log file: ${status.logFile}`);
+    }
+    return;
+  }
+
+  // Default: start the daemon
+  const result = startDaemon(config);
+  if (options.json) {
+    printJson(result);
+  } else if (result.alreadyRunning) {
+    console.log(`Auto-sync daemon already running (pid ${result.pid}).`);
+  } else if (result.started) {
+    // Update config to enable auto-sync
+    config.sync.auto = true;
+    saveConfig(config);
+    console.log(`Auto-sync daemon started (pid ${result.pid}).`);
+    console.log(`Debounce: ${config.sync.debounce || 30}s, interval: ${config.sync.interval || 300}s`);
+  } else {
+    console.error("Failed to start auto-sync daemon.");
+    process.exitCode = 1;
+  }
+}
+
 async function handleIngest(options) {
   const config = loadConfig();
   if (options.replay) {
@@ -894,6 +968,27 @@ async function main() {
         handleSyncStatus(options);
       } else if (positional[0] === "flush") {
         await handleSyncFlush(options);
+      } else if (positional[0] === "auto") {
+        if (options.help || options.h) {
+          console.log(`
+  omp sync auto — Background auto-sync daemon
+
+  USAGE
+    omp sync auto              Start auto-sync daemon
+    omp sync auto stop         Stop auto-sync daemon
+    omp sync auto status       Show auto-sync daemon status
+
+  CONFIG
+    sync.auto        boolean   Enable/disable auto-sync (default: false)
+    sync.debounce    number    Debounce delay in seconds (default: 30)
+    sync.interval    number    Max interval between syncs in seconds (default: 300)
+
+  OPTIONS
+    --json    Output as JSON
+`);
+          break;
+        }
+        handleSyncAuto(options, positional.slice(1));
       } else {
         if (options.help || options.h) {
           console.log(`
@@ -905,6 +1000,7 @@ async function main() {
   SUBCOMMANDS
     omp sync status    Show sync checkpoint and recent runs
     omp sync flush     Delete ALL server-side records (destructive)
+    omp sync auto      Manage background auto-sync daemon
 
   OPTIONS
     --force            Override sync lock

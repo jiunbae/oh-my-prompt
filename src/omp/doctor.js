@@ -81,6 +81,30 @@ function runDoctor(config) {
     report.warnings.push("sync status unavailable");
   }
 
+  // Auto-sync daemon status
+  try {
+    const { isDaemonRunning, getLastSyncTime } = require("./auto-sync");
+    const daemonState = isDaemonRunning();
+    const lastSync = require("./auto-sync").getLastSyncTime
+      ? getLastSyncTime()
+      : null;
+
+    report.checks.autoSync = {
+      enabled: !!config.sync?.auto,
+      running: daemonState.running,
+      pid: daemonState.pid,
+      lastSyncTime: lastSync,
+    };
+
+    if (config.sync?.auto && !daemonState.running) {
+      report.warnings.push(
+        "Auto-sync is enabled but daemon is not running. Start with: omp sync auto"
+      );
+    }
+  } catch {
+    // auto-sync module not available, skip
+  }
+
   report.ok = report.errors.length === 0;
   return report;
 }
