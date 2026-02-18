@@ -23,7 +23,8 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
-    const limit = Math.min(parseInt(searchParams.get("limit") ?? "5", 10), 20);
+    const parsedLimit = parseInt(searchParams.get("limit") ?? "5", 10);
+    const limit = Number.isNaN(parsedLimit) ? 5 : Math.max(1, Math.min(parsedLimit, 50));
 
     if (!id) {
       return NextResponse.json(
@@ -113,15 +114,20 @@ export async function GET(request: NextRequest) {
 
     await client.end();
 
-    // Re-rank candidates using Jaccard similarity for better accuracy
+    // Re-rank candidates using a combined score: 50% Jaccard + 50% normalised ts_rank
+    const maxRank = Math.max(...candidates.map((c) => c.rank), 0.001);
     const ranked = candidates
-      .map((c) => ({
-        id: c.id,
-        timestamp: c.timestamp,
-        projectName: c.projectName,
-        similarity: computeSimilarity(sourcePrompt.promptText, c.promptText),
-        firstLine: c.promptText.split("\n")[0].slice(0, 120),
-      }))
+      .map((c) => {
+        const jaccard = computeSimilarity(sourcePrompt.promptText, c.promptText);
+        const normRank = c.rank / maxRank;
+        return {
+          id: c.id,
+          timestamp: c.timestamp,
+          projectName: c.projectName,
+          similarity: 0.5 * jaccard + 0.5 * normRank,
+          firstLine: c.promptText.split("\n")[0].slice(0, 120),
+        };
+      })
       .filter((c) => c.similarity > 0.1)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);

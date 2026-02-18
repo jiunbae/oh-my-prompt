@@ -282,7 +282,9 @@ export default function ComparePage() {
             >
               <option value="">Select prompt A</option>
               {includeSelectedA && (
-                <option value={selectedA}>{selectedA}</option>
+                <option value={selectedA}>
+                  {"(URL-selected) " + selectedA.slice(0, 8) + "..."}
+                </option>
               )}
               {optionsA.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -313,7 +315,9 @@ export default function ComparePage() {
             >
               <option value="">Select prompt B</option>
               {includeSelectedB && (
-                <option value={selectedB}>{selectedB}</option>
+                <option value={selectedB}>
+                  {"(URL-selected) " + selectedB.slice(0, 8) + "..."}
+                </option>
               )}
               {optionsB.map((option) => (
                 <option key={option.id} value={option.id}>

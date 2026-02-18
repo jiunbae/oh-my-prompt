@@ -35,14 +35,45 @@ function countSegmentWords(segments: DiffSegment[], type: DiffSegment["type"]) {
     .reduce((total, segment) => total + countWords(segment.text), 0);
 }
 
-function renderSegments(segments: DiffSegment[], side: "left" | "right") {
-  return segments.map((segment, index) => {
-    if (side === "left" && segment.type === "added") {
-      return null;
+/**
+ * Build aligned segment pairs so left and right sides stay in sync.
+ * For "removed" segments the right side gets a blank placeholder and
+ * vice-versa for "added" segments.
+ */
+function alignSegments(
+  segments: DiffSegment[]
+): { left: DiffSegment | null; right: DiffSegment | null }[] {
+  return segments.map((seg) => {
+    if (seg.type === "unchanged") {
+      return { left: seg, right: seg };
     }
+    if (seg.type === "removed") {
+      return { left: seg, right: null };
+    }
+    // added
+    return { left: null, right: seg };
+  });
+}
 
-    if (side === "right" && segment.type === "removed") {
-      return null;
+function renderAlignedSide(
+  pairs: { left: DiffSegment | null; right: DiffSegment | null }[],
+  side: "left" | "right"
+) {
+  return pairs.map((pair, index) => {
+    const segment = side === "left" ? pair.left : pair.right;
+
+    if (!segment) {
+      // Empty placeholder to keep alignment
+      const otherSegment = side === "left" ? pair.right : pair.left;
+      return (
+        <span
+          key={`placeholder-${index}`}
+          className="bg-muted/30"
+          aria-hidden="true"
+        >
+          {otherSegment ? otherSegment.text.replace(/\S/g, "\u00A0") : ""}
+        </span>
+      );
     }
 
     const className =
@@ -54,7 +85,7 @@ function renderSegments(segments: DiffSegment[], side: "left" | "right") {
 
     return (
       <span key={`${segment.type}-${index}`} className={className}>
-        {segment.text}{" "}
+        {segment.text}
       </span>
     );
   });
@@ -86,6 +117,7 @@ export function DiffViewer({ promptA, promptB, diff, similarity }: DiffViewerPro
   const wordsAdded = countSegmentWords(diff, "added");
   const wordsRemoved = countSegmentWords(diff, "removed");
   const similarityPercent = Math.round(similarity * 100);
+  const aligned = alignSegments(diff);
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -108,13 +140,13 @@ export function DiffViewer({ promptA, promptB, diff, similarity }: DiffViewerPro
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">Prompt A</h3>
           <div className="min-h-[320px] rounded-md border border-border bg-background p-4 font-mono text-sm leading-6 whitespace-pre-wrap break-words">
-            {renderSegments(diff, "left")}
+            {renderAlignedSide(aligned, "left")}
           </div>
         </div>
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">Prompt B</h3>
           <div className="min-h-[320px] rounded-md border border-border bg-background p-4 font-mono text-sm leading-6 whitespace-pre-wrap break-words">
-            {renderSegments(diff, "right")}
+            {renderAlignedSide(aligned, "right")}
           </div>
         </div>
       </div>

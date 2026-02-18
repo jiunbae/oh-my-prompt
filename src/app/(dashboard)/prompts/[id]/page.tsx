@@ -2,10 +2,11 @@ import { PromptDetail } from "@/components/prompt-detail";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
+import { computeSimilarity } from "@/lib/prompt-diff";
 import Link from "next/link";
 
 // Force dynamic rendering - don't pre-render at build time
@@ -58,32 +59,69 @@ interface SimilarPrompt {
   firstLine: string;
 }
 
-async function getSimilarPrompts(id: string): Promise<SimilarPrompt[]> {
-  const headerStore = await headers();
-  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host");
-  const protocol = headerStore.get("x-forwarded-proto") ?? "http";
-  const baseUrl = host ? `${protocol}://${host}` : process.env.NEXT_PUBLIC_APP_URL;
+async function getSimilarPrompts(
+  sourcePrompt: { id: string; promptText: string; userId: string | null },
+  isAdmin: boolean
+): Promise<SimilarPrompt[]> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) return [];
 
-  if (!baseUrl) {
+  const client = postgres(connectionString);
+  const db = drizzle(client, { schema });
+
+  try {
+    const words = sourcePrompt.promptText
+      .replace(/[^\w\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 15);
+
+    if (words.length === 0) return [];
+
+    const tsquery = words.map((w) => w.replace(/'/g, "")).join(" | ");
+
+    const userFilter = isAdmin
+      ? sql`TRUE`
+      : sql`${schema.prompts.userId} = ${sourcePrompt.userId}`;
+
+    const candidates = await db
+      .select({
+        id: schema.prompts.id,
+        timestamp: schema.prompts.timestamp,
+        projectName: schema.prompts.projectName,
+        promptText: schema.prompts.promptText,
+      })
+      .from(schema.prompts)
+      .where(
+        and(
+          ne(schema.prompts.id, sourcePrompt.id),
+          sql`${schema.prompts.searchVector} @@ to_tsquery('english', ${tsquery})`,
+          sql`${userFilter}`
+        )
+      )
+      .orderBy(
+        sql`ts_rank(${schema.prompts.searchVector}, to_tsquery('english', ${tsquery})) DESC`
+      )
+      .limit(15);
+
+    const ranked = candidates
+      .map((c) => ({
+        id: c.id,
+        timestamp: c.timestamp.toISOString(),
+        projectName: c.projectName,
+        similarity: computeSimilarity(sourcePrompt.promptText, c.promptText),
+        firstLine: c.promptText.split("\n")[0].slice(0, 120),
+      }))
+      .filter((c) => c.similarity > 0.1)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, 5);
+
+    return ranked;
+  } catch {
     return [];
+  } finally {
+    await client.end();
   }
-
-  const cookieHeader = (await cookies()).toString();
-  const response = await fetch(
-    `${baseUrl}/api/prompts/similar?id=${encodeURIComponent(id)}&limit=5`,
-    {
-      method: "GET",
-      headers: cookieHeader ? { cookie: cookieHeader } : undefined,
-      cache: "no-store",
-    }
-  );
-
-  if (!response.ok) {
-    return [];
-  }
-
-  const payload = (await response.json()) as { prompts?: SimilarPrompt[] };
-  return Array.isArray(payload.prompts) ? payload.prompts : [];
 }
 
 interface PromptDetailPageProps {
@@ -141,7 +179,10 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
     });
   }
 
-  const similarPrompts = await getSimilarPrompts(prompt.id);
+  const similarPrompts = await getSimilarPrompts(
+    { id: prompt.id, promptText: prompt.promptText, userId: prompt.userId },
+    user?.isAdmin ?? false
+  );
 
   return (
     <div className="space-y-8">
