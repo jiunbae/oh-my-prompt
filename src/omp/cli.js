@@ -222,9 +222,12 @@ async function handleInstall(options) {
   if (config.sync?.auto) {
     try {
       const { startDaemon } = require("./auto-sync");
-      startDaemon(config);
-    } catch {
-      // ignore daemon start failure during install
+      const daemonResult = startDaemon(config);
+      if (daemonResult.errors && daemonResult.errors.length) {
+        console.warn("Warning: auto-sync daemon failed to start: " + daemonResult.errors.join("; "));
+      }
+    } catch (err) {
+      console.warn("Warning: auto-sync daemon failed to start: " + (err.message || "unknown error"));
     }
   }
 
@@ -260,8 +263,8 @@ async function handleUninstall(options) {
   try {
     const { stopDaemon } = require("./auto-sync");
     stopDaemon();
-  } catch {
-    // ignore daemon stop failure during uninstall
+  } catch (err) {
+    console.warn("Warning: auto-sync daemon failed to stop: " + (err.message || "unknown error"));
   }
 
   // If --all flag: full uninstall (hooks + config + data)
@@ -739,16 +742,24 @@ function handleSyncAuto(options, positional) {
 
   // Default: start the daemon
   const result = startDaemon(config);
+
+  // Persist sync.auto=true on successful start (consistent across output modes)
+  if (result.started) {
+    config.sync.auto = true;
+    saveConfig(config);
+  }
+
   if (options.json) {
     printJson(result);
   } else if (result.alreadyRunning) {
     console.log(`Auto-sync daemon already running (pid ${result.pid}).`);
   } else if (result.started) {
-    // Update config to enable auto-sync
-    config.sync.auto = true;
-    saveConfig(config);
     console.log(`Auto-sync daemon started (pid ${result.pid}).`);
     console.log(`Debounce: ${config.sync.debounce || 30}s, interval: ${config.sync.interval || 300}s`);
+  } else if (result.errors && result.errors.length) {
+    console.error("Failed to start auto-sync daemon:");
+    result.errors.forEach((err) => console.error(`  - ${err}`));
+    process.exitCode = 1;
   } else {
     console.error("Failed to start auto-sync daemon.");
     process.exitCode = 1;

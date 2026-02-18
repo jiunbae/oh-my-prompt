@@ -32,6 +32,15 @@ function validateConfig(config) {
     warnings.push("No deviceId configured (defaults to hostname)");
   }
 
+  // Validate sync timing config
+  try {
+    const { validateTimingConfig } = require("./auto-sync");
+    const timing = validateTimingConfig(config.sync?.debounce, config.sync?.interval);
+    errors.push(...timing.errors);
+  } catch {
+    // auto-sync module not available, skip timing validation
+  }
+
   return { ok: errors.length === 0, errors, warnings };
 }
 
@@ -85,9 +94,7 @@ function runDoctor(config) {
   try {
     const { isDaemonRunning, getLastSyncTime } = require("./auto-sync");
     const daemonState = isDaemonRunning();
-    const lastSync = require("./auto-sync").getLastSyncTime
-      ? getLastSyncTime()
-      : null;
+    const lastSync = getLastSyncTime();
 
     report.checks.autoSync = {
       enabled: !!config.sync?.auto,
