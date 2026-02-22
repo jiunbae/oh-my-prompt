@@ -107,6 +107,33 @@ omp report
 omp analyze <prompt-id>
 ```
 
+## Start with Agent
+
+Copy-paste this prompt into your coding agent to install Oh My Prompt with interactive setup:
+
+```text
+Install Oh My Prompt on this machine.
+
+Before running commands, ask me to choose only the install method:
+1) npm install -g oh-my-prompt (recommended)
+2) npx oh-my-prompt setup (no global install)
+3) from source (git clone + pnpm build:cli)
+
+After installation, run:
+  omp setup
+
+Important:
+- Do NOT use setup flags like --server, --token, --hooks, --yes.
+- Use the interactive wizard only, and let me provide values directly in the prompts.
+- Ask me each setup input in order (server URL, auth/login or token, device name, hook install confirmations).
+
+After setup completes, verify with:
+- omp doctor
+- omp status
+
+Finally, show exactly what was configured (hooks, server URL, and token status).
+```
+
 ## Commands
 
 ### Hook Management
