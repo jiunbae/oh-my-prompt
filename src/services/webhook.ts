@@ -3,6 +3,7 @@ import dns from "node:dns";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import net from "net";
 
 const MAX_FAIL_COUNT = 10;
@@ -257,8 +258,6 @@ export async function dispatchWebhook(
   event: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  const { eq, and, sql } = await import("drizzle-orm");
-
   // Find all active webhooks for this user that subscribe to this event
   const activeWebhooks = await db
       .select()
@@ -442,8 +441,6 @@ export async function sendTestWebhook(
   webhookId: string,
   userId: string
 ): Promise<{ success: boolean; statusCode: number | null; duration: number; error?: string }> {
-  const { eq, and } = await import("drizzle-orm");
-
   const [webhook] = await db
       .select()
       .from(schema.webhooks)

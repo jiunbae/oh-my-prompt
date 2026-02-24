@@ -94,7 +94,7 @@ export function parseSessionToken(token: string): SessionPayload | null {
       return null;
     }
 
-    if (parsed.iat && Date.now() - parsed.iat > MAX_TOKEN_AGE_MS) {
+    if (!parsed.iat || Date.now() - parsed.iat > MAX_TOKEN_AGE_MS) {
       return null; // Token expired
     }
 

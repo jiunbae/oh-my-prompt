@@ -2,7 +2,7 @@ import { PromptDetail } from "@/components/prompt-detail";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, ne, sql } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { parseSessionToken, AUTH_COOKIE_NAME } from "@/lib/auth";
 import { computeSimilarity } from "@/lib/prompt-diff";
@@ -25,11 +25,11 @@ async function getCurrentUser() {
   return parseSessionToken(sessionToken);
 }
 
-async function getPrompt(id: string, userId: string | null) {
-  // Build query with user ownership check
-  const whereCondition = userId
-    ? and(eq(schema.prompts.id, id), eq(schema.prompts.userId, userId))
-    : eq(schema.prompts.id, id);
+async function getPrompt(id: string, userId: string, isAdmin: boolean) {
+  // Admins can view any prompt; non-admins are scoped to their own prompts.
+  const whereCondition = isAdmin
+    ? eq(schema.prompts.id, id)
+    : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, userId));
 
   const result = await db
     .select()
@@ -110,13 +110,14 @@ interface PromptDetailPageProps {
 }
 
 export default async function PromptDetailPage({ params }: PromptDetailPageProps) {
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect("/login");
+  }
+
   const resolvedParams = await params;
 
-  // Get current user from session — admins can view any prompt
-  const user = await getCurrentUser();
-  const userId = user?.isAdmin ? null : (user?.userId ?? null);
-
-  const prompt = await getPrompt(resolvedParams.id, userId);
+  const prompt = await getPrompt(resolvedParams.id, user.userId, user.isAdmin);
 
   if (!prompt) {
     notFound();
@@ -161,7 +162,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
 
   const similarPrompts = await getSimilarPrompts(
     { id: prompt.id, promptText: prompt.promptText, userId: prompt.userId },
-    user?.isAdmin ?? false
+    user.isAdmin
   );
 
   return (

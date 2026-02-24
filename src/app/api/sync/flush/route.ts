@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { rateLimiters } from "@/lib/rate-limit";
 
 export async function DELETE(request: NextRequest) {
   try {
@@ -21,6 +22,19 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json(
         { error: "Invalid user token" },
         { status: 401 }
+      );
+    }
+
+    const rl = rateLimiters.api(userToken);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)),
+          },
+        }
       );
     }
 

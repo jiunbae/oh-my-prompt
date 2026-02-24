@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractProjectName, detectPromptType, estimateTokens } from "./sync";
+import { extractProjectName, detectPromptType, estimateTokens } from "@/lib/utils";
 
 describe("sync services", () => {
   describe("extractProjectName", () => {

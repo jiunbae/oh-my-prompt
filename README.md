@@ -23,7 +23,7 @@ A self-hosted prompt journal + CLI that captures every interaction<br />with Cla
 
 <br />
 
-**[Quickstart for Agents](#quickstart-for-agents)** · **[Start with Agent](#start-with-agent)** · **[Start with Human](#start-with-human)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Local Mode](#-local-dashboard)** · **[Server Deploy](#-server-deployment)** · **[Contributing](#-contributing)**
+**[Quickstart for Agents](#quickstart-for-agents)** · **[Start with Human](#start-with-human)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Local Mode](#-local-dashboard)** · **[Server Deploy](#-server-deployment)** · **[Contributing](#-contributing)**
 
 <br />
 
@@ -100,7 +100,7 @@ Local SQLite → server API<br/>Works offline, syncs when ready
 
 ## Quickstart for Agents
 
-<div><img src="https://quickstart-for-agents.vercel.app/api/header.svg?theme=codex&title=Install+Oh+My+Prompt&lang=Agents" width="100%" /></div>
+<div><img src="https://quickstart-for-agents.vercel.app/api/header.svg?theme=opencode&title=Install+Oh+My+Prompt&lang=Agents" width="100%" /></div>
 
 ```text
 Install Oh My Prompt from https://github.com/jiunbae/oh-my-prompt on this machine.
@@ -129,20 +129,14 @@ Finally, summarize:
 - token status
 ```
 
-<div><img src="https://quickstart-for-agents.vercel.app/api/footer.svg?theme=codex&model=GPT-5.3+Codex&agent=Installer" width="100%" /></div>
+<div><img src="https://quickstart-for-agents.vercel.app/api/footer.svg?theme=opencode&model=OpenCode&agent=Installer" width="100%" /></div>
 
 <br />
 
-## Start with Agent
+<details>
+<summary><b>Setup Flow Preview</b></summary>
 
-Paste this into your AI agent (Claude Code, Codex, OpenCode, Gemini):
-
-> Install Oh My Prompt (https://github.com/jiunbae/oh-my-prompt).
-> Use one install method: `npm install -g oh-my-prompt` (recommended), `npx oh-my-prompt setup`, or source install (`git clone` + `pnpm build:cli`).
-> Then run `omp setup` in interactive mode only (no setup flags) and let me answer the prompts directly.
-> After setup, run `omp doctor` and `omp status`, then summarize configured hooks, server URL, and token status.
-
-`omp setup` guides the full interactive flow:
+`omp setup` guides the interactive flow:
 
 ```bash
 $ omp setup
@@ -170,6 +164,8 @@ $ omp setup
   Setup complete!
 ```
 
+</details>
+
 <details>
 <summary><b>Manual Install Options</b></summary>
 
@@ -188,34 +184,6 @@ pnpm build:cli
 cd packages/omp-cli
 npm link
 omp setup
-```
-
-</details>
-
-<details>
-<summary><b>Strict Copy/Paste Prompt</b></summary>
-
-```text
-Install Oh My Prompt from https://github.com/jiunbae/oh-my-prompt on this machine.
-
-Before running commands, ask me to choose only the install method:
-1) npm install -g oh-my-prompt (recommended)
-2) npx oh-my-prompt setup (no global install)
-3) from source (git clone + pnpm build:cli)
-
-After installation, run:
-  omp setup
-
-Important:
-- Do NOT use setup flags like --server, --token, --hooks, --yes.
-- Use the interactive wizard only, and let me provide values directly in the prompts.
-- Ask me each setup input in order (server URL, auth/login or token, device name, hook install confirmations).
-
-After setup completes, verify with:
-- omp doctor
-- omp status
-
-Finally, show exactly what was configured (hooks, server URL, and token status).
 ```
 
 </details>

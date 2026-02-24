@@ -1,5 +1,3 @@
-import { requireAuth } from "@/lib/with-auth";
-
 export function parseDateRange(searchParams: URLSearchParams): { from: Date; to: Date } {
   const now = new Date();
 
@@ -29,13 +27,4 @@ export function parseDateRange(searchParams: URLSearchParams): { from: Date; to:
   }
 
   return { from, to };
-}
-
-export async function getSessionUserId(): Promise<string | null> {
-  try {
-    const session = await requireAuth();
-    return session.userId;
-  } catch {
-    return null;
-  }
 }

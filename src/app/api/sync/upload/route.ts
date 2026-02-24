@@ -5,6 +5,7 @@ import { processUpload } from "@/services/upload";
 import type { UploadRecord } from "@/services/upload";
 import { dispatchWebhook } from "@/services/webhook";
 import { logger } from "@/lib/logger";
+import { rateLimiters } from "@/lib/rate-limit";
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_RECORDS_PER_REQUEST = 1000;
@@ -54,6 +55,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Invalid user token" },
         { status: 401 }
+      );
+    }
+
+    const rl = rateLimiters.api(userToken);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)),
+          },
+        }
       );
     }
 

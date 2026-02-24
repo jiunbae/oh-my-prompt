@@ -24,12 +24,27 @@ const VALID_TOPICS = [
 type TopicTag = (typeof VALID_TOPICS)[number];
 
 const BATCH_SIZE = 10;
+const DB_BATCH_SIZE = 100;
 
 interface LLMScoreResult {
   id: string;
   quality_score: number;
   topic_tags: string[];
   reasoning: string;
+}
+
+/** A pending update record collected in memory before batch-flushing to DB. */
+interface PendingUpdate {
+  id: string;
+  qualityScore: number;
+  qualityClarity: number | null;
+  qualitySpecificity: number | null;
+  qualityContext: number | null;
+  qualityConstraints: number | null;
+  qualityStructure: number | null;
+  qualityDetails: Record<string, unknown> | null;
+  topicTags: string[];
+  enrichedAt: Date;
 }
 
 // ── Heuristic fallback (no LLM) ──────────────────────────────────
@@ -146,6 +161,44 @@ function parseLLMResponse(
     }));
 }
 
+// ── Batch DB update using SQL CASE/WHEN ──────────────────────────
+
+async function flushPendingUpdates(
+  updates: PendingUpdate[],
+  userId: string,
+): Promise<void> {
+  if (updates.length === 0) return;
+
+  for (let i = 0; i < updates.length; i += DB_BATCH_SIZE) {
+    const chunk = updates.slice(i, i + DB_BATCH_SIZE);
+    const ids = chunk.map((r) => sql`${r.id}`);
+    const scoreCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityScore}`);
+    const clarityCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityClarity}`);
+    const specificityCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualitySpecificity}`);
+    const contextCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityContext}`);
+    const constraintsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityConstraints}`);
+    const structureCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityStructure}`);
+    const detailsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${JSON.stringify(r.qualityDetails)}::jsonb`);
+    const tagsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${sql`ARRAY[${sql.join(r.topicTags.map((t) => sql`${t}`), sql`, `)}]::text[]`}`);
+    const enrichedCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.enrichedAt}`);
+
+    await db.execute(sql`
+      UPDATE prompts SET
+        quality_score = CASE id ${sql.join(scoreCases, sql` `)} END,
+        quality_clarity = CASE id ${sql.join(clarityCases, sql` `)} END,
+        quality_specificity = CASE id ${sql.join(specificityCases, sql` `)} END,
+        quality_context = CASE id ${sql.join(contextCases, sql` `)} END,
+        quality_constraints = CASE id ${sql.join(constraintsCases, sql` `)} END,
+        quality_structure = CASE id ${sql.join(structureCases, sql` `)} END,
+        quality_details = CASE id ${sql.join(detailsCases, sql` `)} END,
+        topic_tags = CASE id ${sql.join(tagsCases, sql` `)} END,
+        enriched_at = CASE id ${sql.join(enrichedCases, sql` `)} END
+      WHERE id IN (${sql.join(ids, sql`, `)})
+        AND user_id = ${userId}
+    `);
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────
 
 export async function handler(input: ProcessorInput): Promise<InsightResult> {
@@ -188,7 +241,35 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
     let totalQuality = 0;
     const topicCounts: Record<string, number> = {};
 
-    // Process in batches
+    // Collect all updates in memory, then batch-flush to DB
+    const pendingUpdates: PendingUpdate[] = [];
+
+    /** Helper to build a PendingUpdate from heuristic scoring and accumulate stats. */
+    function collectHeuristicUpdate(prompt: { id: string; promptText: string; projectName: string | null; workingDirectory: string | null }): void {
+      const heuristic = computeHeuristicScore(prompt.promptText, {
+        hasContext: !!(prompt.projectName || prompt.workingDirectory),
+      });
+      const dims = scorePrompt(prompt.promptText);
+      pendingUpdates.push({
+        id: prompt.id,
+        qualityScore: dims.overall,
+        qualityClarity: dims.clarity,
+        qualitySpecificity: dims.specificity,
+        qualityContext: dims.context,
+        qualityConstraints: dims.constraints,
+        qualityStructure: dims.structure,
+        qualityDetails: { method: "heuristic-v1", ...dims },
+        topicTags: heuristic.topicTags,
+        enrichedAt: new Date(),
+      });
+      totalScored++;
+      totalQuality += dims.overall;
+      for (const tag of heuristic.topicTags) {
+        topicCounts[tag] = (topicCounts[tag] || 0) + 1;
+      }
+    }
+
+    // Process in batches (for LLM calls)
     for (let i = 0; i < unenriched.length; i += BATCH_SIZE) {
       const batch = unenriched.slice(i, i + BATCH_SIZE);
 
@@ -219,31 +300,24 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
             batch.map((p) => p.id),
           );
 
-          // Update database with LLM scores + heuristic dimensions
+          // Collect LLM scores + heuristic dimensions
           const batchPromptMap = new Map(batch.map((p) => [p.id, p]));
           for (const score of scores) {
             const promptData = batchPromptMap.get(score.id);
             const dims = promptData ? scorePrompt(promptData.promptText) : null;
             const overallScore = dims?.overall ?? score.quality_score;
-            await db
-              .update(schema.prompts)
-              .set({
-                qualityScore: overallScore,
-                qualityClarity: dims?.clarity ?? null,
-                qualitySpecificity: dims?.specificity ?? null,
-                qualityContext: dims?.context ?? null,
-                qualityConstraints: dims?.constraints ?? null,
-                qualityStructure: dims?.structure ?? null,
-                qualityDetails: dims ? { method: "llm+heuristic-v1", llmScore: score.quality_score, ...dims } : null,
-                topicTags: score.topic_tags,
-                enrichedAt: new Date(),
-              })
-              .where(
-                and(
-                  eq(schema.prompts.id, score.id),
-                  eq(schema.prompts.userId, input.userId),
-                ),
-              );
+            pendingUpdates.push({
+              id: score.id,
+              qualityScore: overallScore,
+              qualityClarity: dims?.clarity ?? null,
+              qualitySpecificity: dims?.specificity ?? null,
+              qualityContext: dims?.context ?? null,
+              qualityConstraints: dims?.constraints ?? null,
+              qualityStructure: dims?.structure ?? null,
+              qualityDetails: dims ? { method: "llm+heuristic-v1", llmScore: score.quality_score, ...dims } : null,
+              topicTags: score.topic_tags,
+              enrichedAt: new Date(),
+            });
 
             totalScored++;
             totalQuality += overallScore;
@@ -256,107 +330,26 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
           const scoredIds = new Set(scores.map((s) => s.id));
           for (const prompt of batch) {
             if (!scoredIds.has(prompt.id)) {
-              const heuristic = computeHeuristicScore(prompt.promptText, {
-                hasContext: !!(prompt.projectName || prompt.workingDirectory),
-              });
-              const dims = scorePrompt(prompt.promptText);
-              await db
-                .update(schema.prompts)
-                .set({
-                  qualityScore: dims.overall,
-                  qualityClarity: dims.clarity,
-                  qualitySpecificity: dims.specificity,
-                  qualityContext: dims.context,
-                  qualityConstraints: dims.constraints,
-                  qualityStructure: dims.structure,
-                  qualityDetails: { method: "heuristic-v1", ...dims },
-                  topicTags: heuristic.topicTags,
-                  enrichedAt: new Date(),
-                })
-                .where(
-                  and(
-                    eq(schema.prompts.id, prompt.id),
-                    eq(schema.prompts.userId, input.userId),
-                  ),
-                );
-
-              totalScored++;
-              totalQuality += dims.overall;
-              for (const tag of heuristic.topicTags) {
-                topicCounts[tag] = (topicCounts[tag] || 0) + 1;
-              }
+              collectHeuristicUpdate(prompt);
             }
           }
         } catch (llmError) {
           // LLM call failed, fall back to heuristic for entire batch
           console.error("LLM call failed, using heuristic fallback:", llmError);
           for (const prompt of batch) {
-            const heuristic = computeHeuristicScore(prompt.promptText, {
-              hasContext: !!(prompt.projectName || prompt.workingDirectory),
-            });
-            const dims = scorePrompt(prompt.promptText);
-            await db
-              .update(schema.prompts)
-              .set({
-                qualityScore: dims.overall,
-                qualityClarity: dims.clarity,
-                qualitySpecificity: dims.specificity,
-                qualityContext: dims.context,
-                qualityConstraints: dims.constraints,
-                qualityStructure: dims.structure,
-                qualityDetails: { method: "heuristic-v1", ...dims },
-                topicTags: heuristic.topicTags,
-                enrichedAt: new Date(),
-              })
-              .where(
-                and(
-                  eq(schema.prompts.id, prompt.id),
-                  eq(schema.prompts.userId, input.userId),
-                ),
-              );
-
-            totalScored++;
-            totalQuality += dims.overall;
-            for (const tag of heuristic.topicTags) {
-              topicCounts[tag] = (topicCounts[tag] || 0) + 1;
-            }
+            collectHeuristicUpdate(prompt);
           }
         }
       } else {
         // No LLM configured — heuristic only
         for (const prompt of batch) {
-          const heuristic = computeHeuristicScore(prompt.promptText, {
-            hasContext: !!(prompt.projectName || prompt.workingDirectory),
-          });
-          const dims = scorePrompt(prompt.promptText);
-          await db
-            .update(schema.prompts)
-            .set({
-              qualityScore: dims.overall,
-              qualityClarity: dims.clarity,
-              qualitySpecificity: dims.specificity,
-              qualityContext: dims.context,
-              qualityConstraints: dims.constraints,
-              qualityStructure: dims.structure,
-              qualityDetails: { method: "heuristic-v1", ...dims },
-              topicTags: heuristic.topicTags,
-              enrichedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(schema.prompts.id, prompt.id),
-                eq(schema.prompts.userId, input.userId),
-              ),
-            );
-
-          totalScored++;
-          totalQuality += dims.overall;
-          for (const tag of heuristic.topicTags) {
-            topicCounts[tag] = (topicCounts[tag] || 0) + 1;
-          }
+          collectHeuristicUpdate(prompt);
         }
       }
     }
+
+    // Flush all collected updates to DB in batches of DB_BATCH_SIZE
+    await flushPendingUpdates(pendingUpdates, input.userId);
 
     const averageQuality = totalScored > 0 ? Math.round(totalQuality / totalScored) : 0;
 

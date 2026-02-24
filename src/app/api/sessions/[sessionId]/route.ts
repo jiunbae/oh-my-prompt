@@ -34,17 +34,17 @@ export async function GET(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const first = prompts[0];
-    const last = prompts[prompts.length - 1];
+    const newest = prompts[0];
+    const oldest = prompts[prompts.length - 1];
 
     return NextResponse.json({
       sessionId,
-      projectName: first.projectName,
-      source: first.source,
-      deviceName: first.deviceName,
-      workingDirectory: first.workingDirectory,
-      startedAt: first.timestamp,
-      endedAt: last.timestamp,
+      projectName: oldest.projectName,
+      source: oldest.source,
+      deviceName: newest.deviceName,
+      workingDirectory: newest.workingDirectory,
+      startedAt: oldest.timestamp,
+      endedAt: newest.timestamp,
       prompts: prompts.map((p) => ({
         id: p.id,
         timestamp: p.timestamp,
