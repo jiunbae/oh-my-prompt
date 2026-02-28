@@ -119,33 +119,54 @@ When done, run `omp doctor` and summarize the result.
 <details>
 <summary><b>Setup Flow Preview</b></summary>
 
-`omp setup` guides the interactive flow:
+`omp setup` launches an interactive wizard with colored prompts, spinners, and a summary box:
 
-```bash
+```
 $ omp setup
 
-  Oh My Prompt - Setup Wizard
-  ============================
-
-  [1/4] Server URL
-  > Server URL [https://prompt.jiun.dev]:
-
-  [2/4] Authentication
-  > Choice [1]:
-  > Email:
-  > Password (press Enter if new account):
-
-  [3/4] Device Name
-  > Device name [my-laptop]:
-
-  [4/4] Install Hooks
-  > Install Claude Code hook? [Y/n]:
-  > Install Codex hook? [Y/n]:
-  > Install OpenCode hook? [Y/n]:
-
-  Running doctor...
-  Setup complete!
+┌  oh-my-prompt
+│
+◆  Server URL
+│  https://prompt.jiun.dev
+│
+◆  Authentication
+│  ● Login with email & password (recommended)
+│  ○ Paste existing API token
+│
+◆  Email
+│  user@example.com
+│
+◆  Password
+│  ********
+│
+◇  Authenticating... done
+│
+◆  Device name
+│  my-macbook
+│
+◇  Database migrated (schema v3)
+│
+◆  Install hooks
+│  ◻ Claude Code (detected)
+│  ◻ Codex (detected)
+│  ◻ OpenCode (not found)
+│
+◇  Hooks installed (Claude Code, Codex)
+│
+◇  Server validated (200)
+│
+◇  Setup Complete ───────────────────╮
+│                                    │
+│  Server:  https://prompt.jiun.dev  │
+│  Device:  my-macbook               │
+│  Hooks:   claude, codex            │
+│                                    │
+├────────────────────────────────────╯
+│
+└  Run omp backfill to import existing prompts
 ```
+
+Non-interactive mode (`--yes`) and JSON output (`--json`) are fully supported for CI/scripting.
 
 </details>
 
@@ -223,25 +244,36 @@ omp sync         # Sync to remote server
 <details>
 <summary><b>omp setup</b> — Interactive configuration wizard</summary>
 
-```bash
+Beautiful step-by-step wizard powered by [@clack/prompts](https://github.com/bombshell-dev/clack):
+
+```
 $ omp setup
 
-  ✨ Oh My Prompt Setup
-
-  ? Server URL: https://your-server.com
-  ? API Token: ********-****-****-****-************
-  ? Device name: my-laptop
-  ? Install Claude Code hook? Yes
-  ? Install Codex hook? Yes
-
-  ✓ Config saved to ~/.omp/config.json
-  ✓ Database initialized
-  ✓ Claude Code hook installed
-  ✓ Codex hook installed
-  ✓ Server connection verified
-
-  You're all set! Prompts will be captured automatically.
+┌  oh-my-prompt
+│
+◆  Server URL .............. https://your-server.com
+◆  Authentication .......... Login with email & password
+◆  Email ................... you@example.com
+◆  Password ................ ********
+◇  Authenticating... Logged in as you@example.com
+◆  Device name ............. my-laptop
+◇  Database migrated (schema v3)
+◆  Install hooks ........... Claude Code, Codex
+◇  Hooks installed (Claude Code, Codex)
+◇  Server validated (200)
+│
+◇  Setup Complete ───────────────────╮
+│                                    │
+│  Server:  https://your-server.com  │
+│  Device:  my-laptop                │
+│  Hooks:   claude, codex            │
+│                                    │
+├────────────────────────────────────╯
+│
+└  Run omp backfill to import existing prompts
 ```
+
+Flags: `--yes` (non-interactive), `--json` (machine-readable), `--skip-validate`, `--server`, `--token`, `--device`
 </details>
 
 <details>
@@ -485,7 +517,7 @@ oh-my-prompt/
 </tr>
 <tr>
 <td><b>CLI</b></td>
-<td>Node.js · better-sqlite3 · zero runtime deps</td>
+<td>Node.js · better-sqlite3 · @clack/prompts · picocolors</td>
 </tr>
 <tr>
 <td><b>Infra</b></td>
