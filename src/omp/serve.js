@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const { execSync, spawn } = require("child_process");
 const http = require("http");
 const { getConfigDir, ensureDir } = require("./paths");
+const { c, loadClack } = require("./ui");
 
 const SERVE_DIR = path.join(getConfigDir(), "serve");
 const COMPOSE_FILE = path.join(SERVE_DIR, "docker-compose.yaml");
@@ -152,25 +153,54 @@ function isRunning() {
 async function startServer(config) {
   checkDocker();
   const serveConfig = getServeConfig(config);
+  const useTTY = process.stdout.isTTY;
+  let clack, s;
+
+  if (useTTY) {
+    clack = await loadClack();
+  }
 
   if (isRunning()) {
-    console.log(`Dashboard already running at http://localhost:${serveConfig.port}`);
-    return { url: `http://localhost:${serveConfig.port}`, alreadyRunning: true };
+    const url = `http://localhost:${serveConfig.port}`;
+    console.log(`Dashboard already running at ${c.cyan(url)}`);
+    return { url, alreadyRunning: true };
   }
 
   generateComposeFile(serveConfig);
 
-  console.log("Pulling images...");
+  // Pull images
+  if (useTTY) {
+    s = clack.spinner();
+    s.start("Pulling images...");
+  } else {
+    console.log("Pulling images...");
+  }
   try {
-    execSync("docker compose pull", { cwd: SERVE_DIR, stdio: "inherit" });
+    execSync("docker compose pull", {
+      cwd: SERVE_DIR,
+      stdio: useTTY ? "pipe" : "inherit",
+    });
+    if (s) s.stop("Images pulled");
   } catch {
-    console.log("Pull failed (cached images will be used if available).");
+    if (s) s.stop(c.yellow("Pull failed (cached images will be used if available)"));
+    else console.log("Pull failed (cached images will be used if available).");
   }
 
-  console.log("Starting containers...");
+  // Start containers
+  if (useTTY) {
+    s = clack.spinner();
+    s.start("Starting containers...");
+  } else {
+    console.log("Starting containers...");
+  }
   try {
-    execSync("docker compose up -d", { cwd: SERVE_DIR, stdio: "inherit" });
+    execSync("docker compose up -d", {
+      cwd: SERVE_DIR,
+      stdio: useTTY ? "pipe" : "inherit",
+    });
+    if (s) s.stop("Containers started");
   } catch (err) {
+    if (s) s.stop(c.red("Failed to start containers"));
     const msg = err.stderr ? err.stderr.toString() : err.message;
     if (msg.includes("port is already allocated")) {
       console.error(`\nPort ${serveConfig.port} is already in use.`);
@@ -182,47 +212,61 @@ async function startServer(config) {
     return { url: null, error: "Failed to start" };
   }
 
-  process.stdout.write("Waiting for server to be ready");
+  // Wait for health
+  if (useTTY) {
+    s = clack.spinner();
+    s.start("Waiting for server to be ready...");
+  } else {
+    process.stdout.write("Waiting for server to be ready");
+  }
   try {
-    const origCheck = waitForHealth;
-    let dots = setInterval(() => process.stdout.write("."), 1000);
-    await waitForHealth(serveConfig.port);
-    clearInterval(dots);
-    console.log(" ready!");
+    if (!useTTY) {
+      const dots = setInterval(() => process.stdout.write("."), 1000);
+      await waitForHealth(serveConfig.port);
+      clearInterval(dots);
+      console.log(" ready!");
+    } else {
+      await waitForHealth(serveConfig.port);
+      s.stop("Server is ready");
+    }
   } catch (err) {
-    console.log(" failed.");
+    if (useTTY) {
+      s.stop(c.red("Server health check failed"));
+    } else {
+      console.log(" failed.");
+    }
     console.error(err.message);
     console.log("\nCheck logs with: omp serve logs");
     return { url: null, error: err.message };
   }
 
   const url = `http://localhost:${serveConfig.port}`;
-  console.log(`\nDashboard running at ${url}`);
+  console.log(`\nDashboard running at ${c.cyan(c.bold(url))}`);
   if (serveConfig.adminEmail) {
-    console.log(`Admin email: ${serveConfig.adminEmail}`);
+    console.log(`Admin email: ${c.dim(serveConfig.adminEmail)}`);
   }
   console.log(`\nTo sync your local data:`);
-  console.log(`  omp config set server.url ${url}`);
-  console.log(`  # Register at ${url}, then get your token from Settings`);
-  console.log(`  omp config set server.token YOUR_TOKEN`);
-  console.log(`  omp sync`);
+  console.log(`  ${c.cyan(`omp config set server.url ${url}`)}`);
+  console.log(c.dim(`  # Register at ${url}, then get your token from Settings`));
+  console.log(`  ${c.cyan("omp config set server.token YOUR_TOKEN")}`);
+  console.log(`  ${c.cyan("omp sync")}`);
 
   return { url, alreadyRunning: false };
 }
 
 function stopServer() {
   if (!fs.existsSync(COMPOSE_FILE)) {
-    console.log("No local server found.");
+    console.log(c.dim("No local server found."));
     return;
   }
   console.log("Stopping containers...");
   execSync("docker compose down", { cwd: SERVE_DIR, stdio: "inherit" });
-  console.log("Stopped. Data is preserved in Docker volume (omp_serve_pgdata).");
+  console.log(c.green("Stopped.") + c.dim(" Data is preserved in Docker volume (omp_serve_pgdata)."));
 }
 
 function showStatus() {
   if (!fs.existsSync(COMPOSE_FILE)) {
-    console.log("No local server configured. Run 'omp serve' to start.");
+    console.log(c.dim("No local server configured.") + " Run " + c.cyan("omp serve") + " to start.");
     return;
   }
   execSync("docker compose ps", { cwd: SERVE_DIR, stdio: "inherit" });
@@ -230,7 +274,7 @@ function showStatus() {
 
 function showLogs(follow) {
   if (!fs.existsSync(COMPOSE_FILE)) {
-    console.log("No local server configured. Run 'omp serve' to start.");
+    console.log(c.dim("No local server configured.") + " Run " + c.cyan("omp serve") + " to start.");
     return;
   }
   const args = ["compose", "logs"];

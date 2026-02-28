@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { c, loadClack, handleCancel, label, pass, fail, warn, info } = require("./ui");
 const { loadConfig, saveConfig, getConfigSummary } = require("./config");
 const {
   installClaudeHook,
@@ -36,60 +37,62 @@ function getVersion() {
 
 function printHelp() {
   const v = getVersion();
+  const d = c.dim;
+  const cmd = (name, desc) => `    ${c.cyan(name.padEnd(19))}${d(desc)}`;
   console.log(`
-  oh-my-prompt v${v}
-  CLI prompt journal for AI coding assistants
+  ${c.bold(c.cyan("oh-my-prompt"))} ${d("v" + v)}
+  ${d("CLI prompt journal for AI coding assistants")}
 
-  USAGE
-    omp <command> [options]
+  ${c.yellow("USAGE")}
+    ${c.bold("omp")} ${d("<command> [options]")}
 
-  COMMANDS
-    setup              Interactive setup wizard
-    install            Install hooks for Claude Code / Codex / OpenCode
-    uninstall          Remove hooks (--all for full cleanup)
-    status             Show current configuration and hook status
-    doctor             Diagnose common issues
+  ${c.yellow("COMMANDS")}
+${cmd("setup", "Interactive setup wizard")}
+${cmd("install", "Install hooks for Claude Code / Codex / OpenCode")}
+${cmd("uninstall", "Remove hooks (--all for full cleanup)")}
+${cmd("status", "Show current configuration and hook status")}
+${cmd("doctor", "Diagnose common issues")}
 
-    sync               Upload local records to server
-    sync status        Show sync checkpoint and recent runs
-    sync flush         Delete all server-side records (destructive)
-    sync auto          Start background auto-sync daemon
-    sync auto stop     Stop auto-sync daemon
-    sync auto status   Show auto-sync daemon status
+${cmd("sync", "Upload local records to server")}
+${cmd("sync status", "Show sync checkpoint and recent runs")}
+${cmd("sync flush", "Delete all server-side records (destructive)")}
+${cmd("sync auto", "Start background auto-sync daemon")}
+${cmd("sync auto stop", "Stop auto-sync daemon")}
+${cmd("sync auto status", "Show auto-sync daemon status")}
 
-    backfill           Import from Claude transcripts / Codex history
-    import             Import from external sources
-    ingest             Ingest a raw JSON payload (used by hooks)
+${cmd("backfill", "Import from Claude transcripts / Codex history")}
+${cmd("import", "Import from external sources")}
+${cmd("ingest", "Ingest a raw JSON payload (used by hooks)")}
 
-    stats              Show prompt statistics
-    export             Export records (json, csv, jsonl)
+${cmd("stats", "Show prompt statistics")}
+${cmd("export", "Export records (json, csv, jsonl)")}
 
-    serve              Start local dashboard server (Docker)
-    serve stop         Stop local dashboard server
-    serve status       Show local server status
-    serve logs         Tail local server logs
+${cmd("serve", "Start local dashboard server (Docker)")}
+${cmd("serve stop", "Stop local dashboard server")}
+${cmd("serve status", "Show local server status")}
+${cmd("serve logs", "Tail local server logs")}
 
-    config get [key]   Read config value (omit key for full dump)
-    config set <k> <v> Write config value
-    config validate    Validate configuration
+${cmd("config get [key]", "Read config value (omit key for full dump)")}
+${cmd("config set <k> <v>", "Write config value")}
+${cmd("config validate", "Validate configuration")}
 
-    db migrate         Run database migrations
-    db flush           Delete all local records (destructive)
+${cmd("db migrate", "Run database migrations")}
+${cmd("db flush", "Delete all local records (destructive)")}
 
-  GLOBAL OPTIONS
-    --help, -h         Show help for any command
-    --version, -v      Print version
-    --json             Machine-readable JSON output
+  ${c.yellow("GLOBAL OPTIONS")}
+    ${c.cyan("--help, -h")}         ${d("Show help for any command")}
+    ${c.cyan("--version, -v")}      ${d("Print version")}
+    ${c.cyan("--json")}             ${d("Machine-readable JSON output")}
 
-  EXAMPLES
-    omp setup                          # First-time setup
-    omp status                         # Check everything is working
-    omp sync                           # Upload to server
-    omp backfill --claude-only         # Import Claude transcripts
-    omp stats --since 2025-01-01       # Stats from date
-    omp export --format csv --out .    # Export as CSV
+  ${c.yellow("EXAMPLES")}
+    ${c.bold("omp setup")}                          ${d("# First-time setup")}
+    ${c.bold("omp status")}                         ${d("# Check everything is working")}
+    ${c.bold("omp sync")}                           ${d("# Upload to server")}
+    ${c.bold("omp backfill --claude-only")}         ${d("# Import Claude transcripts")}
+    ${c.bold("omp stats --since 2025-01-01")}       ${d("# Stats from date")}
+    ${c.bold("omp export --format csv --out .")}    ${d("# Export as CSV")}
 
-  https://github.com/jiunbae/oh-my-prompt
+  ${d("https://github.com/jiunbae/oh-my-prompt")}
 `);
 }
 
@@ -252,7 +255,20 @@ async function handleInstall(options) {
   return installed;
 }
 
-function askConfirm(question, defaultYes = false) {
+async function askConfirm(question, defaultYes = false) {
+  if (process.stdin.isTTY) {
+    try {
+      const clack = await loadClack();
+      const result = await clack.confirm({
+        message: question,
+        initialValue: defaultYes,
+      });
+      handleCancel(result);
+      return result;
+    } catch {
+      // fallback below
+    }
+  }
   const readline = require("readline");
   const hint = defaultYes ? "Y/n" : "y/N";
   return new Promise((resolve) => {
@@ -456,17 +472,18 @@ function handleStatus(options) {
   if (options.json) {
     printJson(status);
   } else {
-    console.log(`Server: ${status.server}`);
-    console.log(`Token: ${status.serverToken}`);
-    console.log(`Storage: ${status.storage}`);
-    console.log(`SQLite: ${status.sqlitePath}`);
-    console.log(`Capture response: ${status.captureResponse ? "on" : "off"}`);
-    console.log(`Hooks: claude=${hooks.claude_code ? "installed" : "not installed"}, codex=${hooks.codex ? "installed" : "not installed"}, opencode=${hooks.opencode ? "installed" : "not installed"}`);
-    console.log(`Last capture: ${status.lastCapture || "none"}`);
-    console.log(`Queue: ${queueStats.count} files, ${queueStats.bytes} bytes`);
+    const hookIcon = (v) => (v ? c.green("installed") : c.dim("not installed"));
+    console.log(label("Server", status.server === "(not configured)" ? c.yellow(status.server) : c.cyan(status.server)));
+    console.log(label("Token", status.serverToken ? c.dim(status.serverToken) : c.yellow("(not set)")));
+    console.log(label("Storage", status.storage));
+    console.log(label("SQLite", c.dim(status.sqlitePath)));
+    console.log(label("Capture response", status.captureResponse ? c.green("on") : c.dim("off")));
+    console.log(label("Hooks", `claude=${hookIcon(hooks.claude_code)}, codex=${hookIcon(hooks.codex)}, opencode=${hookIcon(hooks.opencode)}`));
+    console.log(label("Last capture", status.lastCapture || c.dim("none")));
+    console.log(label("Queue", `${queueStats.count} files, ${queueStats.bytes} bytes`));
     if (state.lastReplay) {
       console.log(
-        `Last replay: ${state.lastReplay.at} (processed ${state.lastReplay.processed}, failed ${state.lastReplay.failed})`
+        label("Last replay", `${state.lastReplay.at} (processed ${state.lastReplay.processed}, failed ${state.lastReplay.failed})`)
       );
     }
   }
@@ -528,15 +545,15 @@ function handleConfig(options, positional) {
       printJson(result);
     } else {
       if (result.ok) {
-        console.log("Config OK");
+        console.log(pass("Config OK"));
       }
       if (result.errors.length) {
-        console.log("Errors:");
-        result.errors.forEach((err) => console.log(`- ${err}`));
+        console.log(c.red("\nErrors:"));
+        result.errors.forEach((e) => console.log(fail(e)));
       }
       if (result.warnings.length) {
-        console.log("Warnings:");
-        result.warnings.forEach((warn) => console.log(`- ${warn}`));
+        console.log(c.yellow("\nWarnings:"));
+        result.warnings.forEach((w) => console.log(warn(w)));
       }
     }
     if (!result.ok) process.exitCode = 1;
@@ -631,9 +648,17 @@ async function handleSync(options) {
   });
 
   if (!lock.ok) {
-    console.error("Sync already running. Use --force to override.");
+    console.error(fail("Sync already running. Use --force to override."));
     process.exitCode = 1;
     return;
+  }
+
+  const useSpinner = !options.json && process.stdout.isTTY;
+  let s, clack;
+  if (useSpinner) {
+    clack = await loadClack();
+    s = clack.spinner();
+    s.start("Syncing records...");
   }
 
   try {
@@ -647,11 +672,19 @@ async function handleSync(options) {
 
     if (options.json) {
       printJson(result);
+    } else if (s) {
+      const parts = [`Synced ${c.bold(result.uploaded)} records in ${result.chunks} request(s)`];
+      if (result.duplicates) parts.push(c.dim(`(${result.duplicates} duplicates skipped)`));
+      if (result.rejected) parts.push(c.yellow(`(${result.rejected} rejected)`));
+      s.stop(parts.join(" "));
     } else {
       console.log(`Synced ${result.uploaded} records in ${result.chunks} request(s)`);
       if (result.duplicates) console.log(`  Duplicates skipped: ${result.duplicates}`);
       if (result.rejected) console.log(`  Rejected: ${result.rejected}`);
     }
+  } catch (err) {
+    if (s) s.stop(c.red("Sync failed."));
+    throw err;
   } finally {
     releaseSyncLock(lock.lockPath);
   }
@@ -1271,14 +1304,14 @@ async function main() {
       if (options.json) {
         printJson(report);
       } else {
-        if (report.ok) console.log("Doctor: OK");
+        if (report.ok) console.log(pass("Doctor: all checks passed"));
         if (report.errors.length) {
-          console.log("Errors:");
-          report.errors.forEach((err) => console.log(`- ${err}`));
+          console.log(c.red("\nErrors:"));
+          report.errors.forEach((e) => console.log(fail(e)));
         }
         if (report.warnings.length) {
-          console.log("Warnings:");
-          report.warnings.forEach((warn) => console.log(`- ${warn}`));
+          console.log(c.yellow("\nWarnings:"));
+          report.warnings.forEach((w) => console.log(warn(w)));
         }
       }
       if (!report.ok) process.exitCode = 1;
@@ -1322,8 +1355,8 @@ async function main() {
       break;
     }
     default:
-      console.error(`Unknown command: ${command}`);
-      console.error("Run 'omp --help' for available commands.");
+      console.error(fail(`Unknown command: ${c.bold(command)}`));
+      console.error(c.dim("Run 'omp --help' for available commands."));
       process.exitCode = 2;
   }
 }
