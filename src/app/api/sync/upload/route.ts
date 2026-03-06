@@ -6,9 +6,10 @@ import type { UploadRecord } from "@/services/upload";
 import { dispatchWebhook } from "@/services/webhook";
 import { logger } from "@/lib/logger";
 import { rateLimiters } from "@/lib/rate-limit";
+import { env } from "@/env";
 
-const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_RECORDS_PER_REQUEST = 1000;
+const MAX_BODY_SIZE = env.OMP_MAX_BODY_SIZE_MB * 1024 * 1024;
+const MAX_RECORDS_PER_REQUEST = env.OMP_MAX_RECORDS_PER_REQUEST;
 
 const uploadRecordSchema = z.object({
   event_id: z.string().min(1),
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
       rawBody = JSON.parse(rawText);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        logger.error({ error }, "Failed to parse request body as JSON");
+        logger.error({ err: error }, "Failed to parse request body as JSON");
         return NextResponse.json(
           { error: "Invalid JSON in request body" },
           { status: 400 }
@@ -135,7 +136,7 @@ export async function POST(request: NextRequest) {
     if (result.accepted > 0) {
       // Fire webhook notification (non-blocking)
       dispatchWebhook(user.id, "prompt.created", { count: result.accepted }).catch((err) => {
-        logger.error({ error: err, userId: user.id }, "Non-blocking webhook dispatch failed");
+        logger.error({ err, userId: user.id }, "Non-blocking webhook dispatch failed");
       });
     }
 
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
       status: result.success ? 200 : 207, // 207 Multi-Status for partial success
     });
   } catch (error) {
-    logger.error({ error }, "Upload error");
+    logger.error({ err: error }, "Upload error");
     return NextResponse.json(
       { error: "An error occurred during upload" },
       { status: 500 }

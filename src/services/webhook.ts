@@ -5,9 +5,12 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import net from "net";
+import { env } from "@/env";
+import { redactText } from "@/lib/redact";
+import type { WebhookEvent } from "@/app/api/webhooks/shared";
 
-const MAX_FAIL_COUNT = 10;
-const WEBHOOK_TIMEOUT_MS = 10_000;
+const MAX_FAIL_COUNT = env.OMP_WEBHOOK_MAX_FAIL_COUNT;
+const WEBHOOK_TIMEOUT_MS = env.OMP_WEBHOOK_TIMEOUT_MS;
 
 /**
  * Check whether an IPv4 address string falls within private/internal ranges.
@@ -247,6 +250,31 @@ function signPayload(payload: string, secret: string): string {
 }
 
 /**
+ * Deep-redact sensitive fields (promptText, responseText, prompt_text, response_text)
+ * from a webhook payload before delivery.
+ */
+function redactPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const SENSITIVE_KEYS = new Set(["promptText", "responseText", "prompt_text", "response_text"]);
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (SENSITIVE_KEYS.has(key) && typeof value === "string") {
+      result[key] = redactText(value).text;
+    } else if (Array.isArray(value)) {
+      result[key] = value.map((item) =>
+        typeof item === "object" && item !== null
+          ? redactPayload(item as Record<string, unknown>)
+          : item,
+      );
+    } else if (typeof value === "object" && value !== null) {
+      result[key] = redactPayload(value as Record<string, unknown>);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
  * Dispatch a webhook event to all active webhooks for a user.
  *
  * Queries active webhooks subscribed to the given event, POSTs the payload
@@ -255,7 +283,7 @@ function signPayload(payload: string, secret: string): string {
  */
 export async function dispatchWebhook(
   userId: string,
-  event: string,
+  event: WebhookEvent,
   payload: Record<string, unknown>
 ): Promise<void> {
   // Find all active webhooks for this user that subscribe to this event
@@ -272,10 +300,13 @@ export async function dispatchWebhook(
 
     if (activeWebhooks.length === 0) return;
 
+    // Redact sensitive fields before including in webhook delivery
+    const redactedPayload = redactPayload(payload);
+
     const deliveryPayload = {
       event,
       timestamp: new Date().toISOString(),
-      data: payload,
+      data: redactedPayload,
     };
 
     const bodyString = JSON.stringify(deliveryPayload);
@@ -425,7 +456,7 @@ export async function dispatchWebhook(
           }
 
           logger.error(
-            { error, webhookId: webhook.id, url: webhook.url },
+            { err: error, webhookId: webhook.id, url: webhook.url },
             "Webhook delivery failed"
           );
         }

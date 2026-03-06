@@ -2,7 +2,7 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { checkIsAdmin, getSessionUser } from "@/lib/with-auth";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,7 +43,7 @@ interface SessionDetailPageProps {
 export default async function SessionDetailPage({ params }: SessionDetailPageProps) {
   const { sessionId } = await params;
   const user = await getSessionUser();
-  if (!user) return null;
+  if (!user) redirect("/login");
 
   const isAdmin = await checkIsAdmin(user.userId);
 
@@ -67,8 +67,8 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
     notFound();
   }
 
-  const first = prompts[0];
-  const last = prompts[prompts.length - 1];
+  const first = prompts[prompts.length - 1]; // oldest (query is DESC)
+  const last = prompts[0]; // newest
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
   const totalOutputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
 

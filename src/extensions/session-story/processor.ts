@@ -4,6 +4,7 @@ import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, asc, desc, sql } from "drizzle-orm";
+import { redactText } from "@/lib/redact";
 
 interface SessionPrompt {
   index: number;
@@ -98,8 +99,8 @@ function buildSessionContext(
     prompts: prompts.map((p, i) => ({
       index: i + 1,
       timestamp: p.timestamp.toISOString(),
-      prompt_summary: truncateText(p.promptText, 200),
-      response_summary: truncateText(p.responseText, 200),
+      prompt_summary: redactText(truncateText(p.promptText, 200)).text,
+      response_summary: redactText(truncateText(p.responseText, 200)).text,
       type: p.promptType || "user_input",
     })),
   };

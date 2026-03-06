@@ -20,6 +20,25 @@ export interface DashboardData {
     totalTokens: number;
   }>;
   topProjects: Array<{ project: string; count: number }>;
+  // Token Usage card
+  tokenUsage: {
+    totalTokens: number;
+    promptTokens: number;
+    responseTokens: number;
+    avgPerPrompt: number;
+    dailyTrend: Array<{ date: string; tokens: number }>;
+    byProject: Array<{ project: string; tokens: number }>;
+  };
+  // Quality Score card
+  quality: {
+    avgScore: number;
+    totalScored: number;
+    distribution: Array<{ range: string; count: number }>;
+    dailyTrend: Array<{ date: string; avg: number }>;
+    topPrompts: Array<{ id: string; score: number; text: string }>;
+  };
+  // Topics card
+  topics: Array<{ tag: string; count: number }>;
 }
 
 export async function getDashboardData(userId: string): Promise<DashboardData | null> {
@@ -36,7 +55,8 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
 
     const userFilter = eq(schema.prompts.userId, userId);
 
-    const [todayStats, yesterdayStats, dailyCounts, recentSessionsRaw, topProjectsRaw] =
+    // Single Promise.all for all 13 queries (no data dependency between them)
+    const [todayStats, yesterdayStats, dailyCounts, recentSessionsRaw, topProjectsRaw, tokenStats, dailyTokens, tokensByProject, qualityStats, qualityDistRaw, qualityTrend, topQualityRaw, topicTagsRaw] =
       await Promise.all([
         db.select({
           prompts: sql<number>`count(*)`,
@@ -97,6 +117,99 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
         .groupBy(schema.prompts.projectName)
         .orderBy(desc(sql`count(*)`))
         .limit(3),
+
+        // Token totals for the week
+        db.select({
+          totalTokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
+          promptTokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0)),0)`,
+          responseTokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
+          promptCount: sql<number>`count(*)`,
+        })
+        .from(schema.prompts)
+        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart))),
+
+        // Daily token trend (7 days)
+        db.select({
+          date: sql<string>`date(${schema.prompts.timestamp})`,
+          tokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
+        })
+        .from(schema.prompts)
+        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
+        .groupBy(sql`date(${schema.prompts.timestamp})`)
+        .orderBy(sql`date(${schema.prompts.timestamp})`),
+
+        // Tokens by project (top 5)
+        db.select({
+          project: schema.prompts.projectName,
+          tokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
+        })
+        .from(schema.prompts)
+        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.projectName} IS NOT NULL`))
+        .groupBy(schema.prompts.projectName)
+        .orderBy(desc(sql`sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0))`))
+        .limit(5),
+
+        // Quality average + total scored (7 days)
+        db.select({
+          avgScore: sql<number>`coalesce(avg(${schema.prompts.qualityScore}),0)`,
+          totalScored: sql<number>`count(${schema.prompts.qualityScore})`,
+        })
+        .from(schema.prompts)
+        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`)),
+
+        // Quality score distribution (buckets of 20)
+        db.execute(sql`
+          SELECT
+            CASE
+              WHEN ${schema.prompts.qualityScore} < 20 THEN '0-20'
+              WHEN ${schema.prompts.qualityScore} < 40 THEN '20-40'
+              WHEN ${schema.prompts.qualityScore} < 60 THEN '40-60'
+              WHEN ${schema.prompts.qualityScore} < 80 THEN '60-80'
+              ELSE '80-100'
+            END as range,
+            COUNT(*)::int as count
+          FROM ${schema.prompts}
+          WHERE ${schema.prompts.userId} = ${userId}
+            AND ${schema.prompts.timestamp} >= ${weekAgoStart}
+            AND ${schema.prompts.timestamp} < ${tomorrowStart}
+            AND ${schema.prompts.qualityScore} IS NOT NULL
+          GROUP BY 1
+          ORDER BY 1
+        `),
+
+        // Quality daily trend (7 days)
+        db.select({
+          date: sql<string>`date(${schema.prompts.timestamp})`,
+          avg: sql<number>`coalesce(avg(${schema.prompts.qualityScore}),0)`,
+        })
+        .from(schema.prompts)
+        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
+        .groupBy(sql`date(${schema.prompts.timestamp})`)
+        .orderBy(sql`date(${schema.prompts.timestamp})`),
+
+        // Top 3 quality prompts (7 days)
+        db.select({
+          id: schema.prompts.id,
+          qualityScore: schema.prompts.qualityScore,
+          promptText: schema.prompts.promptText,
+        })
+        .from(schema.prompts)
+        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
+        .orderBy(desc(schema.prompts.qualityScore))
+        .limit(3),
+
+        // Topic tags aggregation (7 days)
+        db.execute(sql`
+          SELECT tag, COUNT(*)::int as count
+          FROM ${schema.prompts}, unnest(${schema.prompts.topicTags}) as tag
+          WHERE ${schema.prompts.userId} = ${userId}
+            AND ${schema.prompts.timestamp} >= ${weekAgoStart}
+            AND ${schema.prompts.timestamp} < ${tomorrowStart}
+            AND ${schema.prompts.topicTags} IS NOT NULL
+          GROUP BY tag
+          ORDER BY count DESC
+          LIMIT 10
+        `),
       ]);
 
     // Fill 7-day series with zeros for missing days
@@ -108,6 +221,31 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
     }
     const dailyMap = new Map(dailyCounts.map(d => [d.date, Number(d.count)]));
     const last7Days = dayKeys.map(date => ({ date, count: dailyMap.get(date) ?? 0 }));
+
+    // Fill daily token trend
+    const dailyTokenMap = new Map(dailyTokens.map(d => [d.date, Number(d.tokens)]));
+    const tokenDailyTrend = dayKeys.map(date => ({ date, tokens: dailyTokenMap.get(date) ?? 0 }));
+
+    // Fill quality daily trend
+    const qualityTrendMap = new Map(qualityTrend.map(d => [d.date, Math.round(Number(d.avg))]));
+    const qualityDailyTrend = dayKeys.map(date => ({ date, avg: qualityTrendMap.get(date) ?? 0 }));
+
+    // Parse quality distribution
+    const allRanges = ["0-20", "20-40", "40-60", "60-80", "80-100"];
+    const distRows = extractRows(qualityDistRaw);
+    const distMap = new Map(distRows.map(r => [String(r.range), Number(r.count)]));
+    const qualityDistribution = allRanges.map(range => ({ range, count: distMap.get(range) ?? 0 }));
+
+    // Parse top quality prompts
+    const topQualityPrompts = topQualityRaw.map(p => ({
+      id: p.id,
+      score: Number(p.qualityScore ?? 0),
+      text: (p.promptText ?? "").slice(0, 120),
+    }));
+
+    // Parse topic tags
+    const topicRows = extractRows(topicTagsRaw);
+    const topics = topicRows.map(r => ({ tag: String(r.tag), count: Number(r.count) }));
 
     // Parse sessions
     const sRows = extractRows(recentSessionsRaw);
@@ -122,6 +260,13 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
       source: r.source ? String(r.source) : null,
       totalTokens: Number(r.total_tokens ?? 0),
     }));
+
+    // Token usage stats
+    const tRow = tokenStats[0];
+    const totalTokensWeek = Number(tRow?.totalTokens ?? 0);
+    const promptTokensWeek = Number(tRow?.promptTokens ?? 0);
+    const responseTokensWeek = Number(tRow?.responseTokens ?? 0);
+    const promptCountWeek = Number(tRow?.promptCount ?? 0);
 
     return {
       today: {
@@ -139,9 +284,28 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
       last7Days,
       recentSessions,
       topProjects: topProjectsRaw.map(p => ({
-        project: p.project ?? "No project",
+        project: p.project ?? "Unknown",
         count: Number(p.count),
       })),
+      tokenUsage: {
+        totalTokens: totalTokensWeek,
+        promptTokens: promptTokensWeek,
+        responseTokens: responseTokensWeek,
+        avgPerPrompt: promptCountWeek > 0 ? Math.round(totalTokensWeek / promptCountWeek) : 0,
+        dailyTrend: tokenDailyTrend,
+        byProject: tokensByProject.map(p => ({
+          project: p.project ?? "Unknown",
+          tokens: Number(p.tokens),
+        })),
+      },
+      quality: {
+        avgScore: Math.round(Number(qualityStats[0]?.avgScore ?? 0)),
+        totalScored: Number(qualityStats[0]?.totalScored ?? 0),
+        distribution: qualityDistribution,
+        dailyTrend: qualityDailyTrend,
+        topPrompts: topQualityPrompts,
+      },
+      topics,
     };
   } catch (error) {
     logger.error({ err: error }, "Dashboard data error");

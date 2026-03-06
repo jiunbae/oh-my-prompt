@@ -5,7 +5,11 @@ import * as schema from "@/db/schema";
 import type { UploadRecord, UploadResult } from "./upload-types";
 import { postprocessUploadRecordForDb } from "./upload-postprocess";
 import { computeHeuristicScore } from "@/extensions/prompt-quality/processor";
-import { sql, inArray } from "drizzle-orm";
+import { scorePrompt } from "@/services/quality-scorer";
+import { lintPrompt } from "@/lib/prompt-lint";
+import { sql, inArray, eq, and, desc } from "drizzle-orm";
+import { env } from "@/env";
+import { dispatchWebhook } from "@/services/webhook";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
 
@@ -44,8 +48,8 @@ export async function processUpload(
   const errors: string[] = [];
   const affectedDates = new Set<string>();
 
-  const redactEnabled = process.env.OMP_UPLOAD_REDACT_ENABLED !== "false";
-  const redactMask = process.env.OMP_UPLOAD_REDACT_MASK || "[REDACTED]";
+  const redactEnabled = env.OMP_UPLOAD_REDACT_ENABLED !== "false";
+  const redactMask = env.OMP_UPLOAD_REDACT_MASK;
 
   // ── Phase 1: Validate & prepare all records in memory ──────────
 
@@ -171,6 +175,12 @@ export async function processUpload(
             hasContext: !!(item.record.project || item.record.cwd),
           })
         : null;
+      const dims = isUserInput
+        ? scorePrompt(item.processed.promptText)
+        : null;
+      const lintResults = isUserInput
+        ? lintPrompt(item.processed.promptText)
+        : null;
 
       return {
         eventKey: item.eventKey,
@@ -194,9 +204,19 @@ export async function processUpload(
         wordCountResponse: item.processed.wordCountResponse,
         searchVector: sql`to_tsvector('english', ${item.processed.promptText} || ' ' || ${item.processed.responseText ?? ""})`,
         // Inline heuristic enrichment for user_input prompts
-        ...(heuristic
+        ...(dims
           ? {
-              qualityScore: heuristic.qualityScore,
+              qualityScore: dims.overall,
+              qualityClarity: dims.clarity,
+              qualitySpecificity: dims.specificity,
+              qualityContext: dims.context,
+              qualityConstraints: dims.constraints,
+              qualityStructure: dims.structure,
+              qualityDetails: {
+                method: "heuristic-v1",
+                ...dims,
+                lint: lintResults ?? [],
+              },
               topicTags: heuristic.topicTags,
               enrichedAt: new Date(),
             }
@@ -247,8 +267,18 @@ export async function processUpload(
       const earliest = [...affectedDates].sort()[0];
       await refreshDailyAggregations(userId, new Date(earliest));
     } catch (error) {
-      logger.error({ error }, "Failed to refresh daily analytics aggregations");
+      logger.error({ err: error }, "Failed to refresh daily analytics aggregations");
     }
+  }
+
+  // ── Phase 7: Detect session.completed via gap threshold ───────
+  // If the earliest new prompt's session differs from the previous prompt's
+  // session by >30 min gap, the old session is considered completed.
+  const userInputRecords = toInsert.filter((r) => r.promptType === "user_input");
+  if (userInputRecords.length > 0) {
+    detectSessionCompleted(userId, userInputRecords).catch((err) => {
+      logger.error({ err }, "Non-blocking session.completed detection failed");
+    });
   }
 
   return {
@@ -258,4 +288,45 @@ export async function processUpload(
     rejected,
     errors: errors.slice(0, 10), // Limit error messages
   };
+}
+
+const SESSION_GAP_MS = 30 * 60 * 1000; // 30 minutes
+
+async function detectSessionCompleted(
+  userId: string,
+  newRecords: PreparedRecord[],
+): Promise<void> {
+  const earliestNew = newRecords.reduce(
+    (min, r) => (r.createdAt < min ? r.createdAt : min),
+    newRecords[0].createdAt,
+  );
+
+  // Get the most recent prompt before the earliest new one
+  const [prev] = await db
+    .select({
+      timestamp: schema.prompts.timestamp,
+      sessionId: schema.prompts.sessionId,
+    })
+    .from(schema.prompts)
+    .where(
+      and(
+        eq(schema.prompts.userId, userId),
+        sql`${schema.prompts.timestamp} < ${earliestNew}`,
+      ),
+    )
+    .orderBy(desc(schema.prompts.timestamp))
+    .limit(1);
+
+  if (!prev) return;
+
+  const gap = earliestNew.getTime() - prev.timestamp.getTime();
+  if (gap >= SESSION_GAP_MS && prev.sessionId) {
+    dispatchWebhook(userId, "session.completed", {
+      sessionId: prev.sessionId,
+      endedAt: prev.timestamp.toISOString(),
+      gapMinutes: Math.round(gap / 60_000),
+    }).catch((err) => {
+      logger.error({ err }, "Non-blocking session.completed webhook dispatch failed");
+    });
+  }
 }

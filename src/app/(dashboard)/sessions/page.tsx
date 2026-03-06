@@ -7,6 +7,7 @@ import * as schema from "@/db/schema";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -62,11 +63,11 @@ async function getSessions(params: SearchParams, userId: string) {
     const searchMode = params.searchMode || "keyword";
     if (searchMode === "semantic") {
       conditions.push(
-        sql`${schema.prompts.promptText} % ${params.search} AND similarity(${schema.prompts.promptText}, ${params.search}) > 0.1`
+        sql`LEFT(${schema.prompts.promptText}, 500) % ${params.search} AND similarity(LEFT(${schema.prompts.promptText}, 500), ${params.search}) > 0.1`
       );
     } else if (searchMode === "hybrid") {
       conditions.push(
-        sql`(${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${params.search}) OR (${schema.prompts.promptText} % ${params.search} AND similarity(${schema.prompts.promptText}, ${params.search}) > 0.1))`
+        sql`(${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${params.search}) OR (LEFT(${schema.prompts.promptText}, 500) % ${params.search} AND similarity(LEFT(${schema.prompts.promptText}, 500), ${params.search}) > 0.1))`
       );
     } else {
       conditions.push(
@@ -161,7 +162,7 @@ export default async function SessionsPage({
 }) {
   const params = await searchParams;
   const user = await getCurrentUser();
-  if (!user) return null;
+  if (!user) redirect("/login");
 
   const { sessions, totalCount, projects, sources, devices, workspaces, error } = await getSessions(params, user.userId);
   const currentPage = parseInt(params.page ?? "1", 10);

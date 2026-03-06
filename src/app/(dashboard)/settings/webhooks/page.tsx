@@ -29,9 +29,9 @@ interface WebhookLog {
 
 const AVAILABLE_EVENTS = [
   { value: "prompt.created", label: "Prompt Created" },
+  { value: "prompt.enriched", label: "Prompt Enriched" },
   { value: "prompt.scored", label: "Prompt Scored" },
-  { value: "session.started", label: "Session Started" },
-  { value: "session.ended", label: "Session Ended" },
+  { value: "session.completed", label: "Session Completed" },
   { value: "sync.completed", label: "Sync Completed" },
 ] as const;
 

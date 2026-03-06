@@ -54,11 +54,13 @@ describe("createTRPCContext", () => {
 
     const ctx = await createTRPCContext({ headers });
 
-    expect(ctx.user).toEqual({
-      id: "user-1",
-      email: "user@example.com",
-      isAdmin: false,
-    });
+    expect(ctx.user!.id).toBe("user-1");
+    expect(ctx.user!.email).toBe("user@example.com");
+    // isAdmin is lazy — must resolve first
+    expect(ctx.user!.isAdmin).toBeUndefined();
+    const isAdmin = await ctx.user!.resolveIsAdmin();
+    expect(isAdmin).toBe(false);
+    expect(ctx.user!.isAdmin).toBe(false);
     expect(selectMock).toHaveBeenCalledTimes(1);
   });
 
@@ -71,10 +73,10 @@ describe("createTRPCContext", () => {
 
     const ctx = await createTRPCContext({ headers });
 
-    expect(ctx.user).toEqual({
-      id: "admin-1",
-      email: "admin@example.com",
-      isAdmin: true,
-    });
+    expect(ctx.user!.id).toBe("admin-1");
+    expect(ctx.user!.email).toBe("admin@example.com");
+    const isAdmin = await ctx.user!.resolveIsAdmin();
+    expect(isAdmin).toBe(true);
+    expect(ctx.user!.isAdmin).toBe(true);
   });
 });

@@ -17,7 +17,7 @@
     "db:studio": "drizzle-kit studio",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
-    "setup": "docker compose up -d && sleep 5 && pnpm db:push",
+    "setup": "docker compose up -d && bash -c 'for i in $(seq 1 30); do docker compose exec -T db pg_isready -q && break || sleep 1; done' && pnpm db:push",
     "build:cli": "bash scripts/build-cli.sh",
     "verify:cli": "node packages/omp-cli/scripts/verify-build.js"
   },

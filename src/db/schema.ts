@@ -52,7 +52,7 @@ export const allowedEmails = pgTable("allowed_emails", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  addedBy: uuid("added_by").references(() => users.id),
+  addedBy: uuid("added_by").references(() => users.id, { onDelete: "set null" }),
   addedAt: timestamp("added_at", { withTimezone: true }).defaultNow(),
 });
 
@@ -112,6 +112,8 @@ export const prompts = pgTable(
     index("idx_prompts_text_trgm").using("gin", sql`LEFT(prompt_text, 500) gin_trgm_ops`),
     index("idx_prompts_user_timestamp").on(table.userId, table.timestamp),
     index("idx_prompts_user_project").on(table.userId, table.projectName),
+    index("idx_prompts_user_quality").on(table.userId, table.qualityScore),
+    index("idx_prompts_user_session_ts").on(table.userId, table.sessionId, table.timestamp),
   ]
 );
 
@@ -204,7 +206,7 @@ export const sharedPrompts = pgTable(
       .references(() => prompts.id, { onDelete: "cascade" }),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     shareToken: varchar("share_token", { length: 64 }).notNull().unique(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     viewCount: integer("view_count").default(0),
@@ -280,7 +282,7 @@ export const webhooks = pgTable("webhooks", {
   url: varchar("url", { length: 2048 }).notNull(),
   secret: varchar("secret", { length: 255 }),  // HMAC signing secret
   events: text("events").array().notNull().default(sql`ARRAY['prompt.created']`),
-  // Events: prompt.created, prompt.scored, session.started, session.ended, sync.completed
+  // Events: prompt.created, prompt.enriched, prompt.scored, session.completed, sync.completed
   isActive: boolean("is_active").default(true),
   lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
   lastStatus: integer("last_status"),  // Last HTTP status code

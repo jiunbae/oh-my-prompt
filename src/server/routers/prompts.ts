@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { desc, eq, sql, and } from "drizzle-orm";
+import { desc, eq, sql, and, gte, lte } from "drizzle-orm";
 
 export const promptsRouter = createTRPCRouter({
   /**
@@ -16,11 +16,14 @@ export const promptsRouter = createTRPCRouter({
         projectName: z.string().optional(),
         promptType: z.enum(["user_input", "task_notification", "system"]).optional(),
         search: z.string().optional(),
+        qualityScoreMin: z.number().min(0).max(100).optional(),
+        qualityScoreMax: z.number().min(0).max(100).optional(),
+        topicTags: z.array(z.string()).optional(),
       })
     )
     .query(async ({ input, ctx }) => {
 
-      const { limit, offset, projectName, promptType, search } = input;
+      const { limit, offset, projectName, promptType, search, qualityScoreMin, qualityScoreMax, topicTags } = input;
 
       const conditions = [eq(schema.prompts.userId, ctx.user.id)];
       if (projectName) {
@@ -31,6 +34,15 @@ export const promptsRouter = createTRPCRouter({
       }
       if (search) {
         conditions.push(sql`${schema.prompts.searchVector} @@ websearch_to_tsquery('english', ${search})`);
+      }
+      if (qualityScoreMin !== undefined) {
+        conditions.push(gte(schema.prompts.qualityScore, qualityScoreMin));
+      }
+      if (qualityScoreMax !== undefined) {
+        conditions.push(lte(schema.prompts.qualityScore, qualityScoreMax));
+      }
+      if (topicTags && topicTags.length > 0) {
+        conditions.push(sql`${schema.prompts.topicTags} && ${topicTags}::text[]`);
       }
 
       const whereClause = and(...conditions);

@@ -7,6 +7,8 @@ const {
   uninstallClaudeHook,
   installCodexHook,
   uninstallCodexHook,
+  installGeminiHook,
+  uninstallGeminiHook,
   installOpenCodeHook,
   uninstallOpenCodeHook,
   listHookStatus,
@@ -65,6 +67,9 @@ ${cmd("import", "Import from external sources")}
 ${cmd("ingest", "Ingest a raw JSON payload (used by hooks)")}
 
 ${cmd("stats", "Show prompt statistics")}
+${cmd("report", "Generate summary report for a time range")}
+${cmd("analyze [id]", "Analyze a prompt (default: most recent)")}
+${cmd("ask", 'Ask a question about your prompts')}
 ${cmd("export", "Export records (json, csv, jsonl)")}
 
 ${cmd("serve", "Start local dashboard server (Docker)")}
@@ -169,6 +174,9 @@ function detectCliTargets() {
   if (commandExists("codex") || fs.existsSync(path.join(home, ".codex"))) {
     targets.push("codex");
   }
+  if (commandExists("gemini") || fs.existsSync(path.join(home, ".gemini"))) {
+    targets.push("gemini");
+  }
   if (commandExists("opencode") || fs.existsSync(path.join(xdgConfigHome, "opencode"))) {
     targets.push("opencode");
   }
@@ -180,7 +188,7 @@ function resolveCliList(cliOption) {
     return detectCliTargets();
   }
   if (cliOption === "all") {
-    return ["claude", "codex", "opencode"];
+    return ["claude", "codex", "gemini", "opencode"];
   }
   return cliOption.split(",").map((entry) => entry.trim());
 }
@@ -222,6 +230,17 @@ async function handleInstall(options) {
       configured: codexResult.configured,
       conflict: codexResult.conflict,
       merged: codexResult.merged,
+    });
+  }
+
+  if (targets.includes("gemini")) {
+    const geminiResult = installGeminiHook();
+    config.hooks.enabled.gemini = geminiResult.configured;
+    installed.push({
+      cli: "gemini",
+      path: geminiResult.scriptPath,
+      configPath: geminiResult.settingsPath,
+      configured: geminiResult.configured,
     });
   }
 
@@ -354,6 +373,14 @@ async function handleUninstall(options) {
     } catch { /* ignore */ }
 
     try {
+      const geminiResult = uninstallGeminiHook();
+      if (geminiResult.removed) {
+        removed.push({ cli: "gemini", path: geminiResult.scriptPath });
+        console.log("  Removed Gemini hook: " + (geminiResult.scriptPath || ""));
+      }
+    } catch { /* ignore */ }
+
+    try {
       const opencodeResult = uninstallOpenCodeHook();
       if (opencodeResult.scriptPath || opencodeResult.removed || opencodeResult.configUpdated) {
         removed.push({ cli: "opencode", path: opencodeResult.scriptPath });
@@ -420,6 +447,18 @@ async function handleUninstall(options) {
     }
   }
 
+  if (targets.includes("gemini")) {
+    const geminiResult = uninstallGeminiHook();
+    config.hooks.enabled.gemini = false;
+    if (geminiResult.removed) {
+      removed.push({
+        cli: "gemini",
+        path: geminiResult.scriptPath,
+        removed: geminiResult.removed,
+      });
+    }
+  }
+
   if (targets.includes("opencode")) {
     const opencodeResult = uninstallOpenCodeHook();
     config.hooks.enabled.opencode = false;
@@ -478,7 +517,7 @@ function handleStatus(options) {
     console.log(label("Storage", status.storage));
     console.log(label("SQLite", c.dim(status.sqlitePath)));
     console.log(label("Capture response", status.captureResponse ? c.green("on") : c.dim("off")));
-    console.log(label("Hooks", `claude=${hookIcon(hooks.claude_code)}, codex=${hookIcon(hooks.codex)}, opencode=${hookIcon(hooks.opencode)}`));
+    console.log(label("Hooks", `claude=${hookIcon(hooks.claude_code)}, codex=${hookIcon(hooks.codex)}, gemini=${hookIcon(hooks.gemini)}, opencode=${hookIcon(hooks.opencode)}`));
     console.log(label("Last capture", status.lastCapture || c.dim("none")));
     console.log(label("Queue", `${queueStats.count} files, ${queueStats.bytes} bytes`));
     if (state.lastReplay) {
@@ -853,7 +892,7 @@ async function handleIngest(options) {
     return;
   }
 
-  let rawPayload = options.json ? options.json : null;
+  let rawPayload = typeof options.json === "string" ? options.json : (options.payload || null);
   if (options.stdin || !process.stdin.isTTY) {
     rawPayload = await readStdin();
   }
@@ -865,12 +904,336 @@ async function handleIngest(options) {
   }
 
   const result = ingestPayload(rawPayload, config);
-  if (options.json) {
+  if (options.json === true) {
     printJson(result);
   } else if (!result.ok) {
     console.error(result.error || "Failed to ingest");
     process.exitCode = 1;
   }
+}
+
+async function handleAsk(options, positional) {
+  const config = loadConfig();
+  const serverUrl = config.server?.url;
+  const serverToken = config.server?.token;
+
+  if (!serverUrl || !serverToken) {
+    console.error("Server not configured. Run 'omp setup' first.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const question = positional.join(" ").trim();
+  if (!question) {
+    console.error("Usage: omp ask \"your question about prompts\"");
+    process.exitCode = 2;
+    return;
+  }
+
+  const url = `${serverUrl.replace(/\/$/, "")}/api/insights/ask`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Token": serverToken,
+      },
+      body: JSON.stringify({ question }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      console.error(`Server error (${res.status}): ${body.error || "Unknown error"}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = await res.json();
+
+    if (options.json) {
+      printJson(result);
+      return;
+    }
+
+    console.log("");
+    console.log(`  ${c.bold(c.cyan(result.title || "Answer"))}`);
+    console.log("");
+    console.log(`  ${result.summary || "No summary available."}`);
+
+    if (result.highlights && result.highlights.length) {
+      console.log("");
+      for (const h of result.highlights) {
+        console.log(`  ${c.dim(h.label + ":")} ${c.bold(String(h.value))}`);
+      }
+    }
+
+    if (result.trends && result.trends.length) {
+      console.log("");
+      console.log(`  ${c.yellow("Trends:")}`);
+      for (const t of result.trends) {
+        const arrow = t.direction === "up" ? c.green("\u2191") : t.direction === "down" ? c.red("\u2193") : c.dim("\u2192");
+        console.log(`  ${arrow} ${t.metric}: ${t.explanation}`);
+      }
+    }
+
+    if (result.recommendations && result.recommendations.length) {
+      console.log("");
+      console.log(`  ${c.yellow("Recommendations:")}`);
+      for (const r of result.recommendations) {
+        console.log(`  ${c.dim("\u2022")} ${r}`);
+      }
+    }
+
+    if (result.confidence !== undefined) {
+      console.log("");
+      console.log(`  ${c.dim("Confidence:")} ${Math.round(result.confidence * 100)}%`);
+    }
+    console.log("");
+  } catch (err) {
+    console.error(`Failed to reach server: ${err.message}`);
+    process.exitCode = 1;
+  }
+}
+
+function handleAnalyze(options, positional) {
+  const config = loadConfig();
+  const db = openDb(config.storage.sqlite.path);
+  const promptId = positional[0];
+
+  let row;
+  if (promptId) {
+    row = db.prepare("SELECT * FROM prompts WHERE id = ?").get(promptId);
+    if (!row) {
+      db.close();
+      console.error(`Prompt not found: ${promptId}`);
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    row = db.prepare("SELECT * FROM prompts ORDER BY created_at DESC LIMIT 1").get();
+    if (!row) {
+      db.close();
+      console.error("No prompts found in the database.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // Fetch quality review if exists
+  let review = null;
+  try {
+    review = db.prepare("SELECT * FROM prompt_reviews WHERE prompt_id = ?").get(row.id);
+  } catch {
+    // table may not exist
+  }
+
+  db.close();
+
+  if (options.json) {
+    printJson({ prompt: row, review: review || null });
+    return;
+  }
+
+  console.log("");
+  console.log(`  ${c.bold(c.cyan("Prompt Analysis"))}`);
+  console.log("");
+  console.log(label("  ID", row.id));
+  console.log(label("  Created", row.created_at));
+  console.log(label("  Source", c.cyan(row.source)));
+  console.log(label("  CLI", row.cli_name));
+  if (row.project) console.log(label("  Project", c.bold(row.project)));
+  if (row.session_id) console.log(label("  Session", c.dim(row.session_id)));
+  if (row.model) console.log(label("  Model", row.model));
+
+  console.log("");
+  console.log(`  ${c.yellow("Prompt Text:")}`);
+  const promptText = row.prompt_text || "(empty)";
+  const truncated = promptText.length > 500 ? promptText.slice(0, 500) + c.dim("... (truncated)") : promptText;
+  console.log(`  ${truncated}`);
+
+  if (row.response_text) {
+    console.log("");
+    console.log(`  ${c.yellow("Response:")}`);
+    const respTruncated = row.response_text.length > 500
+      ? row.response_text.slice(0, 500) + c.dim("... (truncated)")
+      : row.response_text;
+    console.log(`  ${respTruncated}`);
+  }
+
+  console.log("");
+  console.log(`  ${c.yellow("Metadata:")}`);
+  console.log(label("  Prompt length", `${row.prompt_length} chars`));
+  if (row.response_length) console.log(label("  Response length", `${row.response_length} chars`));
+  if (row.token_estimate) console.log(label("  Tokens (prompt)", String(row.token_estimate)));
+  if (row.token_estimate_response) console.log(label("  Tokens (response)", String(row.token_estimate_response)));
+  if (row.word_count) console.log(label("  Words (prompt)", String(row.word_count)));
+
+  if (review) {
+    console.log("");
+    console.log(`  ${c.yellow("Quality Score:")} ${c.bold(String(review.score))} / 100`);
+    try {
+      const signals = JSON.parse(review.signals_json);
+      if (Array.isArray(signals) && signals.length) {
+        for (const sig of signals) {
+          const icon = sig.positive ? c.green("+") : c.red("-");
+          console.log(`  ${icon} ${sig.label || sig.name || sig}`);
+        }
+      }
+    } catch { /* ignore */ }
+    try {
+      const suggestions = JSON.parse(review.suggestions_json);
+      if (Array.isArray(suggestions) && suggestions.length) {
+        console.log("");
+        console.log(`  ${c.yellow("Suggestions:")}`);
+        for (const s of suggestions) {
+          console.log(`  ${c.dim("\u2022")} ${typeof s === "string" ? s : s.text || JSON.stringify(s)}`);
+        }
+      }
+    } catch { /* ignore */ }
+  }
+  console.log("");
+}
+
+function handleReport(options) {
+  const config = loadConfig();
+  const db = openDb(config.storage.sqlite.path);
+
+  const where = [];
+  const params = [];
+
+  if (options.since) {
+    const sinceDate = new Date(options.since);
+    if (isNaN(sinceDate.getTime())) {
+      console.error("Invalid --since date");
+      process.exitCode = 2;
+      return;
+    }
+    where.push("p.created_at >= ?");
+    params.push(sinceDate.toISOString());
+  }
+  if (options.until) {
+    const untilDate = new Date(options.until);
+    if (isNaN(untilDate.getTime())) {
+      console.error("Invalid --until date");
+      process.exitCode = 2;
+      return;
+    }
+    untilDate.setHours(23, 59, 59, 999);
+    where.push("p.created_at <= ?");
+    params.push(untilDate.toISOString());
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+  const overall = db.prepare(
+    `SELECT
+      COUNT(*) as total_prompts,
+      SUM(token_estimate) as total_tokens,
+      SUM(token_estimate_response) as total_tokens_response,
+      AVG(prompt_length) as avg_length,
+      COUNT(DISTINCT project) as project_count,
+      COUNT(DISTINCT session_id) as session_count,
+      COUNT(DISTINCT source) as source_count,
+      MIN(created_at) as first_prompt,
+      MAX(created_at) as last_prompt
+    FROM prompts p ${whereClause}`
+  ).get(...params);
+
+  const topProjects = db.prepare(
+    `SELECT project, COUNT(*) as count, SUM(token_estimate) as tokens
+    FROM prompts p ${whereClause ? whereClause + " AND" : "WHERE"} project IS NOT NULL AND project != ''
+    GROUP BY project ORDER BY count DESC LIMIT 10`
+  ).all(...params);
+
+  const topSessions = db.prepare(
+    `SELECT session_id, COUNT(*) as count, MIN(created_at) as started, MAX(created_at) as ended
+    FROM prompts p ${whereClause ? whereClause + " AND" : "WHERE"} session_id IS NOT NULL AND session_id != ''
+    GROUP BY session_id ORDER BY count DESC LIMIT 5`
+  ).all(...params);
+
+  const sourceBreakdown = db.prepare(
+    `SELECT source, COUNT(*) as count
+    FROM prompts p ${whereClause}
+    GROUP BY source ORDER BY count DESC`
+  ).all(...params);
+
+  let qualityStats = null;
+  try {
+    qualityStats = db.prepare(
+      `SELECT AVG(r.score) as avg_score, MIN(r.score) as min_score, MAX(r.score) as max_score, COUNT(*) as reviewed_count
+      FROM prompt_reviews r
+      JOIN prompts p ON r.prompt_id = p.id
+      ${whereClause}`
+    ).get(...params);
+  } catch { /* table may not exist */ }
+
+  db.close();
+
+  const report = {
+    overall,
+    topProjects,
+    topSessions,
+    sourceBreakdown,
+    qualityStats,
+  };
+
+  if (options.json || options.format === "json") {
+    printJson(report);
+    return;
+  }
+
+  console.log("");
+  console.log(`  ${c.bold(c.cyan("Prompt Report"))}`);
+  if (options.since || options.until) {
+    const range = [options.since || "...", options.until || "now"].join(" \u2192 ");
+    console.log(`  ${c.dim(range)}`);
+  }
+  console.log("");
+
+  console.log(`  ${c.yellow("Overview:")}`);
+  console.log(label("  Total prompts", c.bold(String(overall.total_prompts || 0))));
+  console.log(label("  Total tokens", String(overall.total_tokens || 0)));
+  console.log(label("  Total response tokens", String(overall.total_tokens_response || 0)));
+  console.log(label("  Avg prompt length", `${Math.round(overall.avg_length || 0)} chars`));
+  console.log(label("  Projects", String(overall.project_count || 0)));
+  console.log(label("  Sessions", String(overall.session_count || 0)));
+  if (overall.first_prompt) {
+    console.log(label("  Date range", `${overall.first_prompt} \u2192 ${overall.last_prompt}`));
+  }
+
+  if (sourceBreakdown.length) {
+    console.log("");
+    console.log(`  ${c.yellow("Sources:")}`);
+    for (const s of sourceBreakdown) {
+      console.log(`  ${c.dim("\u2022")} ${s.source}: ${c.bold(String(s.count))} prompts`);
+    }
+  }
+
+  if (topProjects.length) {
+    console.log("");
+    console.log(`  ${c.yellow("Top Projects:")}`);
+    for (const p of topProjects) {
+      console.log(`  ${c.dim("\u2022")} ${c.bold(p.project)}: ${p.count} prompts, ${p.tokens || 0} tokens`);
+    }
+  }
+
+  if (topSessions.length) {
+    console.log("");
+    console.log(`  ${c.yellow("Most Active Sessions:")}`);
+    for (const s of topSessions) {
+      const sid = s.session_id.length > 16 ? s.session_id.slice(0, 16) + "..." : s.session_id;
+      console.log(`  ${c.dim("\u2022")} ${sid}: ${s.count} prompts (${s.started} \u2192 ${s.ended})`);
+    }
+  }
+
+  if (qualityStats && qualityStats.reviewed_count > 0) {
+    console.log("");
+    console.log(`  ${c.yellow("Quality Trends:")}`);
+    console.log(label("  Reviewed prompts", String(qualityStats.reviewed_count)));
+    console.log(label("  Avg score", `${Math.round(qualityStats.avg_score)} / 100`));
+    console.log(label("  Score range", `${qualityStats.min_score} \u2192 ${qualityStats.max_score}`));
+  }
+  console.log("");
 }
 
 async function main() {
@@ -919,13 +1282,13 @@ async function main() {
     case "install": {
       if (options.help || options.h) {
         console.log(`
-  omp install — Install hooks for Claude Code / Codex / OpenCode
+  omp install — Install hooks for Claude Code / Codex / Gemini / OpenCode
 
   USAGE
     omp install [options]
 
   OPTIONS
-    --cli <targets>           Comma-separated: claude,codex,opencode,all (default: auto-detect)
+    --cli <targets>           Comma-separated: claude,codex,gemini,opencode,all (default: auto-detect)
     --server <url>            Server URL
     --token <token>           Authentication token
     --sqlite-path <path>      Custom SQLite database path
@@ -950,6 +1313,9 @@ async function main() {
           }
           if (item.cli === "codex" && item.configured) {
             console.log(`Codex config updated at ${item.configPath}`);
+          }
+          if (item.cli === "gemini" && item.configured) {
+            console.log(`Gemini settings updated at ${item.configPath}`);
           }
           if (item.cli === "opencode" && item.conflict) {
             console.log("OpenCode config 'plugin' is not an array. Please update ~/.config/opencode/opencode.json manually.");
@@ -1352,6 +1718,80 @@ async function main() {
         console.error(`Unknown subcommand: omp serve ${action}`);
         process.exitCode = 2;
       }
+      break;
+    }
+    case "ask": {
+      if (options.help || options.h) {
+        console.log(`
+  omp ask — Ask a question about your prompts
+
+  USAGE
+    omp ask "your question" [options]
+
+  The question is sent to the server's AI-powered insights endpoint,
+  which analyzes your prompt history and returns an answer.
+
+  OPTIONS
+    --json    Output as JSON
+
+  EXAMPLES
+    omp ask "What projects did I work on this week?"
+    omp ask "How many prompts did I send yesterday?"
+    omp ask "What are my most active sessions?" --json
+`);
+        break;
+      }
+      await handleAsk(options, positional);
+      break;
+    }
+    case "analyze": {
+      if (options.help || options.h) {
+        console.log(`
+  omp analyze — Analyze a specific prompt
+
+  USAGE
+    omp analyze [prompt-id] [options]
+
+  Shows prompt text, metadata, and quality score breakdown.
+  If no ID is given, analyzes the most recent prompt.
+
+  OPTIONS
+    --json    Output as JSON
+
+  EXAMPLES
+    omp analyze
+    omp analyze abc123-def456
+    omp analyze --json
+`);
+        break;
+      }
+      handleAnalyze(options, positional);
+      break;
+    }
+    case "report": {
+      if (options.help || options.h) {
+        console.log(`
+  omp report — Generate a summary report
+
+  USAGE
+    omp report [options]
+
+  Shows total prompts, tokens, projects, top sessions, quality trends.
+
+  OPTIONS
+    --since <date>    Filter from date (YYYY-MM-DD)
+    --until <date>    Filter to date (YYYY-MM-DD)
+    --format <fmt>    Output format: text, json (default: text)
+    --json            Alias for --format json
+
+  EXAMPLES
+    omp report
+    omp report --since 2025-01-01
+    omp report --since 2025-01-01 --until 2025-06-30 --json
+`);
+        break;
+      }
+      handleReport(options);
       break;
     }
     default:

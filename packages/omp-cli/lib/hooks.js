@@ -77,7 +77,11 @@ function extractText(content) {
 
 function isReal(entry) {
   if ((entry.type || entry.role) !== 'user') return false;
-  const c = entry.message?.content || entry.content;
+  let c = entry.message?.content || entry.content;
+  if (Array.isArray(c)) {
+    c = c.filter(b => b.type === 'text').map(b => b.text).join('\\n');
+    if (!c) return false;
+  }
   if (typeof c !== 'string') return false;
   const t = c.trim();
   if (!t) return false;
@@ -339,6 +343,156 @@ function getCodexWrapperScriptPath() {
 
 function getCodexChainPath() {
   return path.join(getHooksDir(), "codex", "notify-chain.json");
+}
+
+function getGeminiHome() {
+  return process.env.GEMINI_HOME || path.join(os.homedir(), ".gemini");
+}
+
+function getGeminiSettingsPath() {
+  return path.join(getGeminiHome(), "settings.json");
+}
+
+function getGeminiHookScriptPath() {
+  return path.join(getHooksDir(), "gemini", "omp-gemini-hook.sh");
+}
+
+function geminiHookScript() {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+OMP_BIN="\${OMP_BIN:-omp}"
+
+payload="$(cat || true)"
+if [ -z "$payload" ]; then
+  echo '{"decision":"allow"}'
+  exit 0
+fi
+
+# Extract fields from the Gemini CLI hook payload and send to omp ingest
+enriched=$(node -e "
+  const p = JSON.parse(process.argv[1]);
+  const out = {
+    timestamp: new Date().toISOString(),
+    source: 'gemini',
+    session_id: p.session_id || '',
+    cwd: p.cwd || '',
+    role: 'user',
+    text: p.prompt || p.user_message || p.text || '',
+    response_text: p.response || p.model_response || '',
+    cli_name: 'gemini',
+    hook_version: '1.0.0',
+    capture_response: true,
+    meta: {
+      hook_event: p.hook_event_name || '',
+    },
+  };
+  if (!out.text && !out.response_text) process.exit(0);
+  console.log(JSON.stringify(out));
+" "$payload" 2>/dev/null) || true
+
+if [ -n "$enriched" ]; then
+  printf '%s\\n' "$enriched" | "$OMP_BIN" ingest --stdin || true
+fi
+
+echo '{"decision":"allow"}'
+exit 0
+`;
+}
+
+function ensureGeminiSettingsHook(scriptPath) {
+  const settingsPath = getGeminiSettingsPath();
+  let settings = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    } catch {
+      settings = {};
+    }
+  }
+
+  if (!settings.hooks) settings.hooks = {};
+  if (!settings.hooks.AfterAgent) settings.hooks.AfterAgent = [];
+
+  const command = `bash ${scriptPath}`;
+  const hookEntries = settings.hooks.AfterAgent;
+
+  const exists = hookEntries.some((entry) => {
+    if (entry.hooks) {
+      return entry.hooks.some((h) => h.command && h.command.includes(scriptPath));
+    }
+    return entry.command && entry.command.includes(scriptPath);
+  });
+
+  if (!exists) {
+    hookEntries.push({
+      hooks: [
+        {
+          type: "command",
+          command: command,
+          name: "Oh My Prompt capture",
+          timeout: 10000,
+        },
+      ],
+    });
+  }
+
+  ensureDir(path.dirname(settingsPath));
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+  return settingsPath;
+}
+
+function removeGeminiSettingsHook(scriptPath) {
+  const settingsPath = getGeminiSettingsPath();
+  if (!fs.existsSync(settingsPath)) return;
+
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+  } catch {
+    return;
+  }
+
+  if (!settings.hooks || !settings.hooks.AfterAgent) return;
+
+  settings.hooks.AfterAgent = settings.hooks.AfterAgent.filter((entry) => {
+    if (entry.hooks) {
+      return !entry.hooks.some((h) => h.command && h.command.includes(scriptPath));
+    }
+    return !(entry.command && entry.command.includes(scriptPath));
+  });
+
+  if (settings.hooks.AfterAgent.length === 0) {
+    delete settings.hooks.AfterAgent;
+  }
+
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+}
+
+function installGeminiHook() {
+  const scriptPath = getGeminiHookScriptPath();
+  ensureDir(path.dirname(scriptPath));
+
+  fs.writeFileSync(scriptPath, geminiHookScript());
+  makeExecutable(scriptPath);
+
+  const settingsPath = ensureGeminiSettingsHook(scriptPath);
+
+  return { scriptPath, settingsPath, configured: true };
+}
+
+function uninstallGeminiHook() {
+  const scriptPath = getGeminiHookScriptPath();
+  let removed = false;
+
+  if (fs.existsSync(scriptPath)) {
+    fs.unlinkSync(scriptPath);
+    removed = true;
+  }
+
+  removeGeminiSettingsHook(scriptPath);
+
+  return { scriptPath, removed };
 }
 
 function getOpenCodeConfigDir() {
@@ -780,6 +934,27 @@ function listHookStatus() {
     }
   }
 
+  const geminiScriptPath = getGeminiHookScriptPath();
+  let geminiConfigured = false;
+  if (fs.existsSync(geminiScriptPath)) {
+    const geminiSettingsPath = getGeminiSettingsPath();
+    if (fs.existsSync(geminiSettingsPath)) {
+      try {
+        const geminiSettings = JSON.parse(fs.readFileSync(geminiSettingsPath, "utf-8"));
+        if (geminiSettings.hooks && Array.isArray(geminiSettings.hooks.AfterAgent)) {
+          geminiConfigured = geminiSettings.hooks.AfterAgent.some((entry) => {
+            if (entry.hooks) {
+              return entry.hooks.some((h) => h.command && h.command.includes(geminiScriptPath));
+            }
+            return entry.command && entry.command.includes(geminiScriptPath);
+          });
+        }
+      } catch {
+        geminiConfigured = false;
+      }
+    }
+  }
+
   const opencodeConfigPath = getOpenCodeConfigPath();
   const opencodeScriptPath = getOpenCodePluginPath();
   let opencodeConfigured = false;
@@ -798,6 +973,7 @@ function listHookStatus() {
     claude_code: fs.existsSync(getClaudeHookPath()),
     claude_code_stop: fs.existsSync(getClaudeStopHookPath()),
     codex: codexConfigured,
+    gemini: geminiConfigured,
     opencode: opencodeConfigured,
   };
 }
@@ -807,6 +983,8 @@ module.exports = {
   uninstallClaudeHook,
   installCodexHook,
   uninstallCodexHook,
+  installGeminiHook,
+  uninstallGeminiHook,
   installOpenCodeHook,
   uninstallOpenCodeHook,
   listHookStatus,

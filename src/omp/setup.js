@@ -24,6 +24,9 @@ function detectClis() {
   if (commandExists("codex") || fs.existsSync(path.join(home, ".codex"))) {
     targets.push("codex");
   }
+  if (commandExists("gemini") || fs.existsSync(path.join(home, ".gemini"))) {
+    targets.push("gemini");
+  }
   if (
     commandExists("opencode") ||
     fs.existsSync(path.join(xdgConfigHome, "opencode"))
@@ -37,7 +40,7 @@ function resolveCliTargets(options) {
   if (options["no-hooks"]) return [];
   if (options.hooks) {
     if (options.hooks === "none") return [];
-    if (options.hooks === "all") return ["claude", "codex", "opencode"];
+    if (options.hooks === "all") return ["claude", "codex", "gemini", "opencode"];
     return options.hooks.split(",").map((s) => s.trim());
   }
   return detectClis();
@@ -91,6 +94,7 @@ async function cliLogin(
 function cliDisplayName(cli) {
   if (cli === "claude") return "Claude Code";
   if (cli === "codex") return "Codex";
+  if (cli === "gemini") return "Gemini CLI";
   return "OpenCode";
 }
 
@@ -392,7 +396,7 @@ async function runSetup(options) {
 
     if (cliTargets.length === 0 && !options["no-hooks"]) {
       clack.log.warn(
-        "No supported CLI tools detected (claude, codex, opencode)."
+        "No supported CLI tools detected (claude, codex, gemini, opencode)."
       );
       clack.log.info(
         c.dim("Install hooks later with: omp install <cli>")
@@ -419,6 +423,7 @@ async function runSetup(options) {
       const {
         installClaudeHook,
         installCodexHook,
+        installGeminiHook,
         installOpenCodeHook,
       } = require("./hooks");
 
@@ -446,6 +451,14 @@ async function runSetup(options) {
                 configPath: codexResult.configPath,
                 merged: codexResult.merged,
                 conflict: codexResult.conflict,
+              };
+            } else if (cli === "gemini") {
+              const geminiResult = installGeminiHook();
+              config.hooks.enabled.gemini = geminiResult.configured;
+              result.hooks.gemini = {
+                installed: geminiResult.configured,
+                path: geminiResult.scriptPath,
+                configPath: geminiResult.settingsPath,
               };
             } else if (cli === "opencode") {
               const opencodeResult = installOpenCodeHook();
@@ -679,6 +692,7 @@ async function runSetup(options) {
     const {
       installClaudeHook,
       installCodexHook,
+      installGeminiHook,
       installOpenCodeHook,
     } = require("./hooks");
 
@@ -701,6 +715,14 @@ async function runSetup(options) {
             configPath: codexResult.configPath,
             merged: codexResult.merged,
             conflict: codexResult.conflict,
+          };
+        } else if (cli === "gemini") {
+          const geminiResult = installGeminiHook();
+          config.hooks.enabled.gemini = geminiResult.configured;
+          result.hooks.gemini = {
+            installed: geminiResult.configured,
+            path: geminiResult.scriptPath,
+            configPath: geminiResult.settingsPath,
           };
         } else if (cli === "opencode") {
           const opencodeResult = installOpenCodeHook();

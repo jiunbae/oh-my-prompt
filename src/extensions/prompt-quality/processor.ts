@@ -5,6 +5,8 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { sql, eq, and } from "drizzle-orm";
 import { scorePrompt } from "@/services/quality-scorer";
+import { dispatchWebhook } from "@/services/webhook";
+import { redactText } from "@/lib/redact";
 
 const VALID_TOPICS = [
   "debugging",
@@ -275,10 +277,10 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
       const batch = unenriched.slice(i, i + BATCH_SIZE);
 
       if (llmConfig) {
-        // LLM-powered scoring
+        // LLM-powered scoring — redact sensitive content before sending to external LLM
         const promptsForLLM = batch.map((p) => ({
           id: p.id,
-          text: p.promptText,
+          text: redactText(p.promptText).text,
         }));
 
         try {
@@ -351,6 +353,17 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
 
     // Flush all collected updates to DB in batches of DB_BATCH_SIZE
     await flushPendingUpdates(pendingUpdates, input.userId);
+
+    // Fire prompt.enriched webhook for scored prompts
+    if (pendingUpdates.length > 0) {
+      dispatchWebhook(input.userId, "prompt.enriched", {
+        count: pendingUpdates.length,
+        averageScore: pendingUpdates.reduce((s, u) => s + u.qualityScore, 0) / pendingUpdates.length,
+        promptIds: pendingUpdates.map((u) => u.id),
+      }).catch((err) => {
+        logger.error({ err }, "Non-blocking prompt.enriched webhook dispatch failed");
+      });
+    }
 
     const averageQuality = totalScored > 0 ? Math.round(totalQuality / totalScored) : 0;
 

@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MiniActivityChart } from "@/components/charts/mini-activity-chart";
+import { MiniTokenTrendChart } from "@/components/charts/mini-token-trend-chart";
+import { QualityDistributionChart } from "@/components/charts/quality-distribution-chart";
+import { MiniQualityTrendChart } from "@/components/charts/mini-quality-trend-chart";
 import { getSessionUser } from "@/lib/with-auth";
 import { getDashboardData } from "@/lib/dashboard";
 import { formatNumber } from "@/lib/analytics";
@@ -40,7 +44,7 @@ function DeltaBadge({ current, previous }: { current: number; previous: number }
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
-  if (!user) return null;
+  if (!user) redirect("/login");
 
   const data = await getDashboardData(user.userId);
 
@@ -194,6 +198,141 @@ export default async function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Token Usage + Quality Score + Topics */}
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* Token Usage Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Token Usage</CardTitle>
+              <span className="text-xs text-muted-foreground">Last 7 days</span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-secondary/50 p-2">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</p>
+                <p className="text-sm font-semibold text-foreground">{formatNumber(data.tokenUsage.totalTokens)}</p>
+              </div>
+              <div className="rounded-md bg-secondary/50 p-2">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Avg / Prompt</p>
+                <p className="text-sm font-semibold text-foreground">{formatNumber(data.tokenUsage.avgPerPrompt)}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Daily Trend</p>
+              <MiniTokenTrendChart data={data.tokenUsage.dailyTrend} />
+            </div>
+            {data.tokenUsage.byProject.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">By Project</p>
+                <div className="space-y-2">
+                  {data.tokenUsage.byProject.map((p) => {
+                    const maxTokens = data.tokenUsage.byProject[0]?.tokens ?? 1;
+                    const pct = (p.tokens / maxTokens) * 100;
+                    return (
+                      <div key={p.project} className="space-y-0.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-foreground truncate">{p.project}</span>
+                          <span className="text-muted-foreground shrink-0 ml-2">{formatNumber(p.tokens)}</span>
+                        </div>
+                        <div className="h-1 bg-secondary rounded-full overflow-hidden">
+                          <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-between text-[10px] text-muted-foreground pt-2 border-t border-border">
+              <span>Prompt: {formatNumber(data.tokenUsage.promptTokens)}</span>
+              <span>Response: {formatNumber(data.tokenUsage.responseTokens)}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Prompt Quality Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Prompt Quality</CardTitle>
+              <span className="text-xs text-muted-foreground">Last 7 days</span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md bg-secondary/50 p-2">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Avg Score</p>
+                <p className="text-sm font-semibold text-foreground">{data.quality.avgScore}/100</p>
+              </div>
+              <div className="rounded-md bg-secondary/50 p-2">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Scored</p>
+                <p className="text-sm font-semibold text-foreground">{data.quality.totalScored}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Score Distribution</p>
+              <QualityDistributionChart data={data.quality.distribution} />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Quality Trend</p>
+              <MiniQualityTrendChart data={data.quality.dailyTrend} />
+            </div>
+            {data.quality.topPrompts.length > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Top Prompts</p>
+                <div className="space-y-1.5">
+                  {data.quality.topPrompts.map((p) => (
+                    <Link key={p.id} href={`/prompts/${p.id}`} className="block">
+                      <div className="flex items-start gap-2 text-xs hover:bg-accent/50 -mx-1 px-1 py-1 rounded transition-colors">
+                        <Badge variant="secondary" className="text-[10px] shrink-0">{p.score}</Badge>
+                        <span className="text-foreground line-clamp-1">{p.text}</span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Topics Card */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Topics</CardTitle>
+              <span className="text-xs text-muted-foreground">Last 7 days</span>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {data.topics.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No topic data yet</p>
+            ) : (
+              <div className="space-y-2.5">
+                {data.topics.map((t) => {
+                  const maxCount = data.topics[0]?.count ?? 1;
+                  const pct = (t.count / maxCount) * 100;
+                  return (
+                    <Link key={t.tag} href={`/prompts?tag=${encodeURIComponent(t.tag)}`} className="block group">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-foreground font-medium group-hover:text-primary transition-colors">{t.tag}</span>
+                          <span className="text-muted-foreground shrink-0 ml-2">{t.count}</span>
+                        </div>
+                        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                          <div className="h-full bg-purple-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* AI Insights */}
       <div>

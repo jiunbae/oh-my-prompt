@@ -1,14 +1,13 @@
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { logger } from "@/lib/logger";
+import { env } from "@/env";
 
 const SALT_ROUNDS = 12;
-const SESSION_SECRET = process.env.SESSION_SECRET;
-if (!SESSION_SECRET && process.env.NODE_ENV === "production" && typeof window === "undefined") {
-  console.warn("WARNING: SESSION_SECRET is not set. Sessions will not work.");
+const EFFECTIVE_SECRET = env.SESSION_SECRET;
+if (!EFFECTIVE_SECRET && process.env.NODE_ENV === "production" && typeof window === "undefined") {
+  logger.warn("SESSION_SECRET is not set — sessions will not work");
 }
-// When SESSION_SECRET is missing, use empty string so token operations return null
-// (matching middleware behavior which also rejects empty secrets).
-const EFFECTIVE_SECRET = SESSION_SECRET || "";
 
 /**
  * Hash a password using bcrypt

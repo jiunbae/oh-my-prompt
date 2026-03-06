@@ -17,6 +17,9 @@ export type UploadPostprocessResult = {
   wordCountResponse?: number;
 };
 
+// Rough char-to-token ratio (~4 chars per token for English text)
+const TOKEN_CHAR_RATIO = 4;
+
 export function postprocessUploadRecordForDb(
   record: UploadRecord,
   options: UploadPostprocessOptions
@@ -35,11 +38,11 @@ export function postprocessUploadRecordForDb(
   const promptLength = promptText.length;
   const responseLength = typeof responseText === "string" ? responseText.length : undefined;
 
-  const tokenEstimate = Math.ceil(promptLength / 4);
+  const tokenEstimate = Math.ceil(promptLength / TOKEN_CHAR_RATIO);
   const wordCount = promptText.split(/\s+/).filter(Boolean).length;
 
   const tokenEstimateResponse =
-    typeof responseText === "string" ? Math.ceil(responseLength! / 4) : undefined;
+    typeof responseText === "string" ? Math.ceil(responseLength! / TOKEN_CHAR_RATIO) : undefined;
   const wordCountResponse =
     typeof responseText === "string" ? responseText.split(/\s+/).filter(Boolean).length : undefined;
 

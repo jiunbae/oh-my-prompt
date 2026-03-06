@@ -23,7 +23,14 @@ function exportData(config, options = {}) {
 
   const format = options.format || "jsonl";
   if (format === "csv") {
-    const headers = Object.keys(rows[0] || {});
+    if (rows.length === 0) {
+      if (options.out) {
+        fs.writeFileSync(options.out, "");
+        return { count: 0, output: options.out };
+      }
+      return { count: 0, output: "" };
+    }
+    const headers = Object.keys(rows[0]);
     const lines = [headers.join(",")];
     for (const row of rows) {
       const values = headers.map((key) => JSON.stringify(row[key] ?? ""));

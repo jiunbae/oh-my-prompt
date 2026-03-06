@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
 const { openDb, nowIso, hashContent } = require("./db");
 const { enqueuePayload, getQueueStats } = require("./queue");
@@ -22,9 +23,12 @@ function getWordCount(text) {
   return trimmed.split(/\s+/).length;
 }
 
+// Rough char-to-token ratio (~4 chars per token for English text)
+const TOKEN_CHAR_RATIO = 4;
+
 function estimateTokens(text) {
   if (!text) return 0;
-  return Math.ceil(text.length / 4);
+  return Math.ceil(text.length / TOKEN_CHAR_RATIO);
 }
 
 function normalizePayload(payload, config) {
