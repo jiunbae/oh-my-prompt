@@ -422,9 +422,321 @@ function backfillCodex(config, options = {}) {
   };
 }
 
+// ── OpenCode backfill (SQLite) ──────────────────────────────────────
+
+function getOpenCodeDbPath() {
+  const xdg = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
+  return path.join(xdg, "opencode", "opencode.db");
+}
+
+function backfillOpenCode(config, options = {}) {
+  const dbPath = getOpenCodeDbPath();
+  if (!fs.existsSync(dbPath)) {
+    return { sessions: 0, imported: 0, skipped: 0, duplicates: 0, error: "OpenCode database not found" };
+  }
+
+  let Database;
+  try {
+    Database = require("better-sqlite3");
+  } catch {
+    return { sessions: 0, imported: 0, skipped: 0, duplicates: 0, error: "better-sqlite3 not available" };
+  }
+
+  const ocDb = new Database(dbPath, { readonly: true });
+  let imported = 0;
+  let skipped = 0;
+  let duplicates = 0;
+
+  // Get all sessions with their messages
+  const sessions = ocDb.prepare(
+    "SELECT id, title, directory, time_created FROM session ORDER BY time_created ASC"
+  ).all();
+
+  for (const session of sessions) {
+    // Get user and assistant messages for this session
+    const messages = ocDb.prepare(
+      `SELECT m.id, m.time_created,
+              json_extract(m.data, '$.role') as role,
+              json_extract(m.data, '$.model.modelID') as model
+       FROM message m
+       WHERE m.session_id = ?
+       ORDER BY m.time_created ASC`
+    ).all(session.id);
+
+    // Pair user/assistant messages
+    const turns = [];
+    let currentUser = null;
+
+    for (const msg of messages) {
+      if (msg.role === "user") {
+        if (currentUser) turns.push(currentUser);
+        // Get text parts for this message
+        const parts = ocDb.prepare(
+          `SELECT json_extract(data, '$.text') as text
+           FROM part
+           WHERE message_id = ? AND json_extract(data, '$.type') = 'text'`
+        ).all(msg.id);
+        const text = parts.map((p) => p.text || "").join("\n").trim();
+        currentUser = {
+          messageId: msg.id,
+          text,
+          responseText: null,
+          responseId: null,
+          timestamp: msg.time_created ? new Date(msg.time_created).toISOString() : null,
+          model: msg.model || null,
+        };
+      } else if (msg.role === "assistant" && currentUser) {
+        const parts = ocDb.prepare(
+          `SELECT json_extract(data, '$.text') as text
+           FROM part
+           WHERE message_id = ? AND json_extract(data, '$.type') = 'text'`
+        ).all(msg.id);
+        currentUser.responseText = parts.map((p) => p.text || "").join("\n").trim() || null;
+        currentUser.responseId = msg.id;
+      }
+    }
+    if (currentUser) turns.push(currentUser);
+
+    for (const turn of turns) {
+      if (!turn.text) {
+        skipped++;
+        continue;
+      }
+
+      const eventId = hashContent(
+        JSON.stringify({
+          source: "opencode",
+          session_id: session.id,
+          user_message_id: turn.messageId,
+        })
+      );
+
+      const payload = {
+        timestamp: turn.timestamp || new Date().toISOString(),
+        source: "opencode",
+        session_id: session.id,
+        role: "user",
+        text: turn.text,
+        response_text: turn.responseText,
+        cwd: session.directory || "",
+        project: session.directory ? path.basename(session.directory) : "",
+        cli_name: "opencode",
+        model: turn.model,
+        capture_response: !!turn.responseText,
+        event_id: eventId,
+      };
+
+      if (options.dryRun) {
+        imported++;
+        continue;
+      }
+
+      const result = ingestPayload(payload, config);
+      if (result.ok) {
+        if (result.deduped) duplicates++;
+        else imported++;
+      } else {
+        skipped++;
+      }
+    }
+  }
+
+  ocDb.close();
+  return { sessions: sessions.length, imported, skipped, duplicates };
+}
+
+// ── Gemini backfill (chat JSON files) ───────────────────────────────
+
+function getGeminiHome() {
+  return process.env.GEMINI_HOME || path.join(os.homedir(), ".gemini");
+}
+
+function scanGeminiChatFiles() {
+  const tmpDir = path.join(getGeminiHome(), "tmp");
+  if (!fs.existsSync(tmpDir)) return [];
+
+  const results = [];
+  let projectDirs;
+  try {
+    projectDirs = fs.readdirSync(tmpDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  for (const entry of projectDirs) {
+    if (!entry.isDirectory()) continue;
+    const chatsDir = path.join(tmpDir, entry.name, "chats");
+    if (!fs.existsSync(chatsDir)) continue;
+
+    let chatFiles;
+    try {
+      chatFiles = fs.readdirSync(chatsDir).filter((f) => f.endsWith(".json"));
+    } catch {
+      continue;
+    }
+
+    for (const file of chatFiles) {
+      results.push({
+        path: path.join(chatsDir, file),
+        projectHash: entry.name,
+      });
+    }
+  }
+  return results;
+}
+
+function resolveGeminiProjectDir(projectHash) {
+  // Try to find project root from history dir
+  const geminiHome = getGeminiHome();
+  const historyDir = path.join(geminiHome, "history");
+  if (!fs.existsSync(historyDir)) return "";
+
+  try {
+    const users = fs.readdirSync(historyDir, { withFileTypes: true });
+    for (const user of users) {
+      if (!user.isDirectory()) continue;
+      const hashDir = path.join(historyDir, user.name, projectHash);
+      const rootFile = path.join(hashDir, ".project_root");
+      if (fs.existsSync(rootFile)) {
+        return fs.readFileSync(rootFile, "utf-8").trim();
+      }
+    }
+  } catch {}
+
+  // Also check projects.json for mapping
+  const projectsFile = path.join(geminiHome, "projects.json");
+  if (fs.existsSync(projectsFile)) {
+    try {
+      const projects = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
+      // projects.json maps dir -> name, not hash -> dir, so we can't directly resolve
+      // Return empty and fall back to session data
+    } catch {}
+  }
+
+  return "";
+}
+
+function extractGeminiContent(content) {
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    // Content can be an array of parts like [{text: "..."}, ...]
+    return content
+      .map((part) => (typeof part === "string" ? part : part.text || ""))
+      .join("\n")
+      .trim();
+  }
+  if (content && typeof content === "object" && content.text) {
+    return String(content.text).trim();
+  }
+  return "";
+}
+
+function backfillGemini(config, options = {}) {
+  const chatFiles = scanGeminiChatFiles();
+  if (chatFiles.length === 0) {
+    return { sessions: 0, imported: 0, skipped: 0, duplicates: 0 };
+  }
+
+  let imported = 0;
+  let skipped = 0;
+  let duplicates = 0;
+  let sessionCount = 0;
+
+  for (const { path: filePath, projectHash } of chatFiles) {
+    let chat;
+    try {
+      chat = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    } catch {
+      skipped++;
+      continue;
+    }
+
+    if (!chat.messages || !Array.isArray(chat.messages)) continue;
+
+    const sessionId = chat.sessionId || path.basename(filePath, ".json");
+    const projectDir = resolveGeminiProjectDir(projectHash);
+    sessionCount++;
+
+    // Parse user/gemini message pairs
+    const turns = [];
+    let currentUser = null;
+
+    for (const msg of chat.messages) {
+      if (msg.type === "user") {
+        const content = extractGeminiContent(msg.content);
+        // Skip system messages
+        if (!content || content === "System: Please continue." || content.startsWith("System:")) {
+          continue;
+        }
+        if (currentUser) turns.push(currentUser);
+        currentUser = {
+          messageId: msg.id || null,
+          text: content,
+          responseText: null,
+          timestamp: msg.timestamp || null,
+        };
+      } else if (msg.type === "gemini" && currentUser) {
+        const content = extractGeminiContent(msg.content);
+        if (content) {
+          currentUser.responseText = content;
+        }
+      }
+      // Skip info, error, system messages
+    }
+    if (currentUser) turns.push(currentUser);
+
+    for (const turn of turns) {
+      if (!turn.text) {
+        skipped++;
+        continue;
+      }
+
+      const eventId = hashContent(
+        JSON.stringify({
+          source: "gemini",
+          session_id: sessionId,
+          message_id: turn.messageId || "",
+          prompt_text: turn.text,
+        })
+      );
+
+      const payload = {
+        timestamp: turn.timestamp || new Date().toISOString(),
+        source: "gemini",
+        session_id: sessionId,
+        role: "user",
+        text: turn.text,
+        response_text: turn.responseText,
+        cwd: projectDir,
+        project: projectDir ? path.basename(projectDir) : "",
+        cli_name: "gemini",
+        capture_response: !!turn.responseText,
+        event_id: eventId,
+      };
+
+      if (options.dryRun) {
+        imported++;
+        continue;
+      }
+
+      const result = ingestPayload(payload, config);
+      if (result.ok) {
+        if (result.deduped) duplicates++;
+        else imported++;
+      } else {
+        skipped++;
+      }
+    }
+  }
+
+  return { sessions: sessionCount, imported, skipped, duplicates };
+}
+
 module.exports = {
   backfillTranscripts,
   backfillCodex,
+  backfillOpenCode,
+  backfillGemini,
   isRealUserMessage,
   extractText,
   parseTranscript,

@@ -1790,44 +1790,60 @@ async function main() {
     case "backfill": {
       if (options.help || options.h) {
         console.log(`
-  omp backfill — Import from Claude transcripts and Codex history
+  omp backfill — Import from Claude, Codex, OpenCode, and Gemini history
 
   USAGE
     omp backfill [options]
 
-  Scans ~/.claude/projects/ for JSONL transcripts and
-  ~/.codex/history.jsonl for Codex prompts.
+  Scans agent data directories for historical prompts:
+    Claude    ~/.claude/projects/ (JSONL transcripts)
+    Codex     ~/.codex/history.jsonl + ~/.codex/sessions/
+    OpenCode  ~/.local/share/opencode/opencode.db (SQLite)
+    Gemini    ~/.gemini/tmp/*/chats/session-*.json
 
   OPTIONS
-    --path <file>     Process a single transcript file (Claude only)
-    --claude-only     Only backfill Claude Code transcripts
-    --codex-only      Only backfill Codex history
-    --dry-run         Show what would be imported without writing
-    --json            Output as JSON
+    --path <file>       Process a single transcript file (Claude only)
+    --claude-only       Only backfill Claude Code transcripts
+    --codex-only        Only backfill Codex history
+    --opencode-only     Only backfill OpenCode sessions
+    --gemini-only       Only backfill Gemini chat sessions
+    --dry-run           Show what would be imported without writing
+    --json              Output as JSON
 `);
         break;
       }
-      const { backfillTranscripts, backfillCodex } = require("./backfill");
+      const { backfillTranscripts, backfillCodex, backfillOpenCode, backfillGemini } = require("./backfill");
       const config = loadConfig();
       const dryRun = !!options["dry-run"];
       const claudeOnly = !!options["claude-only"];
       const codexOnly = !!options["codex-only"];
+      const opencodeOnly = !!options["opencode-only"];
+      const geminiOnly = !!options["gemini-only"];
+      const hasFilter = claudeOnly || codexOnly || opencodeOnly || geminiOnly;
 
       let claudeResult = null;
       let codexResult = null;
+      let opencodeResult = null;
+      let geminiResult = null;
 
-      if (!codexOnly) {
+      if (!hasFilter || claudeOnly) {
         claudeResult = backfillTranscripts(config, {
           path: options.path,
           dryRun,
         });
       }
-      if (!claudeOnly && !options.path) {
+      if ((!hasFilter || codexOnly) && !options.path) {
         codexResult = backfillCodex(config, { dryRun });
+      }
+      if ((!hasFilter || opencodeOnly) && !options.path) {
+        opencodeResult = backfillOpenCode(config, { dryRun });
+      }
+      if ((!hasFilter || geminiOnly) && !options.path) {
+        geminiResult = backfillGemini(config, { dryRun });
       }
 
       if (options.json) {
-        printJson({ claude: claudeResult, codex: codexResult });
+        printJson({ claude: claudeResult, codex: codexResult, opencode: opencodeResult, gemini: geminiResult });
       } else {
         if (claudeResult) {
           console.log(`[Claude] Scanned ${claudeResult.files} transcript file(s)`);
@@ -1841,6 +1857,14 @@ async function main() {
         if (codexResult) {
           console.log(`[Codex] Scanned ${codexResult.entries} history entries`);
           console.log(`[Codex] Imported: ${codexResult.imported}, Skipped: ${codexResult.skipped}, Duplicates: ${codexResult.duplicates}`);
+        }
+        if (opencodeResult) {
+          console.log(`[OpenCode] Scanned ${opencodeResult.sessions} session(s)`);
+          console.log(`[OpenCode] Imported: ${opencodeResult.imported}, Skipped: ${opencodeResult.skipped}, Duplicates: ${opencodeResult.duplicates}`);
+        }
+        if (geminiResult) {
+          console.log(`[Gemini] Scanned ${geminiResult.sessions} chat session(s)`);
+          console.log(`[Gemini] Imported: ${geminiResult.imported}, Skipped: ${geminiResult.skipped}, Duplicates: ${geminiResult.duplicates}`);
         }
       }
       break;
