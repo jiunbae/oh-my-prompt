@@ -217,7 +217,7 @@ export async function processUpload(
                 ...dims,
                 lint: lintResults ?? [],
               },
-              topicTags: heuristic.topicTags,
+              topicTags: heuristic?.topicTags,
               enrichedAt: new Date(),
             }
           : {}),
