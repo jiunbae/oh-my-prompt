@@ -152,7 +152,7 @@ async function callAzureOpenAI(
       "api-key": cfg.apiKey || "",
     },
     body: JSON.stringify({
-      max_tokens: cfg.maxTokens || 2048,
+      max_completion_tokens: cfg.maxTokens || 2048,
       temperature: cfg.temperature ?? 0.3,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     }),
