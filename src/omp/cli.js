@@ -94,7 +94,9 @@ ${cmd("db flush", "Delete all local records (destructive)")}
     ${c.bold("omp status")}                         ${d("# Check everything is working")}
     ${c.bold("omp sync")}                           ${d("# Upload to server")}
     ${c.bold("omp backfill --claude-only")}         ${d("# Import Claude transcripts")}
-    ${c.bold("omp stats --since 2025-01-01")}       ${d("# Stats from date")}
+    ${c.bold("omp stats --since 7d")}               ${d("# Last 7 days")}
+    ${c.bold("omp stats --view hourly")}            ${d("# Hour-of-day pattern")}
+    ${c.bold("omp stats --group-by weekday")}       ${d("# Find your busiest day")}
     ${c.bold("omp export --format csv --out .")}    ${d("# Export as CSV")}
 
   ${d("https://github.com/jiunbae/oh-my-prompt")}
@@ -555,6 +557,146 @@ function parseValue(raw) {
   return raw;
 }
 
+function formatNumber(value, digits = 0) {
+  const num = Number(value || 0);
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(num);
+}
+
+function formatMinutes(value) {
+  const minutes = Math.round(Number(value || 0));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function formatTimestamp(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function fitText(value, width) {
+  const text = String(value ?? "");
+  if (text.length <= width) return text.padEnd(width);
+  if (width <= 1) return text.slice(0, width);
+  return `${text.slice(0, width - 1)}…`;
+}
+
+function getDashboardWidth() {
+  const columns = process.stdout.columns || 86;
+  return Math.max(60, Math.min(columns - 2, 96));
+}
+
+function renderHeaderPanel(title, subtitle) {
+  const width = getDashboardWidth();
+  const innerWidth = width - 4;
+  console.log("");
+  console.log(`  ┌${"─".repeat(width - 2)}┐`);
+  console.log(`  │ ${c.bold(c.cyan(fitText(title, innerWidth)))} │`);
+  console.log(`  │ ${c.dim(fitText(subtitle, innerWidth))} │`);
+  console.log(`  └${"─".repeat(width - 2)}┘`);
+}
+
+function renderCards(items, columns = 2) {
+  if (!items.length) return;
+
+  const width = getDashboardWidth();
+  const gap = 2;
+  const cardWidth = Math.floor((width - gap * (columns - 1)) / columns);
+  const blankCard = Array.from({ length: 5 }, () => " ".repeat(cardWidth));
+
+  function renderCard(item) {
+    const innerWidth = cardWidth - 4;
+    if (!item) return blankCard;
+    return [
+      `┌${"─".repeat(cardWidth - 2)}┐`,
+      `│ ${c.dim(fitText(item.label.toUpperCase(), innerWidth))} │`,
+      `│ ${c.bold(fitText(item.value, innerWidth))} │`,
+      `│ ${c.dim(fitText(item.subtitle || "", innerWidth))} │`,
+      `└${"─".repeat(cardWidth - 2)}┘`,
+    ];
+  }
+
+  for (let index = 0; index < items.length; index += columns) {
+    const row = items.slice(index, index + columns);
+    while (row.length < columns) row.push(null);
+    const cardLines = row.map(renderCard);
+    for (let line = 0; line < cardLines[0].length; line += 1) {
+      console.log(`  ${cardLines.map((card) => card[line]).join("  ")}`);
+    }
+  }
+}
+
+function renderSectionTitle(title) {
+  console.log("");
+  console.log(`  ${c.bold(c.cyan(title))}`);
+}
+
+function renderBarList(rows, options = {}) {
+  if (!rows.length) return;
+
+  const labelKey = options.labelKey || "bucket";
+  const valueKey = options.valueKey || "total_prompts";
+  const suffix = options.suffix || (() => "");
+  const colorizeBar = options.colorizeBar || ((text) => c.cyan(text));
+  const width = getDashboardWidth();
+  const labelWidth = Math.min(18, Math.max(...rows.map((row) => String(row[labelKey]).length), 8));
+  const maxValue = Math.max(...rows.map((row) => Number(row[valueKey] || 0)), 1);
+  const barWidth = Math.max(12, width - labelWidth - 26);
+
+  rows.forEach((row) => {
+    const value = Number(row[valueKey] || 0);
+    const filled = value > 0 ? Math.max(1, Math.round((value / maxValue) * barWidth)) : 0;
+    const empty = Math.max(0, barWidth - filled);
+    const bar = `${colorizeBar("█".repeat(filled))}${c.dim("░".repeat(empty))}`;
+    const right = suffix(row);
+    console.log(
+      `  ${c.dim(fitText(row[labelKey], labelWidth))} ${bar} ${c.bold(formatNumber(value))}${right ? ` ${c.dim(right)}` : ""}`
+    );
+  });
+}
+
+const VALID_STATS_VIEWS = new Set(["overview", "projects", "sources", "hourly", "weekday", "sessions"]);
+
+function titleCase(value) {
+  return String(value)
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function resolveStatsView(view, explicitGroupBy) {
+  const name = view || "overview";
+  if (!VALID_STATS_VIEWS.has(name)) {
+    throw new Error(
+      `Invalid --view value "${name}". Use one of: ${Array.from(VALID_STATS_VIEWS).join(", ")}.`
+    );
+  }
+
+  const defaultGroupBy =
+    name === "projects"
+      ? "project"
+      : name === "sources"
+        ? "source"
+        : name === "hourly"
+          ? "hour"
+          : name === "weekday"
+            ? "weekday"
+            : null;
+
+  return {
+    name,
+    label: titleCase(name),
+    groupBy: explicitGroupBy || defaultGroupBy,
+    showFocus: name === "overview" || name === "hourly" || name === "weekday" || name === "sessions",
+    showTopProjects: name === "overview",
+    showTopSources: name === "overview",
+    showGrouped: name !== "sessions",
+  };
+}
+
 function handleConfig(options, positional) {
   const config = loadConfig();
   const action = positional[0];
@@ -640,24 +782,133 @@ async function handleImport(options, positional) {
 }
 
 function handleStats(options) {
-  const config = loadConfig();
-  const stats = getStats(config, {
-    since: options.since,
-    until: options.until,
-    groupBy: options["group-by"],
-  });
-
-  if (options.json) {
-    printJson(stats);
+  let statsView;
+  let stats;
+  try {
+    statsView = resolveStatsView(options.view, options["group-by"]);
+    const config = loadConfig();
+    stats = getStats(config, {
+      since: options.since,
+      until: options.until,
+      groupBy: statsView.groupBy,
+      limit: options.limit,
+    });
+  } catch (error) {
+    console.error(error.message || "Failed to load stats.");
+    process.exitCode = 2;
     return;
   }
 
-  console.log("Overall:");
-  console.log(stats.overall);
-  if (stats.grouped) {
-    console.log("Grouped:");
-    console.table(stats.grouped);
+  if (options.json) {
+    printJson({ view: statsView.name, ...stats });
+    return;
   }
+
+  const totalPrompts = Number(stats.overall.total_prompts || 0);
+  const parsedLimit = Number(options.limit);
+  const limit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10;
+  const rangeText =
+    options.since || options.until
+      ? `${options.since || "beginning"} -> ${options.until || "now"}`
+      : "all time";
+
+  const headerTitle = statsView.name === "overview" ? "Local Analytics" : `Local Analytics · ${statsView.label}`;
+  renderHeaderPanel(headerTitle, `Range: ${rangeText}`);
+
+  if (totalPrompts === 0) {
+    console.log("");
+    console.log(`  ${c.yellow("No prompts found for this range.")}`);
+    console.log("");
+    return;
+  }
+
+  renderCards([
+    {
+      label: "Prompts",
+      value: formatNumber(stats.overall.total_prompts),
+      subtitle: `${formatNumber(stats.overall.project_count)} projects`,
+    },
+    {
+      label: "Responses",
+      value: `${stats.overall.response_rate}%`,
+      subtitle: `${formatNumber(stats.overall.response_count)} captured`,
+    },
+    {
+      label: "Tokens",
+      value: formatNumber(stats.overall.total_combined_tokens),
+      subtitle: `${formatNumber(stats.overall.total_tokens)} in / ${formatNumber(stats.overall.total_response_tokens)} out`,
+    },
+    {
+      label: "Active Days",
+      value: formatNumber(stats.overall.active_days),
+      subtitle: `${formatNumber(stats.overall.avg_prompts_per_active_day, 1)} prompts/day`,
+    },
+    {
+      label: "Sessions",
+      value: formatNumber(stats.sessions.total_sessions),
+      subtitle: `${formatNumber(stats.sessions.avg_prompts_per_session, 1)} prompts/session`,
+    },
+    {
+      label: "Longest Streak",
+      value: `${formatNumber(stats.patterns.longest_active_streak)} day(s)`,
+      subtitle: stats.patterns.busiest_weekday
+        ? `${stats.patterns.busiest_weekday.bucket} is busiest`
+        : "No weekday pattern yet",
+    },
+  ], 2);
+
+  if (statsView.showFocus) {
+    renderSectionTitle("Focus");
+    console.log(`  ${c.dim("Prompt length")} ${c.bold(`${formatNumber(stats.overall.avg_length, 1)} chars`)}`);
+    console.log(`  ${c.dim("Response length")} ${c.bold(`${formatNumber(stats.overall.avg_response_length, 1)} chars`)}`);
+    console.log(`  ${c.dim("Avg session")} ${c.bold(formatMinutes(stats.sessions.avg_session_minutes))}`);
+    console.log(
+      `  ${c.dim("Longest session")} ${c.bold(`${formatMinutes(stats.sessions.longest_session_minutes)} · ${formatNumber(stats.sessions.longest_session_prompts)} prompts`)}`
+    );
+    if (stats.patterns.peak_hour) {
+      console.log(
+        `  ${c.dim("Peak hour")} ${c.bold(`${stats.patterns.peak_hour.bucket} · ${formatNumber(stats.patterns.peak_hour.count)} prompts`)}`
+      );
+    }
+    if (stats.overall.first_prompt && stats.overall.last_prompt) {
+      console.log(
+        `  ${c.dim("Captured range")} ${c.bold(`${formatTimestamp(stats.overall.first_prompt)} -> ${formatTimestamp(stats.overall.last_prompt)}`)}`
+      );
+    }
+  }
+
+  if (statsView.showTopProjects && stats.topProjects.length) {
+    renderSectionTitle("Top Projects");
+    renderBarList(stats.topProjects.slice(0, limit), {
+      suffix: (row) =>
+        `${formatNumber(row.total_combined_tokens)} tok · ${row.response_rate}% rsp · ${formatNumber(row.avg_length, 1)} ch`,
+      colorizeBar: (text) => c.cyan(text),
+    });
+  }
+
+  if (statsView.showTopSources && stats.topSources.length) {
+    renderSectionTitle("Top Sources");
+    renderBarList(stats.topSources.slice(0, limit), {
+      suffix: (row) =>
+        `${formatNumber(row.total_combined_tokens)} tok · ${row.response_rate}% rsp`,
+      colorizeBar: (text) => c.blue(text),
+    });
+  }
+
+  if (statsView.showGrouped && stats.grouped) {
+    const groupedRows = stats.grouped.slice(0, limit);
+    renderSectionTitle(`Grouped By ${statsView.groupBy}`);
+    renderBarList(groupedRows, {
+      suffix: (row) =>
+        `${formatNumber(row.total_combined_tokens)} tok · ${row.response_rate}% rsp`,
+      colorizeBar: (text) => c.green(text),
+    });
+    if (stats.grouped.length > groupedRows.length) {
+      console.log(`  ${c.dim(`Showing first ${groupedRows.length} rows. Use --limit to expand.`)}`);
+    }
+  }
+
+  console.log("");
 }
 
 function handleExport(options) {
@@ -1378,9 +1629,11 @@ async function main() {
     omp stats [options]
 
   OPTIONS
-    --since <date>      Filter from date (YYYY-MM-DD)
-    --until <date>      Filter to date (YYYY-MM-DD)
-    --group-by <field>  Group by: day, project, source
+    --since <date>      Filter from date (YYYY-MM-DD, ISO datetime, or Nd)
+    --until <date>      Filter to date (YYYY-MM-DD, ISO datetime, or Nd)
+    --view <preset>     Preset view: overview, projects, sources, hourly, weekday, sessions
+    --group-by <field>  Group by: day, week, month, project, source, hour, weekday
+    --limit <n>         Limit rows in top/grouped sections (default: 10)
     --json              Output as JSON
 `);
         break;

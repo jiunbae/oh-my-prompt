@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.218.2] - 2026-03-09
+
+### Added
+- `omp stats --view <preset>` presets for `overview`, `projects`, `sources`, `hourly`, `weekday`, and `sessions`
+- richer local-only analytics including session summaries, activity streaks, peak hour, and weekday patterns
+
+### Changed
+- redesigned `omp stats` output into a dashboard-style CLI layout with summary cards and bar lists
+- expanded `omp stats --group-by` support to `day`, `week`, `month`, `project`, `source`, `hour`, and `weekday`
+
 ## [0.1.0] - 2026-02-08
 
 ### Added
@@ -37,5 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/jiunbae/oh-my-prompt/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jiunbae/oh-my-prompt/compare/v2026.218.2...HEAD
+[2026.218.2]: https://github.com/jiunbae/oh-my-prompt/releases/tag/v2026.218.2
 [0.1.0]: https://github.com/jiunbae/oh-my-prompt/releases/tag/v0.1.0

@@ -304,7 +304,7 @@ $ omp analyze abc123
 <summary><b>omp stats</b> — View statistics</summary>
 
 ```bash
-$ omp stats --since 7d --group-by weekday
+$ omp stats --view weekday --since 7d
 
   ┌──────────────────────────────────────────────────────────────┐
   │ Local Analytics                                             │
@@ -336,7 +336,7 @@ $ omp stats --since 7d --group-by weekday
 | `omp backfill` | Import from Claude transcripts / Codex history |
 | `omp serve` | Start local dashboard server (Docker) |
 | `omp serve stop` | Stop local dashboard server |
-| `omp stats [--group-by day\|week\|month\|project\|source\|hour\|weekday]` | View local analytics |
+| `omp stats [--view overview\|projects\|sources\|hourly\|weekday\|sessions] [--group-by day\|week\|month\|project\|source\|hour\|weekday]` | View local analytics |
 | `omp export [--format json\|jsonl\|csv]` | Export prompts |
 | `omp import codex-history` | Import from Codex |
 | `omp config get\|set\|validate` | Manage configuration |

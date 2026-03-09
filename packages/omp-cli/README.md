@@ -160,7 +160,7 @@ omp import codex-history [--path ~/.codex/history.jsonl]
 ### Analytics
 
 ```bash
-omp stats [--since 2026-01-01] [--group-by day|week|project]
+omp stats [--view overview|projects|sources|hourly|weekday|sessions] [--since 7d] [--group-by day|week|month|project|source|hour|weekday]
 omp report [--format text|json] [--since 2026-01-01]
 omp analyze <prompt-id>            # Analyze prompt quality
 omp analyze --file prompt.txt      # Analyze file
@@ -312,20 +312,23 @@ Suggestions:
 ### Stats Report
 
 ```bash
-omp stats --group-by week
+omp stats --view weekday --since 7d
 ```
 
 Output:
 ```
-Overall:
-{ total: 1234, avgLength: 450, avgTokens: 600 }
-Grouped:
-┌─────────┬───────┬───────┬───────────┐
-│ week    │ count │ avgLen│ avgTokens │
-├─────────┼───────┼───────┼───────────┤
-│ 2026-06 │ 120   │ 420   │ 580       │
-│ 2026-07 │ 145   │ 480   │ 620       │
-└─────────┴───────┴───────┴───────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Local Analytics                                             │
+│ Range: 7d -> now                                            │
+└──────────────────────────────────────────────────────────────┘
+
+Top Projects
+api       ██████████████████████████ 42  6.2k tok · 88% rsp
+frontend  ████████████████░░░░░░░░░ 27  3.8k tok · 91% rsp
+
+Grouped By weekday
+Mon       ██████████████████████████ 18  2.1k tok · 94% rsp
+Tue       ████████████████████░░░░░░ 14  1.8k tok · 86% rsp
 ```
 
 ### Report
