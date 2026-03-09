@@ -27,8 +27,11 @@ A self-hosted prompt journal + CLI that captures every interaction<br />with Cla
 
 <br />
 
-<!-- Replace with actual screenshot -->
-<!-- <img src="docs/assets/dashboard-preview.png" alt="Dashboard Preview" width="800" /> -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/dashboard.png" />
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/screenshots/dashboard-light.png" />
+  <img alt="Dashboard Preview" src="docs/assets/screenshots/dashboard.png" width="800" />
+</picture>
 
 </div>
 
@@ -391,14 +394,52 @@ The self-hosted web dashboard turns raw prompts into insights.
 </tr>
 </table>
 
-<!-- Screenshot gallery — uncomment when screenshots are available
 <details>
 <summary><b>Screenshots</b></summary>
 <br />
-<img src="docs/assets/prompts-list.png" width="400" /> <img src="docs/assets/analytics.png" width="400" />
-<img src="docs/assets/prompt-detail.png" width="400" /> <img src="docs/assets/quality-score.png" width="400" />
+<table>
+<tr>
+<td align="center"><b>Analytics</b></td>
+<td align="center"><b>Sessions</b></td>
+</tr>
+<tr>
+<td><img src="docs/assets/screenshots/analytics.png" alt="Analytics" width="400" /></td>
+<td><img src="docs/assets/screenshots/sessions.png" alt="Sessions" width="400" /></td>
+</tr>
+<tr>
+<td align="center"><b>AI Insights</b></td>
+<td align="center"><b>Search</b></td>
+</tr>
+<tr>
+<td><img src="docs/assets/screenshots/insights.png" alt="AI Insights" width="400" /></td>
+<td><img src="docs/assets/screenshots/search.png" alt="Search" width="400" /></td>
+</tr>
+<tr>
+<td align="center"><b>Templates</b></td>
+<td align="center"><b>Login</b></td>
+</tr>
+<tr>
+<td><img src="docs/assets/screenshots/templates.png" alt="Templates" width="400" /></td>
+<td><img src="docs/assets/screenshots/login.png" alt="Login" width="400" /></td>
+</tr>
+</table>
+
+<details>
+<summary>Light Mode</summary>
+<br />
+<table>
+<tr>
+<td align="center"><b>Dashboard</b></td>
+<td align="center"><b>Analytics</b></td>
+</tr>
+<tr>
+<td><img src="docs/assets/screenshots/dashboard-light.png" alt="Dashboard (Light)" width="400" /></td>
+<td><img src="docs/assets/screenshots/analytics-light.png" alt="Analytics (Light)" width="400" /></td>
+</tr>
+</table>
 </details>
--->
+
+</details>
 
 <br />
 
