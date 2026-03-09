@@ -27,16 +27,19 @@ function getSessionSecret() {
   return secret;
 }
 
-function checkDocker() {
+function dockerAvailable() {
   try {
     execSync("docker info", { stdio: "ignore" });
-  } catch {
-    throw new Error("Docker is not running. Please start Docker and try again.");
-  }
-  try {
     execSync("docker compose version", { stdio: "ignore" });
+    return true;
   } catch {
-    throw new Error("Docker Compose is not available. Please install Docker Compose.");
+    return false;
+  }
+}
+
+function checkDocker() {
+  if (!dockerAvailable()) {
+    throw new Error("Docker is not running or Docker Compose is not available.");
   }
 }
 
@@ -294,5 +297,6 @@ module.exports = {
   showLogs,
   isRunning,
   getServeConfig,
+  dockerAvailable,
   SERVE_DIR,
 };

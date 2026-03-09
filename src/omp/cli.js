@@ -1940,24 +1940,30 @@ async function main() {
       const action = positional[0] || null;
       if (options.help || options.h) {
         console.log(`
-  omp serve — Local dashboard server via Docker
+  omp serve — Local dashboard server
 
   USAGE
-    omp serve              Start local dashboard
-    omp serve stop         Stop local dashboard
+    omp serve              Start dashboard (Docker if available, otherwise local)
+    omp serve --local      Force lightweight local mode (SQLite, no Docker)
+    omp serve stop         Stop Docker dashboard
     omp serve status       Show container status
     omp serve logs         Tail app logs
 
-  CONFIG
-    omp config set serve.image <image>       Docker image (default: registry.jiun.dev/oh-my-prompt:latest)
+  OPTIONS
+    --local                Use SQLite-only local server (no Docker required)
+    --port <port>          Port number (default: 3000)
+
+  CONFIG (Docker mode)
+    omp config set serve.image <image>       Docker image
     omp config set serve.port <port>         Local port (default: 3000)
     omp config set serve.adminEmail <email>  Auto-seeded admin email
 
-  Requires Docker and Docker Compose.
+  Docker mode runs PostgreSQL + Redis + App via Docker Compose.
+  Local mode serves a read-only dashboard directly from your SQLite database.
 `);
         break;
       }
-      const { startServer, stopServer, showStatus, showLogs } = require("./serve");
+      const { startServer, stopServer, showStatus, showLogs, dockerAvailable } = require("./serve");
       if (action === "stop") {
         stopServer();
       } else if (action === "status") {
@@ -1966,7 +1972,17 @@ async function main() {
         showLogs(options.follow || options.f);
       } else if (!action) {
         const config = loadConfig();
-        await startServer(config);
+        const useLocal = options.local || !dockerAvailable();
+        if (useLocal) {
+          if (!options.local) {
+            console.log(c.dim("Docker not found — starting in local mode (SQLite).\n"));
+          }
+          const port = parseInt(options.port, 10) || config.serve?.port || 3000;
+          const { startLocalServer } = require("./serve-local");
+          await startLocalServer(config, port);
+        } else {
+          await startServer(config);
+        }
       } else {
         console.error(`Unknown subcommand: omp serve ${action}`);
         process.exitCode = 2;
