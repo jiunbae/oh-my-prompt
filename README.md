@@ -304,17 +304,20 @@ $ omp analyze abc123
 <summary><b>omp stats</b> — View statistics</summary>
 
 ```bash
-$ omp stats --group-by week
+$ omp stats --since 7d --group-by weekday
 
-  Overall: 1,234 prompts · 450 avg length · 600 avg tokens
+  ┌──────────────────────────────────────────────────────────────┐
+  │ Local Analytics                                             │
+  │ Range: 7d -> now                                            │
+  └──────────────────────────────────────────────────────────────┘
 
-  ┌──────────┬───────┬─────────┬───────────┐
-  │ Week     │ Count │ Avg Len │ Avg Tokens│
-  ├──────────┼───────┼─────────┼───────────┤
-  │ 2026-W05 │   120 │     420 │       580 │
-  │ 2026-W06 │   145 │     480 │       620 │
-  │ 2026-W07 │   198 │     510 │       650 │
-  └──────────┴───────┴─────────┴───────────┘
+  Top Projects
+  api       ██████████████████████████ 42  6.2k tok · 88% rsp
+  frontend  ████████████████░░░░░░░░░ 27  3.8k tok · 91% rsp
+
+  Grouped By weekday
+  Mon       ██████████████████████████ 18  2.1k tok · 94% rsp
+  Tue       ████████████████████░░░░░░ 14  1.8k tok · 86% rsp
 ```
 </details>
 
@@ -333,7 +336,7 @@ $ omp stats --group-by week
 | `omp backfill` | Import from Claude transcripts / Codex history |
 | `omp serve` | Start local dashboard server (Docker) |
 | `omp serve stop` | Stop local dashboard server |
-| `omp stats [--group-by day\|week]` | View statistics |
+| `omp stats [--group-by day\|week\|month\|project\|source\|hour\|weekday]` | View local analytics |
 | `omp export [--format json\|jsonl\|csv]` | Export prompts |
 | `omp import codex-history` | Import from Codex |
 | `omp config get\|set\|validate` | Manage configuration |
