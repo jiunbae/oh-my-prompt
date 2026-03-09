@@ -73,34 +73,6 @@ Local SQLite → server API<br/>Works offline, syncs when ready
 
 <br />
 
-## How It Works
-
-```
-  You                    CLI                      Dashboard
-  ───                    ───                      ─────────
-
-  claude "fix the bug"
-       │
-       └──── hook ────▶  omp ingest ──▶ SQLite (local)
-                              │
-                              ├── omp sync ──▶ POST /api/sync/upload
-                              │                       │
-                              │                ┌──────┴──────┐
-                              │                │  PostgreSQL  │
-                              │                └─────────────┘
-                              │                       │
-                              │              ┌────────┴────────┐
-                              │              │ omp serve        │  ← local mode
-                              │              │ localhost:3000   │
-                              │              └─────────────────┘
-                              │                      or
-                              │              ┌─────────────────┐
-                              └──────────────│ your-server.com │  ← server mode
-                                             └─────────────────┘
-```
-
-<br />
-
 ## Quickstart for Agents
 
 <div><img src="https://quickstart-for-agents.vercel.app/api/header.svg?theme=opencode&title=Install+Oh+My+Prompt&lang=Agents" width="100%" /></div>
@@ -194,6 +166,34 @@ omp setup
 ```
 
 </details>
+
+## How It Works
+
+```
+  You                    CLI                      Dashboard
+  ───                    ───                      ─────────
+
+  claude "fix the bug"
+       │
+       └──── hook ────▶  omp ingest ──▶ SQLite (local)
+                              │
+                              ├── omp sync ──▶ POST /api/sync/upload
+                              │                       │
+                              │                ┌──────┴──────┐
+                              │                │  PostgreSQL  │
+                              │                └─────────────┘
+                              │                       │
+                              │              ┌────────┴────────┐
+                              │              │ omp serve        │  ← local mode
+                              │              │ localhost:3000   │
+                              │              └─────────────────┘
+                              │                      or
+                              │              ┌─────────────────┐
+                              └──────────────│ your-server.com │  ← server mode
+                                             └─────────────────┘
+```
+
+<br />
 
 ## Start with Human
 
