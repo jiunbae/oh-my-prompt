@@ -14,7 +14,9 @@ import { rateLimiters } from "@/lib/rate-limit";
 export async function POST(request: NextRequest) {
   try {
     // Rate limit by IP (auth endpoints are unauthenticated)
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || request.headers.get("x-real-ip")
+      || "unknown";
     const rateCheck = rateLimiters.auth(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(

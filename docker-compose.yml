@@ -7,10 +7,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: prompt
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: prompts
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: prompt-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6380}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -40,7 +40,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL: postgresql://prompt:${POSTGRES_PASSWORD:-changeme}@db:5432/prompts
+      DATABASE_URL: postgresql://prompt:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/prompts
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set — generate with: openssl rand -hex 32}
       NODE_ENV: production

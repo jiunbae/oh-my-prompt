@@ -15,9 +15,18 @@ spec:
       labels:
         app: prompt-db
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
       containers:
         - name: postgres
           image: postgres:16-alpine
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 5432
           env:

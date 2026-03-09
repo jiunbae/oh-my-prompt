@@ -32,9 +32,14 @@ yarn-error.log*
 
 # env files
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
+
+# secrets and keys
+*.key
+*.p12
+*.pfx
+k8s/secret.yaml
 
 # vercel
 .vercel

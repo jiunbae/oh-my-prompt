@@ -17,10 +17,20 @@ spec:
     spec:
       imagePullSecrets:
         - name: registry-creds
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
       containers:
         - name: oh-my-prompt
           image: registry.jiun.dev/oh-my-prompt:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 3000
           envFrom:
