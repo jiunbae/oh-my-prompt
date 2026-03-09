@@ -6,7 +6,17 @@ import { logger } from "@/lib/logger";
  * Users bring their own API key via environment variables.
  */
 
-const VALID_PROVIDERS = new Set(["anthropic", "openai", "azure", "ollama", "custom"]);
+const VALID_PROVIDERS = new Set(["anthropic", "openai", "azure", "gemini", "ollama", "custom"]);
+
+/** Models that use reasoning tokens and require max_completion_tokens instead of max_tokens */
+const REASONING_MODEL_PATTERNS = [
+  /^o[1-9]/, // OpenAI o1, o3, o4-mini, etc.
+  /^gpt-5/, // GPT-5 series
+];
+
+function isReasoningModel(model: string): boolean {
+  return REASONING_MODEL_PATTERNS.some((p) => p.test(model));
+}
 
 export function getLLMConfig(): LLMConfig | null {
   const provider = process.env.OMP_LLM_PROVIDER;
@@ -34,8 +44,11 @@ function getDefaultModel(provider: string): string {
     case "anthropic":
       return "claude-sonnet-4-5-20250929";
     case "openai":
+      return "gpt-4o-mini";
     case "azure":
       return "gpt-4o-mini";
+    case "gemini":
+      return "gemini-2.5-flash";
     case "ollama":
       return "llama3.2";
     default:
@@ -77,6 +90,8 @@ export async function callLLM(
       return callOpenAICompatible(messages, cfg);
     case "azure":
       return callAzureOpenAI(messages, cfg);
+    case "gemini":
+      return callGemini(messages, cfg);
     case "ollama":
       return callOpenAICompatible(messages, {
         ...cfg,
@@ -86,6 +101,8 @@ export async function callLLM(
       throw new Error(`Unknown LLM provider: ${cfg.provider}`);
   }
 }
+
+// ── Anthropic ──────────────────────────────────────────────────────
 
 async function callAnthropic(
   messages: LLMMessage[],
@@ -104,7 +121,7 @@ async function callAnthropic(
     body.system = systemMsg.content;
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(cfg.baseUrl || "https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -135,6 +152,58 @@ async function callAnthropic(
   };
 }
 
+// ── OpenAI (and compatible: Ollama, custom) ────────────────────────
+
+function buildOpenAIBody(messages: LLMMessage[], cfg: LLMConfig): Record<string, unknown> {
+  const reasoning = isReasoningModel(cfg.model);
+  const body: Record<string, unknown> = {
+    model: cfg.model,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+  };
+
+  if (reasoning) {
+    body.max_completion_tokens = cfg.maxTokens || 2048;
+    // reasoning models don't support temperature
+  } else {
+    body.max_tokens = cfg.maxTokens || 2048;
+    body.temperature = cfg.temperature ?? 0.3;
+  }
+
+  return body;
+}
+
+async function callOpenAICompatible(
+  messages: LLMMessage[],
+  cfg: LLMConfig,
+): Promise<LLMResponse> {
+  const baseUrl = cfg.baseUrl || "https://api.openai.com/v1";
+
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
+    },
+    body: JSON.stringify(buildOpenAIBody(messages, cfg)),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`OpenAI-compatible API error (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return {
+    content: data.choices?.[0]?.message?.content || "",
+    model: data.model || cfg.model,
+    tokensUsed: data.usage
+      ? (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0)
+      : undefined,
+  };
+}
+
+// ── Azure OpenAI ───────────────────────────────────────────────────
+
 async function callAzureOpenAI(
   messages: LLMMessage[],
   cfg: LLMConfig,
@@ -145,16 +214,16 @@ async function callAzureOpenAI(
 
   const url = `${baseUrl}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
 
+  const body = buildOpenAIBody(messages, cfg);
+  delete body.model; // Azure uses deployment name in URL, not body
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "api-key": cfg.apiKey || "",
     },
-    body: JSON.stringify({
-      max_completion_tokens: cfg.maxTokens || 2048,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -172,37 +241,58 @@ async function callAzureOpenAI(
   };
 }
 
-async function callOpenAICompatible(
+// ── Google Gemini ──────────────────────────────────────────────────
+
+async function callGemini(
   messages: LLMMessage[],
   cfg: LLMConfig,
 ): Promise<LLMResponse> {
-  const baseUrl = cfg.baseUrl || "https://api.openai.com/v1";
+  const baseUrl = cfg.baseUrl || "https://generativelanguage.googleapis.com/v1beta";
+  const model = cfg.model || "gemini-2.5-flash";
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      max_tokens: cfg.maxTokens || 2048,
+  // Convert messages to Gemini format
+  const systemMsg = messages.find((m) => m.role === "system");
+  const nonSystemMsgs = messages.filter((m) => m.role !== "system");
+
+  const body: Record<string, unknown> = {
+    contents: nonSystemMsgs.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    })),
+    generationConfig: {
+      maxOutputTokens: cfg.maxTokens || 2048,
       temperature: cfg.temperature ?? 0.3,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    }),
+    },
+  };
+
+  if (systemMsg) {
+    body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+  }
+
+  const url = `${baseUrl.replace(/\/$/, "")}/models/${model}:generateContent?key=${cfg.apiKey}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`OpenAI-compatible API error (${res.status}): ${text.slice(0, 200)}`);
+    throw new Error(`Gemini API error (${res.status}): ${text.slice(0, 200)}`);
   }
 
   const data = await res.json();
+  const content =
+    data.candidates?.[0]?.content?.parts
+      ?.map((p: { text?: string }) => p.text || "")
+      .join("") || "";
+
   return {
-    content: data.choices?.[0]?.message?.content || "",
-    model: data.model || cfg.model,
-    tokensUsed: data.usage
-      ? (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0)
+    content,
+    model: model,
+    tokensUsed: data.usageMetadata
+      ? (data.usageMetadata.promptTokenCount || 0) + (data.usageMetadata.candidatesTokenCount || 0)
       : undefined,
   };
 }

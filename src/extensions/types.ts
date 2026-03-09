@@ -71,7 +71,7 @@ export interface Extension {
 
 // ── LLM provider config ──────────────────────────────────────────
 
-export type LLMProvider = "anthropic" | "openai" | "azure" | "ollama" | "custom";
+export type LLMProvider = "anthropic" | "openai" | "azure" | "gemini" | "ollama" | "custom";
 
 export interface LLMConfig {
   provider: LLMProvider;
