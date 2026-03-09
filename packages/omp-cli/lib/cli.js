@@ -1867,6 +1867,32 @@ async function main() {
           console.log(`[Gemini] Imported: ${geminiResult.imported}, Skipped: ${geminiResult.skipped}, Duplicates: ${geminiResult.duplicates}`);
         }
       }
+
+      // Reset sync cursor when new records were imported so next `omp sync` picks them up
+      if (!dryRun) {
+        const totalImported =
+          (claudeResult ? claudeResult.totalImported : 0) +
+          (codexResult ? codexResult.imported : 0) +
+          (opencodeResult ? opencodeResult.imported : 0) +
+          (geminiResult ? geminiResult.imported : 0);
+        if (totalImported > 0) {
+          const { getSyncState, updateSyncState } = require("./sync-log");
+          const { openDb } = require("./db");
+          const state = getSyncState(config);
+          if (state.lastSyncedAt) {
+            // Find the earliest backfilled record to reset cursor before it
+            const db = openDb(config.storage.sqlite.path);
+            const earliest = db
+              .prepare("SELECT MIN(created_at) as earliest FROM prompts")
+              .get();
+            db.close();
+            if (earliest && earliest.earliest && earliest.earliest < state.lastSyncedAt) {
+              updateSyncState(config, earliest.earliest, null);
+              console.log(`\nSync cursor reset — run ${c.cyan("omp sync")} to upload backfilled records.`);
+            }
+          }
+        }
+      }
       break;
     }
     case "db": {
