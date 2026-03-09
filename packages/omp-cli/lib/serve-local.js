@@ -23,7 +23,7 @@ function send(res, status, html) {
   res.end(html);
 }
 
-function startLocalServer(config, port = 3000) {
+function startLocalServer(config, port = 3000, { host = "127.0.0.1" } = {}) {
   const db = queries.getDb(config);
 
   const server = http.createServer((req, res) => {
@@ -86,9 +86,13 @@ function startLocalServer(config, port = 3000) {
   });
 
   return new Promise((resolve, reject) => {
-    server.listen(port, "127.0.0.1", () => {
-      const addr = `http://localhost:${port}`;
+    server.listen(port, host, () => {
+      const displayHost = host === "0.0.0.0" ? "0.0.0.0" : "localhost";
+      const addr = `http://${displayHost}:${port}`;
       console.log(`\nDashboard running at ${c.cyan(c.bold(addr))}`);
+      if (host === "0.0.0.0") {
+        console.log(c.yellow("Warning: server is exposed to the network (--host 0.0.0.0)"));
+      }
       console.log(c.dim("Local mode — SQLite, no Docker required"));
       console.log(c.dim(`Database: ${config.storage.sqlite.path}`));
       console.log(c.dim("\nPress Ctrl+C to stop.\n"));

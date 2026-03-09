@@ -1952,6 +1952,7 @@ async function main() {
   OPTIONS
     --local                Use SQLite-only local server (no Docker required)
     --port <port>          Port number (default: 3000)
+    --host <host>          Bind address (default: 127.0.0.1, use 0.0.0.0 for network)
 
   CONFIG (Docker mode)
     omp config set serve.image <image>       Docker image
@@ -1978,8 +1979,9 @@ async function main() {
             console.log(c.dim("Docker not found — starting in local mode (SQLite).\n"));
           }
           const port = parseInt(options.port, 10) || config.serve?.port || 3000;
+          const host = options.host || "127.0.0.1";
           const { startLocalServer } = require("./serve-local");
-          await startLocalServer(config, port);
+          await startLocalServer(config, port, { host });
         } else {
           await startServer(config);
         }
