@@ -71,7 +71,7 @@ export interface Extension {
 
 // ── LLM provider config ──────────────────────────────────────────
 
-export type LLMProvider = "anthropic" | "openai" | "ollama" | "custom";
+export type LLMProvider = "anthropic" | "openai" | "azure" | "ollama" | "custom";
 
 export interface LLMConfig {
   provider: LLMProvider;
@@ -80,4 +80,8 @@ export interface LLMConfig {
   baseUrl?: string;
   maxTokens?: number;
   temperature?: number;
+  /** Azure OpenAI deployment name */
+  azureDeployment?: string;
+  /** Azure OpenAI API version (default: 2024-12-01-preview) */
+  azureApiVersion?: string;
 }

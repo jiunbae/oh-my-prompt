@@ -6,7 +6,7 @@ import { logger } from "@/lib/logger";
  * Users bring their own API key via environment variables.
  */
 
-const VALID_PROVIDERS = new Set(["anthropic", "openai", "ollama", "custom"]);
+const VALID_PROVIDERS = new Set(["anthropic", "openai", "azure", "ollama", "custom"]);
 
 export function getLLMConfig(): LLMConfig | null {
   const provider = process.env.OMP_LLM_PROVIDER;
@@ -24,6 +24,8 @@ export function getLLMConfig(): LLMConfig | null {
     baseUrl: process.env.OMP_LLM_BASE_URL,
     maxTokens: parseInt(process.env.OMP_LLM_MAX_TOKENS || "2048", 10),
     temperature: parseFloat(process.env.OMP_LLM_TEMPERATURE || "0.3"),
+    azureDeployment: process.env.OMP_LLM_AZURE_DEPLOYMENT,
+    azureApiVersion: process.env.OMP_LLM_AZURE_API_VERSION,
   };
 }
 
@@ -32,6 +34,7 @@ function getDefaultModel(provider: string): string {
     case "anthropic":
       return "claude-sonnet-4-5-20250929";
     case "openai":
+    case "azure":
       return "gpt-4o-mini";
     case "ollama":
       return "llama3.2";
@@ -72,6 +75,8 @@ export async function callLLM(
     case "openai":
     case "custom":
       return callOpenAICompatible(messages, cfg);
+    case "azure":
+      return callAzureOpenAI(messages, cfg);
     case "ollama":
       return callOpenAICompatible(messages, {
         ...cfg,
@@ -126,6 +131,44 @@ async function callAnthropic(
     model: data.model || cfg.model,
     tokensUsed: data.usage
       ? (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0)
+      : undefined,
+  };
+}
+
+async function callAzureOpenAI(
+  messages: LLMMessage[],
+  cfg: LLMConfig,
+): Promise<LLMResponse> {
+  const deployment = cfg.azureDeployment || cfg.model;
+  const apiVersion = cfg.azureApiVersion || "2024-12-01-preview";
+  const baseUrl = cfg.baseUrl?.replace(/\/$/, "");
+
+  const url = `${baseUrl}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-key": cfg.apiKey || "",
+    },
+    body: JSON.stringify({
+      max_tokens: cfg.maxTokens || 2048,
+      temperature: cfg.temperature ?? 0.3,
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Azure OpenAI API error (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return {
+    content: data.choices?.[0]?.message?.content || "",
+    model: data.model || cfg.model,
+    tokensUsed: data.usage
+      ? (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0)
       : undefined,
   };
 }
