@@ -12,7 +12,7 @@
 
 ### Your AI coding sessions, captured and analyzed.
 
-A self-hosted prompt journal + CLI that captures every interaction<br />with Claude Code, Codex, OpenCode, and more — then turns them into actionable insights.
+A self-hosted prompt journal + CLI that captures every interaction<br />with Claude Code, Codex, OpenCode, Gemini CLI, and more — then turns them into actionable insights.
 
 <br />
 
@@ -73,6 +73,27 @@ Local SQLite → server API<br/>Works offline, syncs when ready
 
 <br />
 
+## Supported Agents
+
+<table>
+<tr>
+<td align="center" width="25%"><b>Claude Code</b><br /><sub>Anthropic</sub></td>
+<td align="center" width="25%"><b>Codex</b><br /><sub>OpenAI</sub></td>
+<td align="center" width="25%"><b>OpenCode</b><br /><sub>Open Source</sub></td>
+<td align="center" width="25%"><b>Gemini CLI</b><br /><sub>Google</sub></td>
+</tr>
+<tr>
+<td align="center">Hook + Backfill</td>
+<td align="center">Hook + Backfill</td>
+<td align="center">Hook + Backfill</td>
+<td align="center">Hook + Backfill</td>
+</tr>
+</table>
+
+> All agents are auto-detected during `omp setup`. Hooks capture prompts in real-time; backfill imports your full history.
+
+<br />
+
 ## Quickstart for Agents
 
 <div><img src="https://quickstart-for-agents.vercel.app/api/header.svg?theme=opencode&title=Install+Oh+My+Prompt&lang=Agents" width="100%" /></div>
@@ -125,8 +146,9 @@ $ omp setup
 │  ◻ Claude Code (detected)
 │  ◻ Codex (detected)
 │  ◻ OpenCode (not found)
+│  ◻ Gemini CLI (detected)
 │
-◇  Hooks installed (Claude Code, Codex)
+◇  Hooks installed (Claude Code, Codex, Gemini CLI)
 │
 ◇  Server validated (200)
 │
@@ -134,7 +156,7 @@ $ omp setup
 │                                    │
 │  Server:  https://prompt.jiun.dev  │
 │  Device:  my-macbook               │
-│  Hooks:   claude, codex            │
+│  Hooks:   claude, codex, gemini    │
 │                                    │
 ├────────────────────────────────────╯
 │
@@ -208,7 +230,7 @@ omp setup
 omp doctor
 ```
 
-That's it. Now use Claude Code, Codex, or OpenCode normally — prompts are captured automatically.
+That's it. Now use Claude Code, Codex, OpenCode, or Gemini CLI normally — prompts are captured automatically.
 
 ```bash
 claude "Refactor this function to use async/await"
@@ -217,17 +239,23 @@ claude "Refactor this function to use async/await"
 
 ### Choose Your Mode
 
-Oh My Prompt supports two modes depending on your needs:
+| | **SQLite (no Docker)** | **Local Docker** | **Server** |
+|:--|:--|:--|:--|
+| **Setup** | `omp serve --local` | `omp serve` | Deploy to your server |
+| **Requires** | Nothing | Docker | Docker + domain |
+| **Dashboard** | `localhost:3000` | `localhost:3000` | `your-domain.com` |
+| **Database** | SQLite (same as CLI) | PostgreSQL + Redis | PostgreSQL + Redis |
+| **Data** | Local only | Local only | Multi-device sync |
+| **Best for** | Solo use, minimal setup | Full features, solo | Teams, cross-machine |
 
-| | **Local Mode** | **Server Mode** |
-|:--|:--|:--|
-| **Setup** | `omp serve` | Deploy to your server |
-| **Requires** | Docker | Docker + domain |
-| **Dashboard** | `http://localhost:3000` | `https://your-domain.com` |
-| **Data** | Local only | Multi-device sync |
-| **Best for** | Solo use, privacy | Teams, cross-machine |
+**SQLite Mode** — zero dependencies, view your data instantly:
+```bash
+omp serve --local              # Dashboard at http://localhost:3000
+omp serve --local --port 8080  # Custom port
+omp serve --local --host 0.0.0.0  # Network access
+```
 
-**Local Mode** — everything runs on your machine via Docker:
+**Docker Mode** — full-featured with PostgreSQL and Redis:
 ```bash
 omp serve        # Start dashboard at http://localhost:3000
 omp sync         # Sync captured prompts to local dashboard
@@ -261,15 +289,15 @@ $ omp setup
 ◇  Authenticating... Logged in as you@example.com
 ◆  Device name ............. my-laptop
 ◇  Database migrated (schema v3)
-◆  Install hooks ........... Claude Code, Codex
-◇  Hooks installed (Claude Code, Codex)
+◆  Install hooks ........... Claude Code, Codex, Gemini CLI
+◇  Hooks installed (Claude Code, Codex, Gemini CLI)
 ◇  Server validated (200)
 │
 ◇  Setup Complete ───────────────────╮
 │                                    │
 │  Server:  https://your-server.com  │
 │  Device:  my-laptop                │
-│  Hooks:   claude, codex            │
+│  Hooks:   claude, codex, gemini    │
 │                                    │
 ├────────────────────────────────────╯
 │
@@ -327,14 +355,15 @@ $ omp stats --view weekday --since 7d
 | Command | Description |
 |:--------|:------------|
 | `omp setup` | Interactive configuration wizard |
-| `omp install [claude\|codex\|opencode\|all]` | Install capture hooks |
-| `omp uninstall [claude\|codex\|opencode\|all]` | Remove capture hooks |
+| `omp install [claude\|codex\|opencode\|gemini\|all]` | Install capture hooks |
+| `omp uninstall [claude\|codex\|opencode\|gemini\|all]` | Remove capture hooks |
 | `omp status` | Show config and hook status |
 | `omp doctor` | Validate setup, diagnose issues |
 | `omp sync` | Sync local prompts to server |
 | `omp sync status` | Show sync history |
-| `omp backfill` | Import from Claude transcripts / Codex history |
-| `omp serve` | Start local dashboard server (Docker) |
+| `omp backfill [--claude-only\|--codex-only\|--opencode-only\|--gemini-only]` | Import history from all agents |
+| `omp serve` | Start local dashboard (Docker) |
+| `omp serve --local` | Start local dashboard (SQLite, no Docker) |
 | `omp serve stop` | Stop local dashboard server |
 | `omp stats [--view overview\|projects\|sources\|hourly\|weekday\|sessions] [--group-by day\|week\|month\|project\|source\|hour\|weekday]` | View local analytics |
 | `omp export [--format json\|jsonl\|csv]` | Export prompts |
@@ -448,7 +477,21 @@ The self-hosted web dashboard turns raw prompts into insights.
 
 ## 🏗 Local Dashboard
 
-The fastest way to view your data. No server deployment needed — just Docker.
+### SQLite Mode (zero dependencies)
+
+The fastest way to view your data. No Docker, no server — just your existing SQLite database.
+
+```bash
+omp serve --local                    # Dashboard at http://localhost:3000
+omp serve --local --port 8080        # Custom port
+omp serve --local --host 0.0.0.0     # Expose to network
+```
+
+This reads directly from the same SQLite database the CLI uses. No sync, no registration — just open and browse.
+
+### Docker Mode (full features)
+
+For the full dashboard experience with PostgreSQL, Redis, and the web UI:
 
 ```bash
 # Start (pulls images and runs PostgreSQL + Redis + App)
@@ -458,7 +501,7 @@ omp serve
 # Register an account, then:
 omp config set server.url http://localhost:3000
 omp config set server.token YOUR_TOKEN   # from Settings page
-omp backfill                              # import past transcripts
+omp backfill                              # import history from all agents
 omp sync                                  # sync to local dashboard
 ```
 
@@ -525,7 +568,7 @@ kubectl apply -f k8s/
 ```bash
 omp config set server.url https://your-domain.com
 omp config set server.token YOUR_TOKEN   # from Settings page after registration
-omp backfill     # import past Claude/Codex transcripts
+omp backfill     # import history from Claude, Codex, OpenCode, Gemini
 omp sync         # upload to server
 ```
 
