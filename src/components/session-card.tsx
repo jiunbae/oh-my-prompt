@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 
 interface SessionCardProps {
   sessionId: string;
+  displayName?: string | null;
   firstPrompt: string;
   startedAt: string;
   endedAt: string;
@@ -41,6 +42,7 @@ function formatTokens(count: number): string {
 
 export function SessionCard({
   sessionId,
+  displayName,
   firstPrompt,
   startedAt,
   endedAt,
@@ -54,9 +56,20 @@ export function SessionCard({
     <Link href={`/sessions/${sessionId}`} className="block">
       <Card className="transition-colors hover:bg-accent/50 cursor-pointer">
         <CardContent className="p-4">
-          <p className="text-sm text-foreground line-clamp-2 whitespace-pre-line mb-3">
-            {firstPrompt || "Empty prompt"}
-          </p>
+          {displayName ? (
+            <div className="mb-3 space-y-1">
+              <p className="text-sm font-semibold text-foreground line-clamp-1">
+                {displayName}
+              </p>
+              <p className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-line">
+                {firstPrompt || "Empty prompt"}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-foreground line-clamp-2 whitespace-pre-line mb-3">
+              {firstPrompt || "Empty prompt"}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>{formatDate(startedAt)}</span>

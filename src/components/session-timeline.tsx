@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 interface TimelineSession {
   sessionId: string;
+  displayName: string | null;
   startedAt: string;
   endedAt: string;
   promptCount: number;
@@ -159,7 +160,9 @@ export function SessionTimeline({ days }: SessionTimelineProps) {
           }}
         >
           <div className="bg-foreground text-background rounded-md px-3 py-2 text-xs shadow-lg whitespace-nowrap max-w-xs">
-            <p className="font-medium truncate">{tooltip.session.firstPrompt || "No prompt"}</p>
+            <p className="font-medium truncate">
+              {tooltip.session.displayName || tooltip.session.firstPrompt || "No prompt"}
+            </p>
             <div className="flex gap-3 mt-1 text-background/70">
               {tooltip.session.projectName && <span>{tooltip.session.projectName}</span>}
               <span>{tooltip.session.promptCount} prompt{tooltip.session.promptCount !== 1 ? "s" : ""}</span>
