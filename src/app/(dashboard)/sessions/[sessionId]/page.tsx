@@ -86,18 +86,20 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
 
   const first = prompts[prompts.length - 1]; // oldest (query is DESC)
   const last = prompts[0]; // newest
-  const sessionOwnerId = first.userId ?? user.userId;
+  const sessionOwnerId = first.userId;
   const canRename = sessionOwnerId === user.userId;
-  const [displayName] = await db
-    .select({ displayName: schema.sessionDisplayNames.displayName })
-    .from(schema.sessionDisplayNames)
-    .where(
-      and(
-        eq(schema.sessionDisplayNames.userId, sessionOwnerId),
-        eq(schema.sessionDisplayNames.sessionId, sessionId)
-      )
-    )
-    .limit(1);
+  const [displayName] = sessionOwnerId
+    ? await db
+        .select({ displayName: schema.sessionDisplayNames.displayName })
+        .from(schema.sessionDisplayNames)
+        .where(
+          and(
+            eq(schema.sessionDisplayNames.userId, sessionOwnerId),
+            eq(schema.sessionDisplayNames.sessionId, sessionId)
+          )
+        )
+        .limit(1)
+    : [];
   const fallbackName = buildSessionFallbackName(sessionId, first.projectName, first.promptText);
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
   const totalOutputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
