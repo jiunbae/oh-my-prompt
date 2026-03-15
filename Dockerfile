@@ -1,5 +1,5 @@
 # Build stage
-FROM node:22-alpine AS builder
+FROM registry.jiun.dev/library/node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ ENV SKIP_ENV_VALIDATION=true
 RUN pnpm build
 
 # Production stage
-FROM node:22-alpine AS runner
+FROM registry.jiun.dev/library/node:22-alpine AS runner
 
 WORKDIR /app
 
