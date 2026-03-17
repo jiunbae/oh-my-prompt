@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SessionThread } from "@/components/session-thread";
 import { SessionStoryButton } from "@/components/insights/session-story-button";
 import { SessionNameEditor } from "@/components/session-name-editor";
+import { ShareSessionButton } from "@/components/share-session-button";
 
 export const dynamic = "force-dynamic";
 
@@ -177,6 +178,9 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
           )}
         </CardContent>
       </Card>
+
+      {/* Share Session */}
+      <ShareSessionButton sessionId={sessionId} />
 
       {/* AI Session Story */}
       <SessionStoryButton sessionId={sessionId} />

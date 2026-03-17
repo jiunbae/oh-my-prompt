@@ -240,6 +240,33 @@ export const sessionDisplayNames = pgTable(
   ]
 );
 
+// Shared sessions table (read-only session sharing)
+// Note: sessionId has no FK because sessions are logical groupings inferred from
+// prompts.session_id — there is no dedicated sessions table. Ownership is validated
+// at share-creation time by checking prompts with matching (sessionId, userId).
+export const sharedSessions = pgTable(
+  "shared_sessions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    sessionId: varchar("session_id", { length: 255 }).notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    shareToken: varchar("share_token", { length: 64 }).notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    viewCount: integer("view_count").default(0),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_shared_sessions_user").on(table.userId),
+    index("idx_shared_sessions_session").on(table.sessionId),
+    index("idx_shared_sessions_token").on(table.shareToken),
+  ]
+);
+
 // Daily aggregations table
 export const analyticsDaily = pgTable("analytics_daily", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -262,6 +289,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   allowedEmails: many(allowedEmails),
   promptTemplates: many(promptTemplates),
   sharedPrompts: many(sharedPrompts),
+  sharedSessions: many(sharedSessions),
 }));
 
 export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
@@ -361,6 +389,13 @@ export const sharedPromptsRelations = relations(sharedPrompts, ({ one }) => ({
   }),
 }));
 
+export const sharedSessionsRelations = relations(sharedSessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sharedSessions.userId],
+    references: [users.id],
+  }),
+}));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -381,3 +416,5 @@ export type PromptTemplate = typeof promptTemplates.$inferSelect;
 export type NewPromptTemplate = typeof promptTemplates.$inferInsert;
 export type SharedPrompt = typeof sharedPrompts.$inferSelect;
 export type NewSharedPrompt = typeof sharedPrompts.$inferInsert;
+export type SharedSession = typeof sharedSessions.$inferSelect;
+export type NewSharedSession = typeof sharedSessions.$inferInsert;
