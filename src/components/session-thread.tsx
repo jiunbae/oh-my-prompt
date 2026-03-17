@@ -39,11 +39,27 @@ interface SessionThreadProps {
 
 export function SessionThread({ prompts, responseCount }: SessionThreadProps) {
   const [showResponses, setShowResponses] = useState(true);
+  const [sortAsc, setSortAsc] = useState(false);
+
+  const sortedPrompts = sortAsc ? [...prompts].reverse() : prompts;
 
   return (
     <div className="space-y-6">
-      {responseCount > 0 && (
-        <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={() => setSortAsc(!sortAsc)}
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-card text-secondary-foreground hover:bg-surface transition-colors"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {sortAsc ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9M3 12h5m8-4v8m0 0l-3-3m3 3l3-3" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9M3 12h9m2-4v8m0-8l3 3m-3-3l-3 3" />
+            )}
+          </svg>
+          {sortAsc ? "Oldest First" : "Newest First"}
+        </button>
+        {responseCount > 0 && (
           <button
             onClick={() => setShowResponses(!showResponses)}
             className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-card text-secondary-foreground hover:bg-surface transition-colors"
@@ -58,10 +74,10 @@ export function SessionThread({ prompts, responseCount }: SessionThreadProps) {
             </svg>
             {showResponses ? "Hide" : "Show"} Responses ({responseCount})
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {prompts.map((prompt) => (
+      {sortedPrompts.map((prompt) => (
         <div key={prompt.id} className="space-y-0">
           {/* User message */}
           <Card>

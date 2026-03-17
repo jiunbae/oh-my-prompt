@@ -56,6 +56,7 @@ export function SharedSessionView({
   prompts,
 }: SharedSessionViewProps) {
   const [showResponses, setShowResponses] = useState(true);
+  const [sortAsc, setSortAsc] = useState(true);
   const [copied, setCopied] = useState(false);
 
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? 0), 0);
@@ -93,6 +94,19 @@ export function SharedSessionView({
             <span className="font-semibold">Oh My Prompt</span>
           </Link>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSortAsc(!sortAsc)}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-transparent px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {sortAsc ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9M3 12h5m8-4v8m0 0l-3-3m3 3l3-3" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9M3 12h9m2-4v8m0-8l3 3m-3-3l-3 3" />
+                )}
+              </svg>
+              {sortAsc ? "Oldest First" : "Newest First"}
+            </button>
             {responseCount > 0 && (
               <button
                 onClick={() => setShowResponses(!showResponses)}
@@ -185,7 +199,9 @@ export function SharedSessionView({
 
         {/* Prompt thread */}
         <div className="space-y-4">
-          {prompts.map((prompt, index) => (
+          {(sortAsc ? prompts : [...prompts].reverse()).map((prompt) => {
+            const originalIndex = prompts.indexOf(prompt);
+            return (
             <div key={prompt.id} className="space-y-0">
               {/* User message */}
               <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -199,7 +215,7 @@ export function SharedSessionView({
                       </span>
                     )}
                     <span className="ml-auto text-xs text-muted-foreground">
-                      #{index + 1}
+                      #{originalIndex + 1}
                     </span>
                   </div>
                   <div className="prose prose-invert max-w-none">
@@ -227,7 +243,8 @@ export function SharedSessionView({
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
 
         {/* Footer branding */}
