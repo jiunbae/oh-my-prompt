@@ -219,6 +219,27 @@ export const sharedPrompts = pgTable(
   ]
 );
 
+// Per-user custom labels for captured sessions
+export const sessionDisplayNames = pgTable(
+  "session_display_names",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: varchar("session_id", { length: 255 }).notNull(),
+    displayName: varchar("display_name", { length: 120 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_session_display_names_user_session").on(table.userId, table.sessionId),
+    index("idx_session_display_names_user_updated").on(table.userId, table.updatedAt),
+  ]
+);
+
 // Daily aggregations table
 export const analyticsDaily = pgTable("analytics_daily", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

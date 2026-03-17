@@ -81,6 +81,7 @@ export async function GET(request: NextRequest) {
     const sessionsResult = await db.execute(sql`
       SELECT
         ${schema.prompts.sessionId} as session_id,
+        ${schema.sessionDisplayNames.displayName} as display_name,
         MIN(${schema.prompts.timestamp}) as started_at,
         MAX(${schema.prompts.timestamp}) as ended_at,
         COUNT(*)::int as prompt_count,
@@ -89,8 +90,11 @@ export async function GET(request: NextRequest) {
         LEFT((array_agg(${schema.prompts.promptText} ORDER BY ${schema.prompts.timestamp} ASC))[1], 100) as first_prompt,
         SUM(COALESCE(${schema.prompts.tokenEstimate}, 0) + COALESCE(${schema.prompts.tokenEstimateResponse}, 0))::int as total_tokens
       FROM ${schema.prompts}
+      LEFT JOIN ${schema.sessionDisplayNames}
+        ON ${schema.sessionDisplayNames.userId} = ${session.userId}
+       AND ${schema.sessionDisplayNames.sessionId} = ${schema.prompts.sessionId}
       WHERE ${whereClause}
-      GROUP BY ${schema.prompts.sessionId}
+      GROUP BY ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
       ORDER BY MIN(${schema.prompts.timestamp}) ASC, ${schema.prompts.sessionId} ASC
       LIMIT ${limit}
       OFFSET ${offset}
@@ -101,6 +105,7 @@ export async function GET(request: NextRequest) {
     // Group sessions by day (UTC)
     const dayMap = new Map<string, Array<{
       sessionId: string;
+      displayName: string | null;
       startedAt: string;
       endedAt: string;
       promptCount: number;
@@ -124,6 +129,7 @@ export async function GET(request: NextRequest) {
 
       const sessionData = {
         sessionId: String(row.session_id),
+        displayName: row.display_name ? String(row.display_name) : null,
         startedAt,
         endedAt,
         promptCount: Number(row.prompt_count),

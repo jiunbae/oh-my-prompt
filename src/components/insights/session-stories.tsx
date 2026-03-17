@@ -8,6 +8,7 @@ import Link from "next/link";
 
 interface SessionSummary {
   sessionId: string;
+  displayName: string | null;
   startedAt: string;
   endedAt: string;
   promptCount: number;
@@ -45,7 +46,7 @@ function SessionRow({ session }: { session: SessionSummary }) {
               href={`/sessions/${session.sessionId}`}
               className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate"
             >
-              {session.projectName || session.sessionId.slice(0, 12) + "..."}
+              {session.displayName || session.projectName || session.sessionId.slice(0, 12) + "..."}
             </Link>
             {session.source && (
               <Badge variant="outline" className="text-xs">{session.source}</Badge>

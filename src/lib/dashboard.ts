@@ -10,6 +10,7 @@ export interface DashboardData {
   last7Days: Array<{ date: string; count: number }>;
   recentSessions: Array<{
     sessionId: string;
+    displayName: string | null;
     firstPrompt: string;
     startedAt: string;
     endedAt: string;
@@ -88,6 +89,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
         db.execute(sql`
           SELECT
             ${schema.prompts.sessionId} as session_id,
+            ${schema.sessionDisplayNames.displayName} as display_name,
             MIN(${schema.prompts.timestamp}) as started_at,
             MAX(${schema.prompts.timestamp}) as ended_at,
             COUNT(*)::int as prompt_count,
@@ -97,8 +99,11 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
             LEFT((array_agg(${schema.prompts.promptText} ORDER BY ${schema.prompts.timestamp} ASC))[1], 200) as first_prompt,
             SUM(COALESCE(${schema.prompts.tokenEstimate}, 0) + COALESCE(${schema.prompts.tokenEstimateResponse}, 0))::int as total_tokens
           FROM ${schema.prompts}
+          LEFT JOIN ${schema.sessionDisplayNames}
+            ON ${schema.sessionDisplayNames.userId} = ${userId}
+           AND ${schema.sessionDisplayNames.sessionId} = ${schema.prompts.sessionId}
           WHERE ${schema.prompts.userId} = ${userId} AND ${schema.prompts.sessionId} IS NOT NULL
-          GROUP BY ${schema.prompts.sessionId}
+          GROUP BY ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
           ORDER BY MAX(${schema.prompts.timestamp}) DESC
           LIMIT 3
         `),
@@ -251,6 +256,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
     const sRows = extractRows(recentSessionsRaw);
     const recentSessions = sRows.map(r => ({
       sessionId: String(r.session_id),
+      displayName: r.display_name ? String(r.display_name) : null,
       firstPrompt: String(r.first_prompt ?? ""),
       startedAt: String(r.started_at),
       endedAt: String(r.ended_at),

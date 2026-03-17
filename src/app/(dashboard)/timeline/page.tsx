@@ -8,6 +8,7 @@ import { SessionTimeline } from "@/components/session-timeline";
 
 interface TimelineSession {
   sessionId: string;
+  displayName: string | null;
   startedAt: string;
   endedAt: string;
   promptCount: number;

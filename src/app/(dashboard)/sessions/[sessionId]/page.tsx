@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { SessionThread } from "@/components/session-thread";
 import { SessionStoryButton } from "@/components/insights/session-story-button";
+import { SessionNameEditor } from "@/components/session-name-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,22 @@ interface SessionDetailPageProps {
   params: Promise<{ sessionId: string }>;
 }
 
+function buildSessionFallbackName(
+  sessionId: string,
+  projectName: string | null,
+  firstPrompt: string,
+): string {
+  if (projectName?.trim()) return projectName.trim();
+  const firstLine = firstPrompt
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (firstLine) {
+    return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine;
+  }
+  return `Session ${sessionId.slice(0, 12)}`;
+}
+
 export default async function SessionDetailPage({ params }: SessionDetailPageProps) {
   const { sessionId } = await params;
   const user = await getSessionUser();
@@ -69,6 +86,21 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
 
   const first = prompts[prompts.length - 1]; // oldest (query is DESC)
   const last = prompts[0]; // newest
+  const sessionOwnerId = first.userId;
+  const canRename = sessionOwnerId === user.userId;
+  const [displayName] = sessionOwnerId
+    ? await db
+        .select({ displayName: schema.sessionDisplayNames.displayName })
+        .from(schema.sessionDisplayNames)
+        .where(
+          and(
+            eq(schema.sessionDisplayNames.userId, sessionOwnerId),
+            eq(schema.sessionDisplayNames.sessionId, sessionId)
+          )
+        )
+        .limit(1)
+    : [];
+  const fallbackName = buildSessionFallbackName(sessionId, first.projectName, first.promptText);
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
   const totalOutputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
 
@@ -89,6 +121,16 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
       {/* Session metadata header */}
       <Card>
         <CardContent className="p-6">
+          <SessionNameEditor
+            key={`${sessionId}:${displayName?.displayName ?? ""}`}
+            sessionId={sessionId}
+            initialDisplayName={displayName?.displayName ?? null}
+            fallbackName={fallbackName}
+            editable={canRename}
+          />
+          <div className="mt-2 text-sm text-muted-foreground line-clamp-2 whitespace-pre-line">
+            {first.promptText || "Empty prompt"}
+          </div>
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <div className="flex items-center gap-2 text-muted-foreground">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,6 +166,9 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
               <span className="text-muted-foreground">Total:</span>
               <span className="font-medium text-foreground">{formatTokens(totalInputTokens + totalOutputTokens)} tokens</span>
             </div>
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground font-mono break-all">
+            {sessionId}
           </div>
           {first.workingDirectory && (
             <div className="mt-2 text-xs text-muted-foreground font-mono truncate" title={first.workingDirectory}>

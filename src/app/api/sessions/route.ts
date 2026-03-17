@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
       db.execute(sql`
         SELECT
           ${schema.prompts.sessionId} as session_id,
+          ${schema.sessionDisplayNames.displayName} as display_name,
           MIN(${schema.prompts.timestamp}) as started_at,
           MAX(${schema.prompts.timestamp}) as ended_at,
           COUNT(*)::int as prompt_count,
@@ -51,8 +52,11 @@ export async function GET(request: NextRequest) {
           LEFT((array_agg(${schema.prompts.promptText} ORDER BY ${schema.prompts.timestamp} ASC))[1], 200) as first_prompt,
           SUM(COALESCE(${schema.prompts.tokenEstimate}, 0) + COALESCE(${schema.prompts.tokenEstimateResponse}, 0))::int as total_tokens
         FROM ${schema.prompts}
+        LEFT JOIN ${schema.sessionDisplayNames}
+          ON ${schema.sessionDisplayNames.userId} = ${session.userId}
+         AND ${schema.sessionDisplayNames.sessionId} = ${schema.prompts.sessionId}
         WHERE ${whereClause}
-        GROUP BY ${schema.prompts.sessionId}
+        GROUP BY ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
         ORDER BY MAX(${schema.prompts.timestamp}) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `),
@@ -69,6 +73,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       sessions: sRows.map((row) => ({
         sessionId: row.session_id,
+        displayName: row.display_name,
         startedAt: row.started_at,
         endedAt: row.ended_at,
         promptCount: row.prompt_count,

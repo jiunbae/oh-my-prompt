@@ -27,6 +27,7 @@ const getCurrentUser = getSessionUser;
 
 interface SessionRow {
   session_id: string;
+  display_name: string | null;
   started_at: string;
   ended_at: string;
   prompt_count: number;
@@ -89,6 +90,7 @@ async function getSessions(params: SearchParams, userId: string) {
       db.execute(sql`
         SELECT
           ${schema.prompts.sessionId} as session_id,
+          ${schema.sessionDisplayNames.displayName} as display_name,
           MIN(${schema.prompts.timestamp}) as started_at,
           MAX(${schema.prompts.timestamp}) as ended_at,
           COUNT(*)::int as prompt_count,
@@ -99,8 +101,11 @@ async function getSessions(params: SearchParams, userId: string) {
           LEFT((array_agg(${schema.prompts.promptText} ORDER BY ${schema.prompts.timestamp} ASC))[1], 200) as first_prompt,
           SUM(COALESCE(${schema.prompts.tokenEstimate}, 0) + COALESCE(${schema.prompts.tokenEstimateResponse}, 0))::int as total_tokens
         FROM ${schema.prompts}
+        LEFT JOIN ${schema.sessionDisplayNames}
+          ON ${schema.sessionDisplayNames.userId} = ${userId}
+         AND ${schema.sessionDisplayNames.sessionId} = ${schema.prompts.sessionId}
         WHERE ${whereClause}
-        GROUP BY ${schema.prompts.sessionId}
+        GROUP BY ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
         ORDER BY MAX(${schema.prompts.timestamp}) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `),
@@ -224,6 +229,7 @@ export default async function SessionsPage({
             <SessionCard
               key={s.session_id}
               sessionId={s.session_id}
+              displayName={s.display_name}
               firstPrompt={s.first_prompt}
               startedAt={String(s.started_at)}
               endedAt={String(s.ended_at)}
