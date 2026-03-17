@@ -175,8 +175,8 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
             COUNT(*)::int as count
           FROM ${schema.prompts}
           WHERE ${schema.prompts.userId} = ${userId}
-            AND ${schema.prompts.timestamp} >= ${weekAgoStart}
-            AND ${schema.prompts.timestamp} < ${tomorrowStart}
+            AND ${schema.prompts.timestamp} >= ${weekAgoStart.toISOString()}
+            AND ${schema.prompts.timestamp} < ${tomorrowStart.toISOString()}
             AND ${schema.prompts.qualityScore} IS NOT NULL
           GROUP BY 1
           ORDER BY 1
@@ -208,8 +208,8 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           SELECT tag, COUNT(*)::int as count
           FROM ${schema.prompts}, unnest(${schema.prompts.topicTags}) as tag
           WHERE ${schema.prompts.userId} = ${userId}
-            AND ${schema.prompts.timestamp} >= ${weekAgoStart}
-            AND ${schema.prompts.timestamp} < ${tomorrowStart}
+            AND ${schema.prompts.timestamp} >= ${weekAgoStart.toISOString()}
+            AND ${schema.prompts.timestamp} < ${tomorrowStart.toISOString()}
             AND ${schema.prompts.topicTags} IS NOT NULL
           GROUP BY tag
           ORDER BY count DESC

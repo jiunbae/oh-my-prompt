@@ -311,7 +311,7 @@ async function detectSessionCompleted(
     .where(
       and(
         eq(schema.prompts.userId, userId),
-        sql`${schema.prompts.timestamp} < ${earliestNew}`,
+        sql`${schema.prompts.timestamp} < ${earliestNew.toISOString()}`,
       ),
     )
     .orderBy(desc(schema.prompts.timestamp))
