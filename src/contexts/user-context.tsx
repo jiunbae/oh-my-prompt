@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
+const PUBLIC_PATHS = ["/login", "/register", "/share"];
+
 export interface User {
   id: string;
   email: string;
@@ -43,6 +45,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
         setUser(data.user);
       } else if (res.status === 401) {
         setUser(null);
+        const path = window.location.pathname;
+        if (!PUBLIC_PATHS.some((p) => path.startsWith(p))) {
+          window.location.href = "/login";
+          return;
+        }
       } else {
         const data = await res.json();
         setError(data.error || "Failed to fetch user");
