@@ -74,6 +74,7 @@ function postJson(url, headers, body, method = "POST") {
         ...headers,
       },
       timeout: 30000,
+      family: 4,
     };
 
     const req = transport.request(options, (res) => {

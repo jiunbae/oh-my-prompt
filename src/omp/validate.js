@@ -38,6 +38,7 @@ async function validateToken(serverUrl, token, deviceId, options = {}) {
         "X-User-Token": token,
       },
       timeout,
+      family: 4,
     };
 
     const req = transport.request(reqOptions, (res) => {
