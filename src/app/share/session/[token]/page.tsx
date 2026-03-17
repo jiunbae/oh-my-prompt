@@ -63,7 +63,6 @@ export default async function SharedSessionPage({
   const session = result.data;
   return (
     <SharedSessionView
-      sessionId={session.sessionId}
       projectName={session.projectName}
       source={session.source}
       startedAt={session.startedAt.toISOString()}

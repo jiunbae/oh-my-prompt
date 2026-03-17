@@ -14,7 +14,6 @@ interface SharedPromptData {
 }
 
 interface SharedSessionViewProps {
-  sessionId: string;
   projectName: string | null;
   source: string | null;
   startedAt: string;
@@ -64,18 +63,22 @@ export function SharedSessionView({
   const responseCount = prompts.filter((p) => p.responseText).length;
 
   const handleCopy = async () => {
-    const content = prompts
-      .map((p) => {
-        let text = `[User]\n${p.promptText}`;
-        if (p.responseText) {
-          text += `\n\n[Assistant]\n${p.responseText}`;
-        }
-        return text;
-      })
-      .join("\n\n---\n\n");
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      const content = prompts
+        .map((p) => {
+          let text = `[User]\n${p.promptText}`;
+          if (p.responseText) {
+            text += `\n\n[Assistant]\n${p.responseText}`;
+          }
+          return text;
+        })
+        .join("\n\n---\n\n");
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available in insecure contexts
+    }
   };
 
   return (

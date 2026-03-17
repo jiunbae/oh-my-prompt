@@ -46,9 +46,13 @@ export function ShareSessionButton({ sessionId }: ShareSessionButtonProps) {
 
   const handleCopy = async () => {
     if (!shareUrl) return;
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available in insecure contexts
+    }
   };
 
   if (!isOpen) {

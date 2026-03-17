@@ -63,7 +63,12 @@ export async function POST(request: NextRequest) {
         shareToken,
         expiresAt,
       })
-      .returning();
+      .returning({
+        id: schema.sharedSessions.id,
+        shareToken: schema.sharedSessions.shareToken,
+        expiresAt: schema.sharedSessions.expiresAt,
+        createdAt: schema.sharedSessions.createdAt,
+      });
 
     return NextResponse.json({ shared }, { status: 201 });
   } catch (error) {
