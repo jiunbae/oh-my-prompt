@@ -79,7 +79,6 @@ export async function GET(
 
     return NextResponse.json({
       session: {
-        sessionId: shared.sessionId,
         projectName: first.projectName,
         source: first.source,
         startedAt: first.timestamp,

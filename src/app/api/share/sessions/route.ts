@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { z } from "zod";
 
 const createShareSchema = z.object({
-  sessionId: z.string().min(1, "sessionId is required"),
+  sessionId: z.string().min(1, "sessionId is required").max(255, "sessionId too long"),
   expiresIn: z
     .number()
     .int()
@@ -91,7 +91,12 @@ export async function GET() {
         createdAt: schema.sharedSessions.createdAt,
       })
       .from(schema.sharedSessions)
-      .where(eq(schema.sharedSessions.userId, session.userId))
+      .where(
+        and(
+          eq(schema.sharedSessions.userId, session.userId),
+          eq(schema.sharedSessions.isActive, true)
+        )
+      )
       .orderBy(sql`${schema.sharedSessions.createdAt} DESC`);
 
     return NextResponse.json({ shares });
