@@ -26,9 +26,17 @@ export interface SharedSessionData {
   prompts: SharedSessionPrompt[];
 }
 
+export type SharedSessionError = "not_found" | "expired";
+
+export type SharedSessionResult =
+  | { data: SharedSessionData; error?: never }
+  | { data?: never; error: SharedSessionError };
+
 /**
  * Fetch a shared session by token.
  * Validates token, checks active/expiry status, and fetches all prompts.
+ *
+ * Returns a discriminated union so callers can distinguish "not found" from "expired".
  *
  * @param incrementViewCount - When true, increments the view counter.
  *   Use false for metadata prefetches (crawlers, generateMetadata) to avoid inflating counts.
@@ -36,7 +44,7 @@ export interface SharedSessionData {
 export async function getSharedSession(
   token: string,
   options: { incrementViewCount?: boolean } = {}
-): Promise<SharedSessionData | null> {
+): Promise<SharedSessionResult> {
   try {
     const [shared] = await db
       .select()
@@ -49,8 +57,8 @@ export async function getSharedSession(
       )
       .limit(1);
 
-    if (!shared) return null;
-    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) return null;
+    if (!shared) return { error: "not_found" };
+    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) return { error: "expired" };
 
     const prompts = await db
       .select({
@@ -73,7 +81,7 @@ export async function getSharedSession(
       )
       .orderBy(asc(schema.prompts.timestamp));
 
-    if (prompts.length === 0) return null;
+    if (prompts.length === 0) return { error: "not_found" };
 
     if (options.incrementViewCount) {
       await db
@@ -86,17 +94,19 @@ export async function getSharedSession(
     const last = prompts[prompts.length - 1];
 
     return {
-      sessionId: shared.sessionId,
-      projectName: first.projectName,
-      source: first.source,
-      startedAt: first.timestamp,
-      endedAt: last.timestamp,
-      promptCount: prompts.length,
-      sharedAt: shared.createdAt,
-      prompts,
+      data: {
+        sessionId: shared.sessionId,
+        projectName: first.projectName,
+        source: first.source,
+        startedAt: first.timestamp,
+        endedAt: last.timestamp,
+        promptCount: prompts.length,
+        sharedAt: shared.createdAt,
+        prompts,
+      },
     };
   } catch (error) {
     logger.error({ err: error }, "Error fetching shared session");
-    return null;
+    return { error: "not_found" };
   }
 }

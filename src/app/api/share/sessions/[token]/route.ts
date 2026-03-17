@@ -10,15 +10,23 @@ export async function GET(
   try {
     const { token } = await params;
 
-    const session = await getSharedSession(token, { incrementViewCount: true });
+    const result = await getSharedSession(token, { incrementViewCount: true });
 
-    if (!session) {
+    if (result.error === "expired") {
       return NextResponse.json(
-        { error: "Share link not found, expired, or has been revoked" },
+        { error: "This share link has expired" },
+        { status: 410 }
+      );
+    }
+
+    if (result.error) {
+      return NextResponse.json(
+        { error: "Share link not found or has been revoked" },
         { status: 404 }
       );
     }
 
+    const session = result.data;
     return NextResponse.json({
       session: {
         projectName: session.projectName,
