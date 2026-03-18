@@ -2,25 +2,53 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getSharedSession } from "@/lib/shared-session";
 import { SharedSessionView } from "@/components/shared-session-view";
+import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
+
+function formatTokenCount(count: number): string {
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
+  return count.toString();
+}
 
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ token: string }>;
-}) {
+}): Promise<Metadata> {
   const { token } = await params;
   const result = await getSharedSession(token);
 
   if (result.error) {
-    return { title: result.error === "expired" ? "Expired Session - Oh My Prompt" : "Shared Session - Oh My Prompt" };
+    return {
+      title: result.error === "expired"
+        ? "Expired Session - Oh My Prompt"
+        : "Shared Session - Oh My Prompt",
+    };
   }
 
   const session = result.data;
+  const totalInputTokens = session.prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? 0), 0);
+  const totalOutputTokens = session.prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
+  const totalTokens = totalInputTokens + totalOutputTokens;
+
+  const title = `Shared Session${session.projectName ? ` - ${session.projectName}` : ""} (${session.promptCount} prompts) | Oh My Prompt`;
+  const description = `A shared coding session with ${session.promptCount} prompt${session.promptCount !== 1 ? "s" : ""}${session.projectName ? ` in ${session.projectName}` : ""}${totalTokens > 0 ? `. ${formatTokenCount(totalTokens)} total tokens used.` : ""}`;
+
   return {
-    title: `Shared Session${session.projectName ? ` - ${session.projectName}` : ""} (${session.promptCount} prompts) | Oh My Prompt`,
-    description: `A shared coding session with ${session.promptCount} prompts${session.projectName ? ` in ${session.projectName}` : ""}`,
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "article",
+      siteName: "Oh My Prompt",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
   };
 }
 

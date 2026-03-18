@@ -121,16 +121,16 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
         <AreaChart data={formattedData}>
           <defs>
             <linearGradient id="colorInput" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+              <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#34d399" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+              <stop offset="5%" stopColor="var(--chart-3)" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="var(--chart-3)" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+              <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" />
@@ -162,7 +162,7 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
                 type="monotone"
                 dataKey="inputTokens"
                 name="Input"
-                stroke="#818cf8"
+                stroke="var(--chart-1)"
                 fillOpacity={1}
                 fill="url(#colorInput)"
                 stackId="1"
@@ -171,7 +171,7 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
                 type="monotone"
                 dataKey="outputTokens"
                 name="Output"
-                stroke="#34d399"
+                stroke="var(--chart-3)"
                 fillOpacity={1}
                 fill="url(#colorOutput)"
                 stackId="1"
@@ -181,7 +181,7 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
             <Area
               type="monotone"
               dataKey="tokens"
-              stroke="#818cf8"
+              stroke="var(--chart-1)"
               fillOpacity={1}
               fill="url(#colorTokens)"
             />

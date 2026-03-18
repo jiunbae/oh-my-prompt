@@ -1,7 +1,15 @@
 import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
-type BadgeVariant = "default" | "secondary" | "success" | "warning" | "error" | "outline";
+type BadgeVariant =
+  | "default"
+  | "secondary"
+  | "success"
+  | "warning"
+  | "error"
+  | "outline"
+  | "info"
+  | "gradient";
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -14,6 +22,9 @@ const variantStyles: Record<BadgeVariant, string> = {
   warning: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30",
   error: "bg-red-600/20 text-red-400 border-red-600/30",
   outline: "bg-transparent text-muted-foreground border-border",
+  info: "bg-blue-600/15 text-blue-400 border-blue-600/25",
+  gradient:
+    "border-0 bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)] text-white",
 };
 
 const Badge = forwardRef<HTMLSpanElement, BadgeProps>(

@@ -17,14 +17,14 @@ export function MiniTokenTrendChart({ data }: MiniTokenTrendChartProps) {
         <AreaChart data={data} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#818cf8" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+              <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
             </linearGradient>
           </defs>
           <Area
             type="monotone"
             dataKey="tokens"
-            stroke="#818cf8"
+            stroke="var(--chart-1)"
             strokeWidth={1.5}
             fillOpacity={1}
             fill={`url(#${gradientId})`}

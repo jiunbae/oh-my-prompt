@@ -34,12 +34,12 @@ export function ProjectActivityChart({ data }: ProjectActivityChartProps) {
     <div className="h-[240px] w-full mt-4">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={formattedData} layout="vertical" margin={{ left: 10, right: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#27272a" />
+          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--color-border)" />
           <XAxis
             type="number"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "#71717a" }}
+            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
             allowDecimals={false}
           />
           <YAxis
@@ -48,20 +48,20 @@ export function ProjectActivityChart({ data }: ProjectActivityChartProps) {
             axisLine={false}
             tickLine={false}
             width={110}
-            tick={{ fontSize: 10, fill: "#71717a" }}
+            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
           />
           <Tooltip
             contentStyle={{
-              backgroundColor: "#18181b",
-              borderColor: "#27272a",
+              backgroundColor: "var(--color-card)",
+              borderColor: "var(--color-border)",
               fontSize: "12px",
-              color: "#f4f4f5",
+              color: "var(--color-foreground)",
             }}
-            itemStyle={{ color: "#818cf8" }}
-            labelStyle={{ color: "#a1a1aa" }}
+            itemStyle={{ color: "var(--chart-1)" }}
+            labelStyle={{ color: "var(--color-muted-foreground)" }}
             formatter={(value) => [`${value}`, "Prompts"]}
           />
-          <Bar dataKey="count" fill="#818cf8" radius={[0, 4, 4, 0]} />
+          <Bar dataKey="count" fill="var(--chart-1)" radius={[0, 4, 4, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

@@ -47,6 +47,38 @@ function formatTokenCount(count: number): string {
   return count.toString();
 }
 
+function CopyButton({ text, label }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+      title={label || "Copy message"}
+    >
+      {copied ? (
+        <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 export function SharedSessionView({
   projectName,
   source,
@@ -84,19 +116,27 @@ export function SharedSessionView({
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto max-w-4xl px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-foreground hover:text-foreground/80 transition-colors">
-            <svg className="h-6 w-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-            </svg>
-            <span className="font-semibold">Oh My Prompt</span>
-          </Link>
+      {/* Branded header with gradient */}
+      <header className="border-b border-border bg-gradient-to-r from-[var(--accent-gradient-from,#3b82f6)]/10 to-[var(--accent-gradient-to,#8b5cf6)]/10">
+        <div className="container mx-auto max-w-4xl px-6 py-5">
+          <div className="flex items-center justify-between mb-3">
+            <Link href="/" className="flex items-center gap-2 text-foreground hover:text-foreground/80 transition-colors">
+              <svg className="h-6 w-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              <span className="font-semibold">Oh My Prompt</span>
+            </Link>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/15 text-primary text-xs font-medium border border-primary/25">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              Shared Session
+            </span>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSortAsc(!sortAsc)}
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-transparent px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
             >
               <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 {sortAsc ? (
@@ -110,7 +150,7 @@ export function SharedSessionView({
             {responseCount > 0 && (
               <button
                 onClick={() => setShowResponses(!showResponses)}
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-transparent px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
               >
                 <svg
                   className={`h-3.5 w-3.5 transition-transform ${showResponses ? "" : "-rotate-90"}`}
@@ -125,11 +165,11 @@ export function SharedSessionView({
             )}
             <button
               onClick={handleCopy}
-              className="inline-flex items-center gap-2 rounded-md border border-border bg-transparent px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
             >
               {copied ? (
                 <>
-                  <svg className="h-4 w-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="h-4 w-4 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                   Copied!
@@ -188,7 +228,7 @@ export function SharedSessionView({
           </div>
         </div>
 
-        {/* Shared session badge */}
+        {/* Read-only badge */}
         <div className="flex items-center gap-2 mb-6 text-sm text-muted-foreground">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -197,68 +237,108 @@ export function SharedSessionView({
           <span>Read-only shared session</span>
         </div>
 
-        {/* Prompt thread */}
-        <div className="space-y-4">
+        {/* Prompt thread — matching SessionThread styling */}
+        <div className="relative">
+          {/* Vertical timeline line */}
+          <div className="absolute left-5 top-0 bottom-0 w-px bg-border-subtle" />
+
           {(sortAsc ? prompts : [...prompts].reverse()).map((prompt) => {
             const originalIndex = prompts.indexOf(prompt);
             return (
-            <div key={prompt.id} className="space-y-0">
-              {/* User message */}
-              <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <div className="p-6">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="font-medium text-blue-400">You</span>
-                    <span className="text-xs text-muted-foreground">{formatDate(prompt.timestamp)}</span>
-                    {prompt.tokenEstimate && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatTokenCount(prompt.tokenEstimate)} tokens
-                      </span>
-                    )}
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      #{originalIndex + 1}
-                    </span>
+              <div key={prompt.id} className="relative pb-6 last:pb-0">
+                {/* User message */}
+                <div className="relative pl-14 group">
+                  {/* Avatar */}
+                  <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-user-message flex items-center justify-center z-10">
+                    <svg className="h-3.5 w-3.5 text-user-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
                   </div>
-                  <div className="prose prose-invert max-w-none">
-                    <MarkdownContent content={prompt.promptText} />
-                  </div>
-                </div>
-              </div>
 
-              {/* Assistant response */}
-              {showResponses && prompt.responseText && (
-                <div className="rounded-lg border border-border border-l-2 border-l-green-800 bg-card overflow-hidden ml-4">
-                  <div className="p-6">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="font-medium text-green-400">Assistant</span>
-                      {prompt.tokenEstimateResponse && (
-                        <span className="text-xs text-muted-foreground">
-                          {formatTokenCount(prompt.tokenEstimateResponse)} tokens
+                  {/* Message bubble */}
+                  <div className="rounded-lg border border-user-message/30 bg-user-message/10 overflow-hidden">
+                    <div className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="font-medium text-user-message-foreground">You</span>
+                        <span className="text-xs text-muted-foreground">{formatDate(prompt.timestamp)}</span>
+                        {prompt.tokenEstimate && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatTokenCount(prompt.tokenEstimate)} tokens
+                          </span>
+                        )}
+                        <span className="ml-auto flex items-center gap-1">
+                          <CopyButton text={prompt.promptText} />
+                          <span className="text-xs text-muted-foreground font-mono">
+                            #{originalIndex + 1}
+                          </span>
                         </span>
-                      )}
-                    </div>
-                    <div className="prose prose-invert max-w-none">
-                      <MarkdownContent content={prompt.responseText} />
+                      </div>
+                      <div className="prose prose-invert max-w-none">
+                        <MarkdownContent content={prompt.promptText} />
+                      </div>
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
-          );
+
+                {/* Assistant response */}
+                {showResponses && prompt.responseText && (
+                  <div className="relative pl-14 mt-3 group">
+                    {/* Avatar */}
+                    <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-assistant-message flex items-center justify-center z-10">
+                      <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      </svg>
+                    </div>
+
+                    {/* Message bubble */}
+                    <div className="rounded-lg border border-assistant-message/30 bg-assistant-message/10 overflow-hidden">
+                      <div className="p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="font-medium text-assistant-message-foreground">Assistant</span>
+                          {prompt.tokenEstimateResponse && (
+                            <span className="text-xs text-muted-foreground">
+                              {formatTokenCount(prompt.tokenEstimateResponse)} tokens
+                            </span>
+                          )}
+                          <div className="ml-auto">
+                            <CopyButton text={prompt.responseText} />
+                          </div>
+                        </div>
+                        <div className="prose prose-invert max-w-none">
+                          <MarkdownContent content={prompt.responseText} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
           })}
         </div>
 
-        {/* Footer branding */}
-        <div className="mt-8 text-center text-sm text-muted-foreground">
-          <p>
-            Shared via{" "}
+        {/* CTA footer card */}
+        <div className="mt-12 rounded-lg border border-border bg-gradient-to-r from-[var(--accent-gradient-from,#3b82f6)]/5 to-[var(--accent-gradient-to,#8b5cf6)]/5 overflow-hidden">
+          <div className="px-6 py-8 text-center">
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <svg className="h-6 w-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+              </svg>
+              <span className="text-lg font-semibold text-foreground">Oh My Prompt</span>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
+              Prompt journal and insight dashboard for better agent instructions.
+              Track, analyze, and share your coding sessions.
+            </p>
             <Link
               href="/"
-              className="text-primary hover:text-primary/80 transition-colors font-medium"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-medium text-sm hover:opacity-90 transition-opacity"
             >
-              Oh My Prompt
-            </Link>{" "}
-            -- Prompt journal and insight dashboard for better agent instructions
-          </p>
+              Get Started
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </Link>
+          </div>
         </div>
       </main>
     </div>

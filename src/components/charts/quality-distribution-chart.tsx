@@ -25,7 +25,7 @@ export function QualityDistributionChart({ data }: QualityDistributionChartProps
               color: "var(--color-foreground)",
             }}
           />
-          <Bar dataKey="count" fill="#a78bfa" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="count" fill="var(--chart-2)" radius={[2, 2, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

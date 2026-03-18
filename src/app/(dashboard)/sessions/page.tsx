@@ -1,5 +1,7 @@
 import { SessionCard } from "@/components/session-card";
 import { SessionFilters } from "@/components/session-filters";
+import { SessionViewToggle, type ViewMode } from "@/components/session-view-toggle";
+import { SessionTimelineView } from "@/components/session-timeline-view";
 import { getSessionUser } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
@@ -21,6 +23,7 @@ interface SearchParams {
   workspace?: string;
   from?: string;
   to?: string;
+  view?: string;
 }
 
 const getCurrentUser = getSessionUser;
@@ -160,6 +163,85 @@ async function getSessions(params: SearchParams, userId: string) {
   }
 }
 
+function PaginationNav({
+  currentPage,
+  totalPages,
+  buildPageUrl,
+}: {
+  currentPage: number;
+  totalPages: number;
+  buildPageUrl: (page: number) => string;
+}) {
+  // Generate page numbers to display
+  const getPageNumbers = (): (number | "ellipsis")[] => {
+    const pages: (number | "ellipsis")[] = [];
+    const maxVisible = 7;
+
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push("ellipsis");
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      for (let i = start; i <= end; i++) pages.push(i);
+      if (currentPage < totalPages - 2) pages.push("ellipsis");
+      pages.push(totalPages);
+    }
+    return pages;
+  };
+
+  return (
+    <nav className="flex items-center justify-center gap-1" aria-label="Session list pagination">
+      {currentPage > 1 && (
+        <Link
+          href={buildPageUrl(currentPage - 1)}
+          className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="Go to previous page"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </Link>
+      )}
+
+      {getPageNumbers().map((page, idx) =>
+        page === "ellipsis" ? (
+          <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground text-sm">
+            ...
+          </span>
+        ) : (
+          <Link
+            key={page}
+            href={buildPageUrl(page)}
+            className={`inline-flex items-center justify-center h-9 min-w-9 px-3 rounded-lg text-sm font-medium transition-colors ${
+              page === currentPage
+                ? "bg-primary text-primary-foreground"
+                : "border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+            }`}
+            aria-label={`Go to page ${page}`}
+            aria-current={page === currentPage ? "page" : undefined}
+          >
+            {page}
+          </Link>
+        )
+      )}
+
+      {currentPage < totalPages && (
+        <Link
+          href={buildPageUrl(currentPage + 1)}
+          className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          aria-label="Go to next page"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </Link>
+      )}
+    </nav>
+  );
+}
+
 export default async function SessionsPage({
   searchParams,
 }: {
@@ -169,6 +251,7 @@ export default async function SessionsPage({
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
+  const viewMode = (params.view as ViewMode) || "list";
   const { sessions, totalCount, projects, sources, devices, workspaces, error } = await getSessions(params, user.userId);
   const currentPage = parseInt(params.page ?? "1", 10);
   const pageSize = 20;
@@ -185,17 +268,21 @@ export default async function SessionsPage({
     if (params.workspace) p.set("workspace", params.workspace);
     if (params.from) p.set("from", params.from);
     if (params.to) p.set("to", params.to);
+    if (params.view && params.view !== "list") p.set("view", params.view);
     const qs = p.toString();
     return `/sessions${qs ? `?${qs}` : ""}`;
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Sessions</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Browse your Claude Code sessions ({totalCount} total)
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Sessions</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Browse your Claude Code sessions ({totalCount} total)
+          </p>
+        </div>
+        <SessionViewToggle currentView={viewMode} />
       </div>
 
       <SessionFilters
@@ -214,15 +301,37 @@ export default async function SessionsPage({
       />
 
       {error ? (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           <p className="font-medium">Failed to load sessions</p>
-          <p className="mt-1 text-red-400/80">A database error occurred. Please try again later.</p>
+          <p className="mt-1 opacity-80">A database error occurred. Please try again later.</p>
         </div>
       ) : sessions.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <p>No sessions found.</p>
           <p className="text-sm mt-1">Sessions are created when prompts share a session ID.</p>
         </div>
+      ) : viewMode === "grid" ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {sessions.map((s) => (
+            <SessionCard
+              key={s.session_id}
+              sessionId={s.session_id}
+              displayName={s.display_name}
+              firstPrompt={s.first_prompt}
+              startedAt={String(s.started_at)}
+              endedAt={String(s.ended_at)}
+              promptCount={s.prompt_count}
+              responseCount={s.response_count}
+              projectName={s.project_name}
+              source={s.source}
+              deviceName={s.device_name}
+              totalTokens={s.total_tokens}
+              variant="grid"
+            />
+          ))}
+        </div>
+      ) : viewMode === "timeline" ? (
+        <SessionTimelineView sessions={sessions} />
       ) : (
         <div className="space-y-3">
           {sessions.map((s) => (
@@ -239,33 +348,18 @@ export default async function SessionsPage({
               source={s.source}
               deviceName={s.device_name}
               totalTokens={s.total_tokens}
+              variant="list"
             />
           ))}
         </div>
       )}
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-2">
-          {currentPage > 1 && (
-            <Link
-              href={buildPageUrl(currentPage - 1)}
-              className="px-3 py-2 text-sm rounded-lg border border-border text-secondary-foreground hover:bg-accent"
-            >
-              Previous
-            </Link>
-          )}
-          <span className="text-sm text-muted-foreground">
-            Page {currentPage} of {totalPages}
-          </span>
-          {currentPage < totalPages && (
-            <Link
-              href={buildPageUrl(currentPage + 1)}
-              className="px-3 py-2 text-sm rounded-lg border border-border text-secondary-foreground hover:bg-accent"
-            >
-              Next
-            </Link>
-          )}
-        </div>
+        <PaginationNav
+          currentPage={currentPage}
+          totalPages={totalPages}
+          buildPageUrl={buildPageUrl}
+        />
       )}
     </div>
   );

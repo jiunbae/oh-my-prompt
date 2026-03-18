@@ -104,6 +104,10 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
   const fallbackName = buildSessionFallbackName(sessionId, first.projectName, first.promptText);
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
   const totalOutputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
+  const totalTokens = totalInputTokens + totalOutputTokens;
+  const inputPct = totalTokens > 0 ? Math.round((totalInputTokens / totalTokens) * 100) : 0;
+  const outputPct = totalTokens > 0 ? 100 - inputPct : 0;
+  const responseCount = prompts.filter(p => p.responseText).length;
 
   return (
     <div className="space-y-6">
@@ -119,20 +123,33 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         </Link>
       </div>
 
-      {/* Session metadata header */}
-      <Card>
+      {/* Unified session header */}
+      <Card className="overflow-hidden">
+        {/* Gradient bar at top */}
+        <div className="h-1 bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)]" />
         <CardContent className="p-6">
-          <SessionNameEditor
-            key={`${sessionId}:${displayName?.displayName ?? ""}`}
-            sessionId={sessionId}
-            initialDisplayName={displayName?.displayName ?? null}
-            fallbackName={fallbackName}
-            editable={canRename}
-          />
-          <div className="mt-2 text-sm text-muted-foreground line-clamp-2 whitespace-pre-line">
+          {/* Header row: name + actions */}
+          <div className="flex items-start justify-between gap-4 mb-2">
+            <SessionNameEditor
+              key={`${sessionId}:${displayName?.displayName ?? ""}`}
+              sessionId={sessionId}
+              initialDisplayName={displayName?.displayName ?? null}
+              fallbackName={fallbackName}
+              editable={canRename}
+            />
+            <div className="flex items-center gap-2 shrink-0">
+              <ShareSessionButton sessionId={sessionId} />
+              <SessionStoryButton sessionId={sessionId} />
+            </div>
+          </div>
+
+          {/* First prompt preview */}
+          <div className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-line mb-4">
             {first.promptText || "Empty prompt"}
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-sm">
+
+          {/* Time + badges row */}
+          <div className="flex flex-wrap items-center gap-4 text-sm mb-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -146,44 +163,75 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
               <Badge variant="outline">{first.source}</Badge>
             )}
           </div>
-          <div className="flex flex-wrap gap-4 mt-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Prompts:</span>
-              <span className="text-secondary-foreground">{prompts.length}</span>
+
+          {/* Stats grid */}
+          <div className="grid grid-cols-5 gap-2 p-3 bg-surface-sunken rounded-lg mb-4">
+            <div className="text-center">
+              <div className="text-xs text-muted-foreground mb-0.5">Prompts</div>
+              <div className="text-sm font-semibold text-foreground">{prompts.length}</div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Responses:</span>
-              <span className="text-secondary-foreground">{prompts.filter(p => p.responseText).length}</span>
+            <div className="text-center">
+              <div className="text-xs text-muted-foreground mb-0.5">Responses</div>
+              <div className="text-sm font-semibold text-foreground">{responseCount}</div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Input:</span>
-              <span className="text-secondary-foreground">{formatTokens(totalInputTokens)} tokens</span>
+            <div className="text-center">
+              <div className="text-xs text-muted-foreground mb-0.5">Input</div>
+              <div className="text-sm font-semibold text-foreground">{formatTokens(totalInputTokens)}</div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Output:</span>
-              <span className="text-secondary-foreground">{formatTokens(totalOutputTokens)} tokens</span>
+            <div className="text-center">
+              <div className="text-xs text-muted-foreground mb-0.5">Output</div>
+              <div className="text-sm font-semibold text-foreground">{formatTokens(totalOutputTokens)}</div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Total:</span>
-              <span className="font-medium text-foreground">{formatTokens(totalInputTokens + totalOutputTokens)} tokens</span>
+            <div className="text-center">
+              <div className="text-xs text-muted-foreground mb-0.5">Total</div>
+              <div className="text-sm font-bold text-foreground">{formatTokens(totalTokens)}</div>
             </div>
           </div>
-          <div className="mt-2 text-xs text-muted-foreground font-mono break-all">
-            {sessionId}
-          </div>
-          {first.workingDirectory && (
-            <div className="mt-2 text-xs text-muted-foreground font-mono truncate" title={first.workingDirectory}>
-              {first.workingDirectory}
+
+          {/* Token ratio bar */}
+          {totalTokens > 0 && (
+            <div className="mb-4">
+              <div className="flex h-2 rounded-full overflow-hidden bg-surface-sunken">
+                <div
+                  className="bg-user-message transition-all"
+                  style={{ width: `${inputPct}%` }}
+                  title={`Input: ${inputPct}%`}
+                />
+                <div
+                  className="bg-assistant-message transition-all"
+                  style={{ width: `${outputPct}%` }}
+                  title={`Output: ${outputPct}%`}
+                />
+              </div>
+              <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-full bg-user-message" />
+                  Input {inputPct}%
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-2 w-2 rounded-full bg-assistant-message" />
+                  Output {outputPct}%
+                </span>
+              </div>
             </div>
           )}
+
+          {/* Technical details (collapsible) */}
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer hover:text-foreground transition-colors select-none">
+              Technical details
+            </summary>
+            <div className="mt-2 space-y-1 font-mono pl-4">
+              <div className="break-all">{sessionId}</div>
+              {first.workingDirectory && (
+                <div className="truncate" title={first.workingDirectory}>
+                  {first.workingDirectory}
+                </div>
+              )}
+            </div>
+          </details>
         </CardContent>
       </Card>
-
-      {/* Share Session */}
-      <ShareSessionButton sessionId={sessionId} />
-
-      {/* AI Session Story */}
-      <SessionStoryButton sessionId={sessionId} />
 
       {/* Conversation thread */}
       <SessionThread
@@ -198,7 +246,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
             tag: { id: pt.tag.id, name: pt.tag.name, color: pt.tag.color },
           })),
         }))}
-        responseCount={prompts.filter((p) => p.responseText).length}
+        responseCount={responseCount}
       />
     </div>
   );

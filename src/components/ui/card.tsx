@@ -1,17 +1,27 @@
 import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
-type CardProps = HTMLAttributes<HTMLDivElement>;
+type CardVariant = "default" | "elevated" | "outlined" | "glass" | "interactive";
+
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  variant?: CardVariant;
+}
+
+const variantStyles: Record<CardVariant, string> = {
+  default: "border border-border bg-card text-card-foreground shadow-sm",
+  elevated: "border border-border bg-surface-elevated text-card-foreground shadow-md",
+  outlined: "border-2 border-border bg-transparent text-card-foreground",
+  glass: "border border-border/50 bg-card/80 backdrop-blur-sm text-card-foreground shadow-sm",
+  interactive:
+    "border border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:border-border-strong/30 hover:shadow-[0_0_20px_var(--glow)] hover:-translate-y-px cursor-pointer",
+};
 
 const Card = forwardRef<HTMLDivElement, CardProps>(
-  ({ className, children, ...props }, ref) => {
+  ({ className, variant = "default", children, ...props }, ref) => {
     return (
       <div
         ref={ref}
-        className={cn(
-          "rounded-lg border border-border bg-card text-card-foreground shadow-sm",
-          className
-        )}
+        className={cn("rounded-lg", variantStyles[variant], className)}
         {...props}
       >
         {children}
@@ -21,6 +31,29 @@ const Card = forwardRef<HTMLDivElement, CardProps>(
 );
 
 Card.displayName = "Card";
+
+/* CardGradientBar — decorative top gradient strip */
+interface CardGradientBarProps extends HTMLAttributes<HTMLDivElement> {
+  height?: string;
+}
+
+const CardGradientBar = forwardRef<HTMLDivElement, CardGradientBarProps>(
+  ({ className, height = "h-1", ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "w-full rounded-t-lg bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)]",
+          height,
+          className
+        )}
+        {...props}
+      />
+    );
+  }
+);
+
+CardGradientBar.displayName = "CardGradientBar";
 
 type CardHeaderProps = HTMLAttributes<HTMLDivElement>;
 
@@ -110,9 +143,12 @@ CardFooter.displayName = "CardFooter";
 
 export {
   Card,
+  CardGradientBar,
   CardHeader,
   CardTitle,
   CardDescription,
   CardContent,
   CardFooter,
+  type CardProps,
+  type CardVariant,
 };
