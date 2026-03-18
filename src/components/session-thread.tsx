@@ -52,11 +52,11 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+      className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent transition-colors"
       title="Copy message"
     >
       {copied ? (
-        <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="h-3.5 w-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
         </svg>
       ) : (
