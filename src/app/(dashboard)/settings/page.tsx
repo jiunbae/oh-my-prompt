@@ -6,14 +6,14 @@ import { useUser } from "@/contexts/user-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { THEME_OPTIONS } from "@/components/theme-provider";
+import { THEME_OPTIONS, type ThemeOption } from "@/components/theme-provider";
 
 function ThemeCard({
   option,
   isSelected,
   onSelect,
 }: {
-  option: (typeof THEME_OPTIONS)[number];
+  option: ThemeOption;
   isSelected: boolean;
   onSelect: () => void;
 }) {
@@ -100,7 +100,7 @@ function ThemeCard({
       ) : (
         /* Custom theme: Color swatch bar */
         <div className="mb-2 flex h-6 w-full overflow-hidden rounded">
-          {(option as { colors?: readonly string[] }).colors?.map((color, i) => (
+          {option.colors.map((color, i) => (
             <div
               key={i}
               className="flex-1"
@@ -111,9 +111,9 @@ function ThemeCard({
       )}
 
       <p className="text-sm font-medium text-foreground">{option.label}</p>
-      {!isBase && (option as { description?: string; colors?: readonly string[] }).description && (
+      {option.group === "custom" && (
         <p className="text-xs text-muted-foreground mt-0.5">
-          {(option as { description?: string; colors?: readonly string[] }).description}
+          {option.description}
         </p>
       )}
     </button>

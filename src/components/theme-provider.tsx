@@ -3,6 +3,22 @@
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import type { ReactNode } from "react";
 
+type BaseThemeOption = {
+  value: "light" | "dark" | "system";
+  label: string;
+  group: "base";
+};
+
+type CustomThemeOption = {
+  value: "midnight-ocean" | "forest-dusk" | "sunset-glow" | "lavender-mist";
+  label: string;
+  group: "custom";
+  colors: readonly string[];
+  description: string;
+};
+
+export type ThemeOption = BaseThemeOption | CustomThemeOption;
+
 export const THEME_OPTIONS = [
   { value: "light", label: "Light", group: "base" },
   { value: "dark", label: "Dark", group: "base" },
@@ -35,7 +51,7 @@ export const THEME_OPTIONS = [
     colors: ["#0f0a1a", "#a78bfa", "#ec4899", "#4c1d95"],
     description: "Cool purple and violet hues",
   },
-] as const;
+] as const satisfies readonly ThemeOption[];
 
 export type ThemeValue = (typeof THEME_OPTIONS)[number]["value"];
 
