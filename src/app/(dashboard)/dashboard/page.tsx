@@ -36,7 +36,16 @@ function DeltaBadge({ current, previous }: { current: number; previous: number }
   if (delta === 0) return <span className="text-xs text-muted-foreground">same</span>;
   const isPositive = delta > 0;
   return (
-    <span className={`text-xs font-medium ${isPositive ? "text-green-500" : "text-red-400"}`}>
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${isPositive ? "text-green-500" : "text-red-400"}`}>
+      {isPositive ? (
+        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+        </svg>
+      ) : (
+        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      )}
       {isPositive ? "+" : ""}{formatNumber(delta)}
     </span>
   );
@@ -89,7 +98,7 @@ export default async function DashboardPage() {
           { label: "Sessions Today", value: data.today.sessions, prev: data.yesterday.sessions },
           { label: "Active Projects", value: data.today.projects, prev: data.yesterday.projects },
         ].map((item) => (
-          <Card key={item.label}>
+          <Card key={item.label} variant="elevated">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">{item.label}</CardTitle>
             </CardHeader>
@@ -178,7 +187,7 @@ export default async function DashboardPage() {
             <div className="divide-y divide-border">
               {data.recentSessions.map((s) => (
                 <Link key={s.sessionId} href={`/sessions/${s.sessionId}`} className="block">
-                  <div className="flex items-center justify-between py-3 hover:bg-accent/50 -mx-2 px-2 rounded transition-colors">
+                  <div className="flex items-center justify-between py-3 hover:bg-accent/50 hover:shadow-[0_0_15px_var(--glow)] -mx-2 px-2 rounded transition-all">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground line-clamp-1 whitespace-pre-line">
                         {s.displayName || s.firstPrompt || "Empty session"}
@@ -245,7 +254,7 @@ export default async function DashboardPage() {
                           <span className="text-muted-foreground shrink-0 ml-2">{formatNumber(p.tokens)}</span>
                         </div>
                         <div className="h-1 bg-secondary rounded-full overflow-hidden">
-                          <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${pct}%` }} />
+                          <div className="h-full bg-chart-1 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
                       </div>
                     );
@@ -329,7 +338,7 @@ export default async function DashboardPage() {
                           <span className="text-muted-foreground shrink-0 ml-2">{t.count}</span>
                         </div>
                         <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                          <div className="h-full bg-purple-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                          <div className="h-full bg-chart-5 rounded-full transition-all" style={{ width: `${pct}%` }} />
                         </div>
                       </div>
                     </Link>
@@ -344,7 +353,7 @@ export default async function DashboardPage() {
       {/* AI Insights */}
       <div>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-purple-400" />
+          <span className="inline-block w-2 h-2 rounded-full bg-chart-5" />
           AI Insights
         </h2>
         <InsightCards />

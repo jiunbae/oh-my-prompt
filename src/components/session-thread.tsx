@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { MarkdownContent } from "@/components/markdown-content";
 
 function formatDate(date: string): string {
@@ -35,6 +34,38 @@ interface PromptData {
 interface SessionThreadProps {
   prompts: PromptData[];
   responseCount: number;
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent"
+      title="Copy message"
+    >
+      {copied ? (
+        <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      ) : (
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      )}
+    </button>
+  );
 }
 
 export function SessionThread({ prompts, responseCount }: SessionThreadProps) {
@@ -77,65 +108,102 @@ export function SessionThread({ prompts, responseCount }: SessionThreadProps) {
         )}
       </div>
 
-      {sortedPrompts.map((prompt) => (
-        <div key={prompt.id} className="space-y-0">
-          {/* User message */}
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="font-medium text-blue-400">You</span>
-                <span className="text-xs text-muted-foreground">{formatDate(prompt.timestamp)}</span>
-                {prompt.tokenEstimate && (
-                  <span className="text-xs text-muted-foreground">
-                    {formatTokens(prompt.tokenEstimate)} tokens
-                  </span>
-                )}
-                <Link
-                  href={`/prompts/${prompt.id}`}
-                  className="ml-auto text-xs text-muted-foreground hover:text-secondary-foreground transition-colors"
-                >
-                  View detail
-                </Link>
+      {/* Thread with timeline */}
+      <div className="relative">
+        {/* Vertical timeline line */}
+        <div className="absolute left-5 top-0 bottom-0 w-px bg-border-subtle" />
+
+        {sortedPrompts.map((prompt, index) => {
+          const promptNumber = sortAsc ? index + 1 : prompts.length - index;
+          return (
+            <div key={prompt.id} className="relative pb-6 last:pb-0">
+              {/* User message */}
+              <div className="relative pl-14 group">
+                {/* Avatar */}
+                <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-user-message flex items-center justify-center z-10">
+                  <svg className="h-3.5 w-3.5 text-user-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </div>
+
+                {/* Message bubble */}
+                <div className="rounded-lg border border-user-message/30 bg-user-message/10 overflow-hidden">
+                  <div className="p-4">
+                    {/* Header */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="font-medium text-user-message-foreground">You</span>
+                      <span className="text-xs text-muted-foreground">{formatDate(prompt.timestamp)}</span>
+                      {prompt.tokenEstimate && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatTokens(prompt.tokenEstimate)} tokens
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground font-mono">#{promptNumber}</span>
+                      <div className="ml-auto flex items-center gap-1">
+                        <CopyButton text={prompt.promptText} />
+                        <Link
+                          href={`/prompts/${prompt.id}`}
+                          className="text-xs text-muted-foreground hover:text-secondary-foreground transition-colors"
+                        >
+                          View detail
+                        </Link>
+                      </div>
+                    </div>
+                    <div className="prose prose-invert max-w-none">
+                      <MarkdownContent content={prompt.promptText} />
+                    </div>
+                    {prompt.promptTags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-3">
+                        {prompt.promptTags.map((pt) => (
+                          <Badge
+                            key={pt.tag.id}
+                            variant="secondary"
+                            style={pt.tag.color ? { backgroundColor: `${pt.tag.color}22`, color: pt.tag.color, borderColor: pt.tag.color } : undefined}
+                          >
+                            {pt.tag.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="prose prose-invert max-w-none">
-                <MarkdownContent content={prompt.promptText} />
-              </div>
-              {prompt.promptTags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-3">
-                  {prompt.promptTags.map((pt) => (
-                    <Badge
-                      key={pt.tag.id}
-                      variant="secondary"
-                      style={pt.tag.color ? { backgroundColor: `${pt.tag.color}22`, color: pt.tag.color, borderColor: pt.tag.color } : undefined}
-                    >
-                      {pt.tag.name}
-                    </Badge>
-                  ))}
+
+              {/* Assistant response */}
+              {showResponses && prompt.responseText && (
+                <div className="relative pl-14 mt-3 group">
+                  {/* Avatar */}
+                  <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-assistant-message flex items-center justify-center z-10">
+                    <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  </div>
+
+                  {/* Message bubble */}
+                  <div className="rounded-lg border border-assistant-message/30 bg-assistant-message/10 overflow-hidden">
+                    <div className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="font-medium text-assistant-message-foreground">Assistant</span>
+                        {prompt.tokenEstimateResponse && (
+                          <span className="text-xs text-muted-foreground">
+                            {formatTokens(prompt.tokenEstimateResponse)} tokens
+                          </span>
+                        )}
+                        <div className="ml-auto">
+                          <CopyButton text={prompt.responseText} />
+                        </div>
+                      </div>
+                      <div className="prose prose-invert max-w-none">
+                        <MarkdownContent content={prompt.responseText} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
-
-          {/* Assistant response */}
-          {showResponses && prompt.responseText && (
-            <Card className="border-l-2 border-l-green-800 ml-4">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="font-medium text-green-400">Assistant</span>
-                  {prompt.tokenEstimateResponse && (
-                    <span className="text-xs text-muted-foreground">
-                      {formatTokens(prompt.tokenEstimateResponse)} tokens
-                    </span>
-                  )}
-                </div>
-                <div className="prose prose-invert max-w-none">
-                  <MarkdownContent content={prompt.responseText} />
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

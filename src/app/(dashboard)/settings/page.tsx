@@ -6,6 +6,119 @@ import { useUser } from "@/contexts/user-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { THEME_OPTIONS, type ThemeOption } from "@/components/theme-provider";
+
+function ThemeCard({
+  option,
+  isSelected,
+  onSelect,
+}: {
+  option: ThemeOption;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const isBase = option.group === "base";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`
+        relative flex flex-col rounded-lg border p-3 text-left transition-all cursor-pointer
+        ${
+          isSelected
+            ? "border-primary shadow-[0_0_20px_var(--glow)]"
+            : "border-border hover:border-border-strong/30"
+        }
+      `}
+    >
+      {/* Selected check icon */}
+      {isSelected && (
+        <div className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+      )}
+
+      {isBase ? (
+        /* Base theme: Mini UI preview */
+        <div className="mb-2 flex h-16 w-full overflow-hidden rounded border border-border-subtle">
+          {/* Mini sidebar */}
+          <div
+            className={`w-1/4 flex flex-col gap-1 p-1 ${
+              option.value === "light"
+                ? "bg-white"
+                : option.value === "dark"
+                  ? "bg-zinc-900"
+                  : "bg-gradient-to-b from-zinc-100 to-zinc-900"
+            }`}
+          >
+            <div
+              className={`h-1 w-full rounded-sm ${
+                option.value === "light" ? "bg-zinc-300" : option.value === "dark" ? "bg-zinc-700" : "bg-zinc-500"
+              }`}
+            />
+            <div
+              className={`h-1 w-3/4 rounded-sm ${
+                option.value === "light" ? "bg-blue-400" : option.value === "dark" ? "bg-blue-500" : "bg-blue-500"
+              }`}
+            />
+            <div
+              className={`h-1 w-full rounded-sm ${
+                option.value === "light" ? "bg-zinc-200" : option.value === "dark" ? "bg-zinc-800" : "bg-zinc-600"
+              }`}
+            />
+          </div>
+          {/* Mini content */}
+          <div
+            className={`flex-1 p-1.5 ${
+              option.value === "light"
+                ? "bg-zinc-50"
+                : option.value === "dark"
+                  ? "bg-zinc-950"
+                  : "bg-gradient-to-b from-zinc-50 to-zinc-950"
+            }`}
+          >
+            <div
+              className={`h-1.5 w-2/3 rounded-sm mb-1 ${
+                option.value === "light" ? "bg-zinc-300" : option.value === "dark" ? "bg-zinc-700" : "bg-zinc-500"
+              }`}
+            />
+            <div
+              className={`h-1 w-full rounded-sm mb-0.5 ${
+                option.value === "light" ? "bg-zinc-200" : option.value === "dark" ? "bg-zinc-800" : "bg-zinc-600"
+              }`}
+            />
+            <div
+              className={`h-1 w-4/5 rounded-sm ${
+                option.value === "light" ? "bg-zinc-200" : option.value === "dark" ? "bg-zinc-800" : "bg-zinc-600"
+              }`}
+            />
+          </div>
+        </div>
+      ) : (
+        /* Custom theme: Color swatch bar */
+        <div className="mb-2 flex h-6 w-full overflow-hidden rounded">
+          {option.colors.map((color, i) => (
+            <div
+              key={i}
+              className="flex-1"
+              style={{ backgroundColor: color }}
+            />
+          ))}
+        </div>
+      )}
+
+      <p className="text-sm font-medium text-foreground">{option.label}</p>
+      {option.group === "custom" && (
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {option.description}
+        </p>
+      )}
+    </button>
+  );
+}
 
 export default function SettingsPage() {
   const { user, loading, refetch } = useUser();
@@ -41,6 +154,9 @@ export default function SettingsPage() {
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  const baseThemes = THEME_OPTIONS.filter((t) => t.group === "base");
+  const customThemes = THEME_OPTIONS.filter((t) => t.group === "custom");
 
   return (
     <div className="space-y-6">
@@ -127,7 +243,7 @@ export default function SettingsPage() {
                 {/* Regenerate Token */}
                 <div className="pt-4 border-t border-border">
                   {showConfirm ? (
-                    <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
+                    <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
                       <p className="text-red-300 text-sm mb-3">
                         Are you sure? This will invalidate your current token. You&apos;ll need to update your prompt capture hook configuration.
                       </p>
@@ -217,22 +333,37 @@ export default function SettingsPage() {
               Customize the look and feel of the dashboard
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-secondary-foreground">Theme</label>
-              <div className="flex gap-4">
-                {(["dark", "light", "system"] as const).map((t) => (
-                  <label key={t} className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="theme"
-                      value={t}
-                      checked={theme === t}
-                      onChange={() => setTheme(t)}
-                      className="h-4 w-4 border-border bg-input-bg text-primary focus:ring-ring"
-                    />
-                    <span className="text-sm text-secondary-foreground capitalize">{t}</span>
-                  </label>
+          <CardContent className="space-y-6">
+            {/* Base themes */}
+            <div className="space-y-3">
+              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
+                Base
+              </label>
+              <div className="grid grid-cols-3 gap-3">
+                {baseThemes.map((t) => (
+                  <ThemeCard
+                    key={t.value}
+                    option={t}
+                    isSelected={theme === t.value}
+                    onSelect={() => setTheme(t.value)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Custom themes */}
+            <div className="space-y-3">
+              <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
+                Custom
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {customThemes.map((t) => (
+                  <ThemeCard
+                    key={t.value}
+                    option={t}
+                    isSelected={theme === t.value}
+                    onSelect={() => setTheme(t.value)}
+                  />
                 ))}
               </div>
             </div>

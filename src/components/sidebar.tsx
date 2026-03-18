@@ -13,7 +13,7 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
-const navItems: NavItem[] = [
+const overviewItems: NavItem[] = [
   {
     href: "/dashboard",
     label: "Dashboard",
@@ -71,6 +71,9 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
+];
+
+const exploreItems: NavItem[] = [
   {
     href: "/analytics",
     label: "Analytics",
@@ -238,6 +241,63 @@ const adminNavItems: NavItem[] = [
   },
 ];
 
+function SidebarNavLink({
+  item,
+  isActive,
+}: {
+  item: NavItem;
+  isActive: boolean;
+}) {
+  return (
+    <Link
+      href={item.href}
+      aria-current={isActive ? "page" : undefined}
+      className={`
+        relative flex items-center gap-3 rounded-lg px-3 py-2
+        text-sm font-medium transition-colors
+        ${
+          isActive
+            ? "bg-sidebar-active text-sidebar-active-foreground"
+            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+        }
+      `}
+    >
+      {isActive && (
+        <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-sidebar-active-indicator" />
+      )}
+      <span className={isActive ? "text-sidebar-active-indicator" : ""}>
+        {item.icon}
+      </span>
+      {item.label}
+    </Link>
+  );
+}
+
+function SidebarGroup({
+  label,
+  items,
+  pathname,
+}: {
+  label: string;
+  items: NavItem[];
+  pathname: string;
+}) {
+  return (
+    <div>
+      <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+        {label}
+      </p>
+      <div className="space-y-1">
+        {items.map((item) => {
+          const isActive = pathname.startsWith(item.href);
+          return (
+            <SidebarNavLink key={item.href} item={item} isActive={isActive} />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -256,59 +316,13 @@ export function Sidebar() {
         <ThemeToggle />
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4">
-        {navItems.map((item) => {
-          const isActive = pathname.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`
-                flex items-center gap-3 rounded-lg px-3 py-2
-                text-sm font-medium transition-colors
-                ${
-                  isActive
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                }
-              `}
-            >
-              {item.icon}
-              {item.label}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 space-y-5 px-3 py-4" aria-label="Main navigation">
+        <SidebarGroup label="Overview" items={overviewItems} pathname={pathname} />
+        <SidebarGroup label="Explore" items={exploreItems} pathname={pathname} />
 
         {/* Admin Section */}
         {user?.isAdmin && (
-          <>
-            <div className="pt-4 pb-2">
-              <p className="px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Admin
-              </p>
-            </div>
-            {adminNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`
-                    flex items-center gap-3 rounded-lg px-3 py-2
-                    text-sm font-medium transition-colors
-                    ${
-                      isActive
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                    }
-                  `}
-                >
-                  {item.icon}
-                  {item.label}
-                </Link>
-              );
-            })}
-          </>
+          <SidebarGroup label="Admin" items={adminNavItems} pathname={pathname} />
         )}
       </nav>
 

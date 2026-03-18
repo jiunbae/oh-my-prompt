@@ -14,7 +14,7 @@ export function MiniQualityTrendChart({ data }: MiniQualityTrendChartProps) {
           <Line
             type="monotone"
             dataKey="avg"
-            stroke="#a78bfa"
+            stroke="var(--chart-2)"
             strokeWidth={1.5}
             dot={false}
           />
