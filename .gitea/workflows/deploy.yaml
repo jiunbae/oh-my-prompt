@@ -20,6 +20,7 @@ env:
   REGISTRY: registry.jiun.dev
   IMAGE_NAME: oh-my-prompt
   IAC_REPO: jiunbae/IaC
+  APP_PATH: kubernetes/apps/oh-my-prompt
   DEV_PATH: kubernetes/overlays/dev/oh-my-prompt
   PROD_PATH: kubernetes/overlays/prod/oh-my-prompt
 
@@ -60,8 +61,11 @@ jobs:
         run: |
           git clone https://x-access-token:${{ secrets.IAC_GITHUB_TOKEN }}@github.com/${{ env.IAC_REPO }}.git iac
           cd iac
+          sed -i "s/newTag: .*/newTag: ${{ gitea.sha }}/" ${{ env.APP_PATH }}/kustomization.yaml
           sed -i "s/newTag: .*/newTag: ${{ gitea.sha }}/" ${{ env.DEV_PATH }}/kustomization.yaml
           sed -i "s/newTag: .*/newTag: ${{ gitea.sha }}/" ${{ env.PROD_PATH }}/kustomization.yaml
+          echo "=== App (ArgoCD source) ==="
+          cat ${{ env.APP_PATH }}/kustomization.yaml
           echo "=== Dev overlay ==="
           cat ${{ env.DEV_PATH }}/kustomization.yaml
           echo "=== Prod overlay ==="
@@ -72,6 +76,6 @@ jobs:
           cd iac
           git config user.name "CI Bot"
           git config user.email "ci@jiun.dev"
-          git add ${{ env.DEV_PATH }}/kustomization.yaml ${{ env.PROD_PATH }}/kustomization.yaml
+          git add ${{ env.APP_PATH }}/kustomization.yaml ${{ env.DEV_PATH }}/kustomization.yaml ${{ env.PROD_PATH }}/kustomization.yaml
           git diff --staged --quiet || git commit -m "chore(oh-my-prompt): update image to ${{ gitea.sha }}"
           git push
