@@ -2,6 +2,7 @@ import { SessionCard } from "@/components/session-card";
 import { SessionFilters } from "@/components/session-filters";
 import { SessionViewToggle, type ViewMode } from "@/components/session-view-toggle";
 import { SessionTimelineView } from "@/components/session-timeline-view";
+import { SharedSessionsList } from "@/components/shared-sessions-list";
 import { getSessionUser } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
@@ -14,6 +15,7 @@ import { redirect } from "next/navigation";
 export const dynamic = "force-dynamic";
 
 interface SearchParams {
+  tab?: string;
   page?: string;
   search?: string;
   searchMode?: string;
@@ -251,8 +253,11 @@ export default async function SessionsPage({
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
+  const activeTab = params.tab === "shared" ? "shared" : "all";
   const viewMode = (params.view as ViewMode) || "list";
-  const { sessions, totalCount, projects, sources, devices, workspaces, error } = await getSessions(params, user.userId);
+  const { sessions, totalCount, projects, sources, devices, workspaces, error } = activeTab === "all"
+    ? await getSessions(params, user.userId)
+    : { sessions: [], totalCount: 0, projects: [], sources: [], devices: [], workspaces: [], error: false };
   const currentPage = parseInt(params.page ?? "1", 10);
   const pageSize = 20;
   const totalPages = Math.ceil(totalCount / pageSize);
@@ -279,12 +284,45 @@ export default async function SessionsPage({
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Sessions</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Browse your Claude Code sessions ({totalCount} total)
+            {activeTab === "shared"
+              ? "Manage your shared session links"
+              : `Browse your Claude Code sessions (${totalCount} total)`}
           </p>
         </div>
-        <SessionViewToggle currentView={viewMode} />
+        {activeTab === "all" && <SessionViewToggle currentView={viewMode} />}
       </div>
 
+      {/* Tab navigation */}
+      <div className="flex items-center gap-1 border-b border-border">
+        <Link
+          href="/sessions"
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "all"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          All Sessions
+        </Link>
+        <Link
+          href="/sessions?tab=shared"
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === "shared"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+          </svg>
+          Shared
+        </Link>
+      </div>
+
+      {activeTab === "shared" ? (
+        <SharedSessionsList />
+      ) : (
+      <>
       <SessionFilters
         projects={projects}
         sources={sources}
@@ -360,6 +398,8 @@ export default async function SessionsPage({
           totalPages={totalPages}
           buildPageUrl={buildPageUrl}
         />
+      )}
+      </>
       )}
     </div>
   );
