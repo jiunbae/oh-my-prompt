@@ -92,6 +92,7 @@ export function PromptDetail({
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showSharePanel, setShowSharePanel] = useState(false);
   const [shareLinks, setShareLinks] = useState<ShareLink[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
@@ -183,11 +184,10 @@ export function PromptDetail({
         router.push("/sessions");
         router.refresh();
       } else {
-        alert("Failed to delete prompt");
+        setDeleteError("Failed to delete prompt");
       }
-    } catch (error) {
-      console.error("Delete error:", error);
-      alert("An error occurred while deleting");
+    } catch {
+      setDeleteError("An error occurred while deleting");
     } finally {
       setIsDeleting(false);
     }
@@ -377,7 +377,7 @@ export function PromptDetail({
                         onClick={() => copyShareLink(link.shareToken)}
                       >
                         {shareCopied === link.shareToken ? (
-                          <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-4 w-4 text-chart-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
                         ) : (
@@ -508,6 +508,12 @@ export function PromptDetail({
           </div>
         </CardContent>
       </Card>
+
+      {deleteError && (
+        <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+          {deleteError}
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmOpen}
