@@ -333,7 +333,7 @@ function ComparePageContent() {
         </div>
 
         {optionsError && (
-          <p className="mt-3 text-sm text-red-500">{optionsError}</p>
+          <p className="mt-3 text-sm text-destructive">{optionsError}</p>
         )}
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -361,7 +361,7 @@ function ComparePageContent() {
       )}
 
       {diffError && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           {diffError}
         </div>
       )}

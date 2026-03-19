@@ -120,10 +120,10 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
   const getColor = (count: number, inRange: boolean) => {
     if (!inRange) return "bg-transparent";
     if (count === 0) return "bg-secondary/50 dark:bg-secondary/30";
-    if (count < maxCount * 0.25) return "bg-green-200 dark:bg-green-900/60";
-    if (count < maxCount * 0.5) return "bg-green-400 dark:bg-green-700/80";
-    if (count < maxCount * 0.75) return "bg-green-500 dark:bg-green-500";
-    return "bg-green-600 dark:bg-green-400";
+    if (count < maxCount * 0.25) return "bg-chart-2/20";
+    if (count < maxCount * 0.5) return "bg-chart-2/50";
+    if (count < maxCount * 0.75) return "bg-chart-2/75";
+    return "bg-chart-2";
   };
 
   return (
@@ -206,10 +206,10 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
         <div className="flex items-center gap-1">
           <span>Less</span>
           <div className="w-[10px] h-[10px] rounded-sm bg-secondary/50 dark:bg-secondary/30" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-green-200 dark:bg-green-900/60" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-green-400 dark:bg-green-700/80" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-green-500 dark:bg-green-500" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-green-600 dark:bg-green-400" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-chart-2/20" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-chart-2/50" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-chart-2/75" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-chart-2" />
           <span>More</span>
         </div>
       </div>

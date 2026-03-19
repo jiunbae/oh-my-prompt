@@ -55,8 +55,8 @@ function formatTokenCount(count: number): string {
 }
 
 const roleColors: Record<string, string> = {
-  user: "text-blue-400",
-  assistant: "text-green-400",
+  user: "text-primary",
+  assistant: "text-chart-2",
   system: "text-muted-foreground",
 };
 
@@ -377,7 +377,7 @@ export function PromptDetail({
                           variant="ghost"
                           size="sm"
                           onClick={() => handleRevokeShareLink(link.id)}
-                          className="text-red-400 hover:text-red-300"
+                          className="text-destructive hover:text-destructive/80"
                         >
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -401,7 +401,7 @@ export function PromptDetail({
                 <span className="font-medium text-secondary-foreground">Session:</span>
                 <Link
                   href={`/sessions/${sessionId}`}
-                  className="rounded bg-secondary px-2 py-0.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                  className="rounded bg-secondary px-2 py-0.5 text-xs text-primary hover:text-primary/80 transition-colors"
                 >
                   View full session
                 </Link>

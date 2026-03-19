@@ -104,7 +104,7 @@ export function ShareSessionButton({ sessionId }: ShareSessionButtonProps) {
             </select>
           </div>
           {error && (
-            <p className="text-xs text-red-400">{error}</p>
+            <p className="text-xs text-destructive">{error}</p>
           )}
           <button
             onClick={handleShare}

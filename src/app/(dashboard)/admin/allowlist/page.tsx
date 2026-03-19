@@ -155,7 +155,7 @@ export default function AllowlistPage() {
             </Button>
           </form>
           {error && (
-            <p className="text-red-400 text-sm mt-3">{error}</p>
+            <p className="text-destructive text-sm mt-3">{error}</p>
           )}
         </CardContent>
       </Card>
@@ -195,10 +195,10 @@ export default function AllowlistPage() {
                     size="sm"
                     onClick={() => handleDeleteEmail(item.id)}
                     disabled={deletingId === item.id}
-                    className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                    className="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
                   >
                     {deletingId === item.id ? (
-                      <span className="animate-spin h-4 w-4 border-2 border-red-400 border-t-transparent rounded-full" />
+                      <span className="animate-spin h-4 w-4 border-2 border-destructive border-t-transparent rounded-full" />
                     ) : (
                       <svg
                         className="h-4 w-4"

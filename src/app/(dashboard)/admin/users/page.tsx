@@ -126,7 +126,7 @@ export default function AdminUsersPage() {
       </div>
 
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           {error}
         </div>
       )}
@@ -180,7 +180,7 @@ export default function AdminUsersPage() {
                     </div>
                     <div>
                       {u.isAdmin ? (
-                        <Badge variant="default" className="bg-indigo-500/20 text-indigo-300 border-indigo-500/30">
+                        <Badge variant="default" className="bg-chart-1/20 text-chart-1 border-chart-1/30">
                           Admin
                         </Badge>
                       ) : (
@@ -205,8 +205,8 @@ export default function AdminUsersPage() {
                         disabled={isSelf || togglingId === u.id}
                         className={
                           u.isAdmin
-                            ? "text-red-400 hover:text-red-300 hover:bg-red-900/20 text-xs"
-                            : "text-indigo-400 hover:text-indigo-300 hover:bg-indigo-900/20 text-xs"
+                            ? "text-destructive hover:text-destructive/80 hover:bg-destructive/10 text-xs"
+                            : "text-chart-1 hover:text-chart-1/80 hover:bg-chart-1/10 text-xs"
                         }
                         title={isSelf ? "Cannot change your own role" : undefined}
                       >

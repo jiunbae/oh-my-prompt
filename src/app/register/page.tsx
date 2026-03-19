@@ -139,7 +139,7 @@ export default function RegisterPage() {
               />
             </div>
             {error && (
-              <p className="text-red-400 text-sm text-center">{error}</p>
+              <p className="text-destructive text-sm text-center">{error}</p>
             )}
             <Button
               type="submit"
@@ -151,7 +151,7 @@ export default function RegisterPage() {
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">
             Already have an account?{" "}
-            <Link href="/login" className="text-blue-400 hover:text-blue-300">
+            <Link href="/login" className="text-primary hover:text-primary/80">
               Sign in
             </Link>
           </div>

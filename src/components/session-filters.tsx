@@ -277,7 +277,7 @@ export function SessionFilters({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">Active filters:</span>
           {currentSearch && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-1/20 text-chart-1 rounded-full text-xs">
               Search: &quot;{currentSearch}&quot;
               {currentSearchMode && currentSearchMode !== "keyword" && (
                 <span className="opacity-70">({searchModeLabels[currentSearchMode as SearchMode] || currentSearchMode})</span>
@@ -294,22 +294,22 @@ export function SessionFilters({
                     );
                   });
                 }}
-                className="hover:text-indigo-100"
+                className="hover:text-foreground"
               >
                 x
               </button>
             </span>
           )}
           {currentProject && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-300 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-2/20 text-chart-2 rounded-full text-xs">
               Project: {currentProject}
-              <button type="button" onClick={() => handleFilterChange("project", undefined)} className="hover:text-green-100">x</button>
+              <button type="button" onClick={() => handleFilterChange("project", undefined)} className="hover:text-foreground">x</button>
             </span>
           )}
           {currentSource && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-3/20 text-chart-3 rounded-full text-xs">
               Agent: {currentSource}
-              <button type="button" onClick={() => handleFilterChange("source", undefined)} className="hover:text-blue-100">x</button>
+              <button type="button" onClick={() => handleFilterChange("source", undefined)} className="hover:text-foreground">x</button>
             </span>
           )}
           {currentDevice && (
@@ -319,9 +319,9 @@ export function SessionFilters({
             </span>
           )}
           {currentWorkspace && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-5/20 text-chart-5 rounded-full text-xs">
               Workspace: {currentWorkspace.split("/").slice(-2).join("/")}
-              <button type="button" onClick={() => handleFilterChange("workspace", undefined)} className="hover:text-purple-100">x</button>
+              <button type="button" onClick={() => handleFilterChange("workspace", undefined)} className="hover:text-foreground">x</button>
             </span>
           )}
           {(currentFrom || currentTo) && (

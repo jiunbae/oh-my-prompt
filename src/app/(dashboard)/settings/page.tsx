@@ -61,7 +61,7 @@ function ThemeCard({
             />
             <div
               className={`h-1 w-3/4 rounded-sm ${
-                option.value === "light" ? "bg-blue-400" : option.value === "dark" ? "bg-blue-500" : "bg-blue-500"
+                option.value === "light" ? "bg-primary/70" : option.value === "dark" ? "bg-primary" : "bg-primary"
               }`}
             />
             <div
@@ -235,7 +235,7 @@ export default function SettingsPage() {
                 </div>
 
                 {tokenError && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                  <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
                     {tokenError}
                   </div>
                 )}
@@ -244,7 +244,7 @@ export default function SettingsPage() {
                 <div className="pt-4 border-t border-border">
                   {showConfirm ? (
                     <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
-                      <p className="text-red-300 text-sm mb-3">
+                      <p className="text-destructive text-sm mb-3">
                         Are you sure? This will invalidate your current token. You&apos;ll need to update your prompt capture hook configuration.
                       </p>
                       <div className="flex gap-3">
@@ -270,7 +270,7 @@ export default function SettingsPage() {
                     <Button
                       variant="outline"
                       onClick={() => setShowConfirm(true)}
-                      className="text-red-400 hover:text-red-300 hover:border-red-800"
+                      className="text-destructive hover:text-destructive/80 hover:border-destructive/30"
                     >
                       <svg
                         className="h-4 w-4 mr-2"

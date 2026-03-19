@@ -75,7 +75,7 @@ export default function LoginPage() {
               />
             </div>
             {error && (
-              <p className="text-red-400 text-sm text-center">{error}</p>
+              <p className="text-destructive text-sm text-center">{error}</p>
             )}
             <Button
               type="submit"
@@ -87,7 +87,7 @@ export default function LoginPage() {
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
-            <Link href="/register" className="text-blue-400 hover:text-blue-300">
+            <Link href="/register" className="text-primary hover:text-primary/80">
               Register
             </Link>
           </div>

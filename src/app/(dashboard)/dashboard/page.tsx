@@ -10,6 +10,7 @@ import { getSessionUser } from "@/lib/with-auth";
 import { getDashboardData } from "@/lib/dashboard";
 import { formatNumber } from "@/lib/analytics";
 import { InsightCards } from "@/components/insights/insight-cards";
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ function DeltaBadge({ current, previous }: { current: number; previous: number }
   if (delta === 0) return <span className="text-xs text-muted-foreground">same</span>;
   const isPositive = delta > 0;
   return (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${isPositive ? "text-green-500" : "text-red-400"}`}>
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${isPositive ? "text-chart-2" : "text-destructive"}`}>
       {isPositive ? (
         <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -89,6 +90,9 @@ export default async function DashboardPage() {
           </svg>
         </Link>
       </div>
+
+      {/* Onboarding Checklist */}
+      <OnboardingChecklist hasAnySessions={data.today.sessions > 0 || data.recentSessions.length > 0} />
 
       {/* Today's Snapshot */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

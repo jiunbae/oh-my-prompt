@@ -118,7 +118,7 @@ export function SessionNameEditor({
             Dashboard label only. Underlying session IDs from Codex, Claude, tmux, or zellij are unchanged.
           </p>
           {error ? (
-            <p className="text-sm text-red-400">{error}</p>
+            <p className="text-sm text-destructive">{error}</p>
           ) : null}
         </form>
       ) : (

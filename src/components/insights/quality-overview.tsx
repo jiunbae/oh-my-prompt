@@ -89,10 +89,10 @@ function DistributionBar({
   }
 
   const segments = [
-    { key: "excellent", label: "Excellent (76-100)", count: distribution.excellent, color: "bg-green-500" },
-    { key: "good", label: "Good (51-75)", count: distribution.good, color: "bg-blue-500" },
-    { key: "medium", label: "Medium (26-50)", count: distribution.medium, color: "bg-yellow-500" },
-    { key: "low", label: "Low (0-25)", count: distribution.low, color: "bg-red-500" },
+    { key: "excellent", label: "Excellent (76-100)", count: distribution.excellent, color: "bg-chart-2" },
+    { key: "good", label: "Good (51-75)", count: distribution.good, color: "bg-chart-1" },
+    { key: "medium", label: "Medium (26-50)", count: distribution.medium, color: "bg-chart-4" },
+    { key: "low", label: "Low (0-25)", count: distribution.low, color: "bg-destructive" },
   ];
 
   return (
@@ -218,10 +218,10 @@ export function QualityOverview() {
           <CardDescription>Quality analysis of your prompts</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-red-400">{error}</p>
+          <p className="text-sm text-destructive">{error}</p>
           <button
             onClick={fetchStats}
-            className="mt-2 text-sm text-blue-400 hover:underline"
+            className="mt-2 text-sm text-primary hover:underline"
           >
             Retry
           </button>
@@ -240,7 +240,7 @@ export function QualityOverview() {
           <CardDescription>
             {stats.totalEnriched} prompts scored
             {stats.totalUnenriched > 0 && (
-              <span className="text-yellow-400">
+              <span className="text-chart-4">
                 {" "}
                 ({stats.totalUnenriched} pending)
               </span>
@@ -251,7 +251,7 @@ export function QualityOverview() {
           <button
             onClick={handleEnrich}
             disabled={enriching}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
             {enriching ? "Scoring..." : "Score Now"}
           </button>

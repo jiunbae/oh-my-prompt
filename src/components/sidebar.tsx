@@ -1,10 +1,30 @@
 "use client";
 
+import { useState, useEffect, useCallback, createContext, useContext } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "@/contexts/user-context";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
+
+// Context for mobile sidebar control
+const MobileSidebarContext = createContext<{
+  open: boolean;
+  setOpen: (v: boolean) => void;
+}>({ open: false, setOpen: () => {} });
+
+export function MobileSidebarProvider({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <MobileSidebarContext.Provider value={{ open, setOpen }}>
+      {children}
+    </MobileSidebarContext.Provider>
+  );
+}
+
+export function useMobileSidebar() {
+  return useContext(MobileSidebarContext);
+}
 
 interface NavItem {
   href: string;
@@ -244,14 +264,17 @@ const adminNavItems: NavItem[] = [
 function SidebarNavLink({
   item,
   isActive,
+  onClick,
 }: {
   item: NavItem;
   isActive: boolean;
+  onClick?: () => void;
 }) {
   return (
     <Link
       href={item.href}
       aria-current={isActive ? "page" : undefined}
+      onClick={onClick}
       className={`
         relative flex items-center gap-3 rounded-lg px-3 py-2
         text-sm font-medium transition-colors
@@ -277,10 +300,12 @@ function SidebarGroup({
   label,
   items,
   pathname,
+  onLinkClick,
 }: {
   label: string;
   items: NavItem[];
   pathname: string;
+  onLinkClick?: () => void;
 }) {
   return (
     <div>
@@ -291,7 +316,7 @@ function SidebarGroup({
         {items.map((item) => {
           const isActive = pathname.startsWith(item.href);
           return (
-            <SidebarNavLink key={item.href} item={item} isActive={isActive} />
+            <SidebarNavLink key={item.href} item={item} isActive={isActive} onClick={onLinkClick} />
           );
         })}
       </div>
@@ -299,14 +324,14 @@ function SidebarGroup({
   );
 }
 
-export function Sidebar() {
+function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
   const pathname = usePathname();
   const { user, loading, logout } = useUser();
 
   return (
-    <aside className="flex h-screen w-64 flex-col border-r border-border bg-card">
+    <>
       <div className="flex h-16 items-center justify-between border-b border-border px-4">
-        <Link href="/dashboard" className="block">
+        <Link href="/dashboard" className="block" onClick={onLinkClick}>
           <img
             src="/logo-dark.svg"
             alt="Oh My Prompt"
@@ -317,12 +342,12 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-5 px-3 py-4" aria-label="Main navigation">
-        <SidebarGroup label="Overview" items={overviewItems} pathname={pathname} />
-        <SidebarGroup label="Explore" items={exploreItems} pathname={pathname} />
+        <SidebarGroup label="Overview" items={overviewItems} pathname={pathname} onLinkClick={onLinkClick} />
+        <SidebarGroup label="Explore" items={exploreItems} pathname={pathname} onLinkClick={onLinkClick} />
 
         {/* Admin Section */}
         {user?.isAdmin && (
-          <SidebarGroup label="Admin" items={adminNavItems} pathname={pathname} />
+          <SidebarGroup label="Admin" items={adminNavItems} pathname={pathname} onLinkClick={onLinkClick} />
         )}
       </nav>
 
@@ -375,6 +400,96 @@ export function Sidebar() {
           </div>
         ) : null}
       </div>
-    </aside>
+    </>
+  );
+}
+
+export function MobileHeader() {
+  const { setOpen } = useMobileSidebar();
+
+  return (
+    <div className="md:hidden flex items-center h-14 border-b border-border px-4 bg-card">
+      <button
+        onClick={() => setOpen(true)}
+        className="p-2 -ml-2 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        aria-label="Open navigation menu"
+      >
+        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      <Link href="/dashboard" className="ml-3">
+        <img
+          src="/logo-dark.svg"
+          alt="Oh My Prompt"
+          className="h-8 w-auto dark:invert-0 invert"
+        />
+      </Link>
+    </div>
+  );
+}
+
+function MobileSidebarOverlay() {
+  const { open, setOpen } = useMobileSidebar();
+
+  const close = useCallback(() => setOpen(false), [setOpen]);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, close]);
+
+  // Prevent body scroll when open
+  useEffect(() => {
+    if (open) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open]);
+
+  return (
+    <div
+      className={`fixed inset-0 z-50 md:hidden ${open ? "pointer-events-auto" : "pointer-events-none"}`}
+      aria-hidden={!open}
+    >
+      {/* Backdrop */}
+      <div
+        className={`fixed inset-0 bg-background/80 backdrop-blur-sm transition-opacity duration-300 ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+        onClick={close}
+      />
+      {/* Drawer */}
+      <aside
+        className={`fixed left-0 top-0 h-full w-64 flex flex-col border-r border-border bg-card shadow-xl transition-transform duration-300 ease-in-out ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <SidebarContent onLinkClick={close} />
+      </aside>
+    </div>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex h-screen w-64 flex-col border-r border-border bg-card">
+        <SidebarContent />
+      </aside>
+
+      {/* Mobile overlay sidebar */}
+      <MobileSidebarOverlay />
+    </>
   );
 }

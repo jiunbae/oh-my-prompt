@@ -58,11 +58,11 @@ function getSourceColor(source: string | null): string {
   switch (source?.toLowerCase()) {
     case "claude":
     case "claude-code":
-      return "bg-blue-500 dark:bg-blue-400";
+      return "bg-chart-1";
     case "codex":
-      return "bg-green-500 dark:bg-green-400";
+      return "bg-chart-2";
     case "cursor":
-      return "bg-purple-500 dark:bg-purple-400";
+      return "bg-chart-5";
     default:
       return "bg-zinc-400 dark:bg-zinc-500";
   }
@@ -243,15 +243,15 @@ export function SessionTimeline({ days }: SessionTimelineProps) {
       {/* Legend */}
       <div className="flex items-center gap-4 mt-4 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-sm bg-blue-500 dark:bg-blue-400" />
+          <div className="w-3 h-3 rounded-sm bg-chart-1" />
           <span>Claude</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-sm bg-green-500 dark:bg-green-400" />
+          <div className="w-3 h-3 rounded-sm bg-chart-2" />
           <span>Codex</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-sm bg-purple-500 dark:bg-purple-400" />
+          <div className="w-3 h-3 rounded-sm bg-chart-5" />
           <span>Cursor</span>
         </div>
         <div className="flex items-center gap-1.5">
