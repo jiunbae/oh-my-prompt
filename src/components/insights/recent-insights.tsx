@@ -86,7 +86,7 @@ function InsightCard({ insight }: { insight: CachedInsight }) {
               <ul className="space-y-1">
                 {result.recommendations.map((r, i) => (
                   <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                    <span className="text-blue-400 mt-0.5">*</span>
+                    <span className="text-primary mt-0.5">*</span>
                     {r}
                   </li>
                 ))}
@@ -152,7 +152,7 @@ export function RecentInsights() {
         )}
 
         {error && (
-          <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
+          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         )}

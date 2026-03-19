@@ -64,8 +64,8 @@ export default async function SharedSessionPage({
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center space-y-4 max-w-md px-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-yellow-600/20 mb-2">
-            <svg className="h-8 w-8 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-chart-4/20 mb-2">
+            <svg className="h-8 w-8 text-chart-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>

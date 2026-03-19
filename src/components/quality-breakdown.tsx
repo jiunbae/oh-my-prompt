@@ -43,7 +43,7 @@ function colorForScore(score: number) {
     return {
       stroke: "#ef4444",
       fill: "#ef4444",
-      text: "text-red-500",
+      text: "text-destructive",
       label: "Needs work",
     };
   }
@@ -52,7 +52,7 @@ function colorForScore(score: number) {
     return {
       stroke: "#eab308",
       fill: "#eab308",
-      text: "text-yellow-500",
+      text: "text-chart-4",
       label: "Moderate",
     };
   }
@@ -60,7 +60,7 @@ function colorForScore(score: number) {
   return {
     stroke: "#22c55e",
     fill: "#22c55e",
-    text: "text-green-500",
+    text: "text-chart-2",
     label: "Strong",
   };
 }

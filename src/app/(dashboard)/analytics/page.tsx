@@ -52,7 +52,7 @@ export default async function AnalyticsPage() {
       {/* User Prompt Stats */}
       <div>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-blue-400" />
+          <span className="inline-block w-2 h-2 rounded-full bg-chart-1" />
           User Prompts
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -114,7 +114,7 @@ export default async function AnalyticsPage() {
       {/* Agent Response Stats */}
       <div>
         <h2 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
+          <span className="inline-block w-2 h-2 rounded-full bg-chart-2" />
           Agent Responses
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -333,7 +333,7 @@ export default async function AnalyticsPage() {
                     </div>
                     <div className="h-2 bg-secondary rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-indigo-500 rounded-full"
+                        className="h-full bg-chart-1 rounded-full"
                         style={{ width: `${percentage}%` }}
                       />
                     </div>
@@ -358,7 +358,7 @@ export default async function AnalyticsPage() {
                 className="flex items-center justify-between py-2 border-b border-border last:border-0"
               >
                 <div className="flex items-center gap-3">
-                  <div className={`h-2 w-2 rounded-full ${prompt.hasResponse ? "bg-green-500" : "bg-muted-foreground/40"}`} />
+                  <div className={`h-2 w-2 rounded-full ${prompt.hasResponse ? "bg-chart-2" : "bg-muted-foreground/40"}`} />
                   <div>
                     <p className="text-foreground text-sm">
                       {prompt.projectName ?? "No project"}
@@ -370,7 +370,7 @@ export default async function AnalyticsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {prompt.hasResponse && (
-                    <Badge variant="outline" className="text-green-500 border-green-800 text-[10px]">
+                    <Badge variant="outline" className="text-chart-2 border-chart-2/30 text-[10px]">
                       responded
                     </Badge>
                   )}

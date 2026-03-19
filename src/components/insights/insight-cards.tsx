@@ -34,7 +34,7 @@ function TrendArrow({ direction }: { direction: InsightTrend["direction"] }) {
   if (direction === "up") {
     return (
       <svg
-        className="h-3.5 w-3.5 text-green-400"
+        className="h-3.5 w-3.5 text-chart-2"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -51,7 +51,7 @@ function TrendArrow({ direction }: { direction: InsightTrend["direction"] }) {
   if (direction === "down") {
     return (
       <svg
-        className="h-3.5 w-3.5 text-red-400"
+        className="h-3.5 w-3.5 text-destructive"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
@@ -200,7 +200,7 @@ function InsightCard({
                       key={i}
                       className="text-xs text-foreground flex items-start gap-1.5"
                     >
-                      <span className="text-purple-400 mt-0.5 shrink-0">
+                      <span className="text-chart-5 mt-0.5 shrink-0">
                         *
                       </span>
                       <span>{r}</span>

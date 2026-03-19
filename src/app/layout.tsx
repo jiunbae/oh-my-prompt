@@ -17,8 +17,38 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Oh My Prompt",
-  description: "Prompt journal and insight dashboard for better agent instructions",
+  title: "Oh My Prompt — AI Coding Session Analytics",
+  description:
+    "Track, analyze, and share your Claude Code, Codex, and Gemini CLI sessions. Self-hosted prompt journal with quality scoring, token analytics, and session sharing. Free and open source.",
+  keywords: [
+    "claude code",
+    "prompt engineering",
+    "ai coding",
+    "token usage tracking",
+    "prompt analytics",
+    "coding sessions",
+    "ai assistant",
+    "codex",
+    "gemini cli",
+    "prompt journal",
+    "self-hosted",
+    "developer tools",
+    "session sharing",
+    "quality scoring",
+  ],
+  openGraph: {
+    title: "Oh My Prompt — AI Coding Session Analytics",
+    description:
+      "Track, analyze, and share your Claude Code, Codex, and Gemini CLI sessions. Self-hosted prompt journal with quality scoring and token analytics.",
+    siteName: "Oh My Prompt",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Oh My Prompt — AI Coding Session Analytics",
+    description:
+      "Track, analyze, and share your Claude Code, Codex, and Gemini CLI sessions. Free and open source.",
+  },
 };
 
 export default function RootLayout({

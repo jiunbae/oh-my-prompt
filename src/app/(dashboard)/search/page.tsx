@@ -180,9 +180,9 @@ export default function SearchPage() {
       </form>
 
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           <p className="font-medium">Search error</p>
-          <p className="mt-1 text-red-400/80">{error}</p>
+          <p className="mt-1 text-destructive/80">{error}</p>
         </div>
       )}
 

@@ -333,9 +333,9 @@ function AdminSessionsContent() {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-muted-foreground">Active filters:</span>
             {currentUserId && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-1/20 text-chart-1 rounded-full text-xs">
                 User: {users.find((u) => u.id === currentUserId)?.email ?? currentUserId}
-                <button type="button" onClick={() => updateParams({ userId: undefined })} className="hover:text-blue-100">x</button>
+                <button type="button" onClick={() => updateParams({ userId: undefined })} className="hover:text-foreground">x</button>
               </span>
             )}
             {currentDevice && (
@@ -351,7 +351,7 @@ function AdminSessionsContent() {
               </span>
             )}
             {currentSearch && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-1/20 text-chart-1 rounded-full text-xs">
                 Search: &quot;{currentSearch}&quot;
                 <button
                   type="button"
@@ -359,20 +359,20 @@ function AdminSessionsContent() {
                     setSearchInput("");
                     updateParams({ search: undefined });
                   }}
-                  className="hover:text-indigo-100"
+                  className="hover:text-foreground"
                 >x</button>
               </span>
             )}
             {currentProject && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-500/20 text-green-300 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-2/20 text-chart-2 rounded-full text-xs">
                 Project: {currentProject}
-                <button type="button" onClick={() => updateParams({ project: undefined })} className="hover:text-green-100">x</button>
+                <button type="button" onClick={() => updateParams({ project: undefined })} className="hover:text-foreground">x</button>
               </span>
             )}
             {currentSource && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-500/20 text-purple-300 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-5/20 text-chart-5 rounded-full text-xs">
                 Agent: {currentSource}
-                <button type="button" onClick={() => updateParams({ source: undefined })} className="hover:text-purple-100">x</button>
+                <button type="button" onClick={() => updateParams({ source: undefined })} className="hover:text-foreground">x</button>
               </span>
             )}
             {(currentFrom || currentTo) && (
@@ -393,7 +393,7 @@ function AdminSessionsContent() {
       </div>
 
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           {error}
         </div>
       )}

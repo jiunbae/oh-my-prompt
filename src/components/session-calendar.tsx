@@ -141,10 +141,10 @@ export function SessionCalendar({ data, selectedDate, onSelectDate }: SessionCal
   const getColor = (count: number, inRange: boolean) => {
     if (!inRange) return "bg-transparent";
     if (count === 0) return "bg-secondary/50 dark:bg-secondary/30";
-    if (count <= q25) return "bg-blue-200 dark:bg-blue-900/60";
-    if (count <= q50) return "bg-blue-400 dark:bg-blue-700/80";
-    if (count <= q75) return "bg-blue-500 dark:bg-blue-500";
-    return "bg-blue-600 dark:bg-blue-400";
+    if (count <= q25) return "bg-primary/20";
+    if (count <= q50) return "bg-primary/50";
+    if (count <= q75) return "bg-primary/75";
+    return "bg-primary";
   };
 
   return (
@@ -228,10 +228,10 @@ export function SessionCalendar({ data, selectedDate, onSelectDate }: SessionCal
         <div className="flex items-center gap-1">
           <span>Less</span>
           <div className="w-[10px] h-[10px] rounded-sm bg-secondary/50 dark:bg-secondary/30" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-blue-200 dark:bg-blue-900/60" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-blue-400 dark:bg-blue-700/80" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-blue-500 dark:bg-blue-500" />
-          <div className="w-[10px] h-[10px] rounded-sm bg-blue-600 dark:bg-blue-400" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-primary/20" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-primary/50" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-primary/75" />
+          <div className="w-[10px] h-[10px] rounded-sm bg-primary" />
           <span>More</span>
         </div>
       </div>

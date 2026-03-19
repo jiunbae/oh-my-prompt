@@ -165,7 +165,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
           </div>
 
           {/* Stats grid */}
-          <div className="grid grid-cols-5 gap-2 p-3 bg-surface-sunken rounded-lg mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 p-3 bg-surface-sunken rounded-lg mb-4">
             <div className="text-center">
               <div className="text-xs text-muted-foreground mb-0.5">Prompts</div>
               <div className="text-sm font-semibold text-foreground">{prompts.length}</div>

@@ -62,14 +62,14 @@ function saveRecentQuestion(question: string) {
 function TrendArrow({ direction }: { direction: "up" | "down" | "stable" }) {
   if (direction === "up") {
     return (
-      <svg className="h-4 w-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="h-4 w-4 text-chart-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
       </svg>
     );
   }
   if (direction === "down") {
     return (
-      <svg className="h-4 w-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="h-4 w-4 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
       </svg>
     );
@@ -135,7 +135,7 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
                 key={i}
                 className="flex items-start gap-2 text-sm text-muted-foreground"
               >
-                <svg className="h-4 w-4 mt-0.5 shrink-0 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4 mt-0.5 shrink-0 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
                 {r}
@@ -265,7 +265,7 @@ export function AskData() {
                   key={q}
                   onClick={() => handleChipClick(q)}
                   disabled={loading}
-                  className="rounded-full border border-blue-600/30 bg-blue-600/10 px-3 py-1 text-xs text-blue-400 transition-colors hover:bg-blue-600/20 disabled:opacity-50"
+                  className="rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
                 >
                   {q}
                 </button>
@@ -276,7 +276,7 @@ export function AskData() {
 
         {/* Error state */}
         {error && (
-          <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-400">
+          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
             {error}
           </div>
         )}

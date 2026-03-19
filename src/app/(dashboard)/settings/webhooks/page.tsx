@@ -280,7 +280,7 @@ export default function WebhooksSettingsPage() {
       </div>
 
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+        <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           {error}
           <button onClick={() => setError(null)} className="ml-2 underline">
             Dismiss
@@ -366,7 +366,7 @@ export default function WebhooksSettingsPage() {
               </div>
 
               {createError && (
-                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
                   {createError}
                 </div>
               )}
@@ -534,8 +534,8 @@ export default function WebhooksSettingsPage() {
                           <span
                             className={
                               webhook.lastStatus >= 200 && webhook.lastStatus < 300
-                                ? "text-green-400"
-                                : "text-red-400"
+                                ? "text-chart-2"
+                                : "text-destructive"
                             }
                           >
                             {webhook.lastStatus}
@@ -549,8 +549,8 @@ export default function WebhooksSettingsPage() {
                       <div
                         className={`p-3 rounded-lg text-sm ${
                           testResult.success
-                            ? "bg-green-500/10 border border-green-500/20 text-green-400"
-                            : "bg-red-500/10 border border-red-500/20 text-red-400"
+                            ? "bg-chart-2/10 border border-chart-2/20 text-chart-2"
+                            : "bg-destructive/10 border border-destructive/20 text-destructive"
                         }`}
                       >
                         {testResult.success
@@ -645,14 +645,14 @@ export default function WebhooksSettingsPage() {
                                           className={
                                             log.statusCode >= 200 &&
                                             log.statusCode < 300
-                                              ? "text-green-400"
-                                              : "text-red-400"
+                                              ? "text-chart-2"
+                                              : "text-destructive"
                                           }
                                         >
                                           {log.statusCode}
                                         </span>
                                       ) : (
-                                        <span className="text-red-400">
+                                        <span className="text-destructive">
                                           Error
                                         </span>
                                       )}

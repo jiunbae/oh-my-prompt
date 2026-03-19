@@ -114,17 +114,17 @@ export function SharedPromptView({
                 </span>
               )}
               {promptType && (
-                <span className="inline-flex items-center rounded-full border border-blue-600/30 bg-blue-600/20 px-2.5 py-0.5 text-xs font-medium text-blue-400">
+                <span className="inline-flex items-center rounded-full border border-primary/30 bg-primary/20 px-2.5 py-0.5 text-xs font-medium text-primary">
                   {promptType.replace("_", " ")}
                 </span>
               )}
               {qualityScore !== null && (
                 <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
                   qualityScore >= 80
-                    ? "border-green-600/30 bg-green-600/20 text-green-400"
+                    ? "border-chart-2/30 bg-chart-2/20 text-chart-2"
                     : qualityScore >= 50
-                    ? "border-yellow-600/30 bg-yellow-600/20 text-yellow-400"
-                    : "border-red-600/30 bg-red-600/20 text-red-400"
+                    ? "border-chart-4/30 bg-chart-4/20 text-chart-4"
+                    : "border-destructive/30 bg-destructive/20 text-destructive"
                 }`}>
                   Quality: {qualityScore}/100
                 </span>
@@ -147,7 +147,7 @@ export function SharedPromptView({
             {/* User prompt */}
             <div className="p-6">
               <div className="flex items-center gap-2 mb-3">
-                <span className="font-medium text-blue-400">You</span>
+                <span className="font-medium text-primary">You</span>
               </div>
               <div className="prose prose-invert max-w-none">
                 <MarkdownContent content={promptText} />
@@ -158,7 +158,7 @@ export function SharedPromptView({
             {responseText && (
               <div className="p-6">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="font-medium text-green-400">Assistant</span>
+                  <span className="font-medium text-chart-2">Assistant</span>
                 </div>
                 <div className="prose prose-invert max-w-none">
                   <MarkdownContent content={responseText} />
