@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +58,11 @@ export default function TemplatesPage() {
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewResult, setPreviewResult] = useState<string>("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimerRef.current);
+  }, []);
 
   // Form state
   const [formTitle, setFormTitle] = useState("");
@@ -227,7 +232,8 @@ export default function TemplatesPage() {
         const data = await res.json();
         await navigator.clipboard.writeText(data.rendered);
         setCopiedId(t.id);
-        setTimeout(() => setCopiedId(null), 2000);
+        clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopiedId(null), 2000);
       }
     } catch (error) {
       console.error("Use template error:", error);

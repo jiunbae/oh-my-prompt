@@ -1,17 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const INSTALL_CMD = "npm install -g oh-my-prompt && omp setup";
 
 export function InstallCommand() {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current);
+  }, []);
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(INSTALL_CMD);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // fallback: ignore
     }

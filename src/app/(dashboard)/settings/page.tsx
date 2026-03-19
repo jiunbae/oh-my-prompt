@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "next-themes";
 import { useUser } from "@/contexts/user-context";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -123,10 +123,23 @@ function ThemeCard({
 export default function SettingsPage() {
   const { user, loading, refetch } = useUser();
   const { theme, setTheme } = useTheme();
+  const [itemsPerPage, setItemsPerPage] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('omp-items-per-page') || '12';
+    return '12';
+  });
+  const [defaultView, setDefaultView] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('omp-default-view') || 'grid';
+    return 'grid';
+  });
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimerRef.current);
+  }, []);
 
   const regenerateToken = async () => {
     setRegenerating(true);
@@ -151,7 +164,8 @@ export default function SettingsPage() {
     if (user?.token) {
       await navigator.clipboard.writeText(user.token);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -308,7 +322,14 @@ export default function SettingsPage() {
               <label className="text-sm font-medium text-secondary-foreground">
                 Items per page
               </label>
-              <select className="flex h-10 w-full max-w-xs rounded-md border border-border bg-input-bg px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring">
+              <select
+                value={itemsPerPage}
+                onChange={(e) => {
+                  setItemsPerPage(e.target.value);
+                  localStorage.setItem('omp-items-per-page', e.target.value);
+                }}
+                className="flex h-10 w-full max-w-xs rounded-md border border-border bg-input-bg px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+              >
                 <option value="12">12</option>
                 <option value="24">24</option>
                 <option value="48">48</option>
@@ -318,7 +339,14 @@ export default function SettingsPage() {
               <label className="text-sm font-medium text-secondary-foreground">
                 Default view
               </label>
-              <select className="flex h-10 w-full max-w-xs rounded-md border border-border bg-input-bg px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring">
+              <select
+                value={defaultView}
+                onChange={(e) => {
+                  setDefaultView(e.target.value);
+                  localStorage.setItem('omp-default-view', e.target.value);
+                }}
+                className="flex h-10 w-full max-w-xs rounded-md border border-border bg-input-bg px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+              >
                 <option value="grid">Grid</option>
                 <option value="list">List</option>
               </select>

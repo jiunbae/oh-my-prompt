@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,11 @@ export function SharedSessionsList() {
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimerRef.current);
+  }, []);
 
   useEffect(() => {
     fetchShares();
@@ -69,7 +74,8 @@ export function SharedSessionsList() {
       const url = `${window.location.origin}/share/session/${shareToken}`;
       await navigator.clipboard.writeText(url);
       setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+      clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedId(null), 2000);
     } catch {
       // Clipboard may not be available
     }

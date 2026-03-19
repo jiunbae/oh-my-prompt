@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownContent } from "@/components/markdown-content";
@@ -38,12 +38,18 @@ interface SessionThreadProps {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current);
+  }, []);
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard API may not be available
     }
@@ -70,7 +76,7 @@ function CopyButton({ text }: { text: string }) {
 
 export function SessionThread({ prompts, responseCount }: SessionThreadProps) {
   const [showResponses, setShowResponses] = useState(true);
-  const [sortAsc, setSortAsc] = useState(false);
+  const [sortAsc, setSortAsc] = useState(true);
 
   const sortedPrompts = sortAsc ? [...prompts].reverse() : prompts;
 

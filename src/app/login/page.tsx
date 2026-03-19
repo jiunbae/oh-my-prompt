@@ -91,11 +91,13 @@ export default function LoginPage() {
               Register
             </Link>
           </div>
-          <div className="mt-6 pt-4 border-t border-border text-center">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
-              Build: v0.1.2-debug
-            </p>
-          </div>
+          {process.env.NEXT_PUBLIC_APP_VERSION && (
+            <div className="mt-6 pt-4 border-t border-border text-center">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
+                Build: {process.env.NEXT_PUBLIC_APP_VERSION}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

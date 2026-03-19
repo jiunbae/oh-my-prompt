@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { MarkdownContent } from "@/components/markdown-content";
 
@@ -46,6 +46,11 @@ export function SharedPromptView({
   tokenEstimateResponse,
 }: SharedPromptViewProps) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current);
+  }, []);
 
   const handleCopy = async () => {
     let content = `[User]\n${promptText}`;
@@ -54,7 +59,8 @@ export function SharedPromptView({
     }
     await navigator.clipboard.writeText(content);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   return (

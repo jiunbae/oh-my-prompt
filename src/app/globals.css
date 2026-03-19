@@ -404,6 +404,26 @@ code {
   --tw-prose-pre-bg: #27272a;
 }
 
+/* Logo invert fix for custom dark themes */
+.midnight-ocean .invert,
+.forest-dusk .invert,
+.sunset-glow .invert,
+.lavender-mist .invert {
+  filter: none;
+}
+
+/* Prose styling fix for custom dark themes */
+.midnight-ocean .prose-invert,
+.forest-dusk .prose-invert,
+.sunset-glow .prose-invert,
+.lavender-mist .prose-invert {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-bg: var(--surface-secondary);
+}
+
 /* Native select styling for light theme */
 select {
   color-scheme: inherit;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface ShareSessionButtonProps {
   sessionId: string;
@@ -13,6 +13,11 @@ export function ShareSessionButton({ sessionId }: ShareSessionButtonProps) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expiresIn, setExpiresIn] = useState<string>("none");
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current);
+  }, []);
 
   const handleShare = async () => {
     setLoading(true);
@@ -49,7 +54,8 @@ export function ShareSessionButton({ sessionId }: ShareSessionButtonProps) {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard API may not be available in insecure contexts
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, createContext, useContext, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "@/contexts/user-context";
@@ -15,8 +15,9 @@ const MobileSidebarContext = createContext<{
 
 export function MobileSidebarProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const value = useMemo(() => ({ open, setOpen }), [open]);
   return (
-    <MobileSidebarContext.Provider value={{ open, setOpen }}>
+    <MobileSidebarContext.Provider value={value}>
       {children}
     </MobileSidebarContext.Provider>
   );

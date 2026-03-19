@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -96,6 +96,15 @@ export function PromptDetail({
   const [shareLoading, setShareLoading] = useState(false);
   const [shareCopied, setShareCopied] = useState<string | null>(null);
   const [shareExpiry, setShareExpiry] = useState<string>("never");
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const shareCopyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => {
+      clearTimeout(copyTimerRef.current);
+      clearTimeout(shareCopyTimerRef.current);
+    };
+  }, []);
 
   const totalTokens = inputTokens + outputTokens;
 
@@ -155,7 +164,8 @@ export function PromptDetail({
     const url = `${window.location.origin}/share/${token}`;
     await navigator.clipboard.writeText(url);
     setShareCopied(token);
-    setTimeout(() => setShareCopied(null), 2000);
+    clearTimeout(shareCopyTimerRef.current);
+    shareCopyTimerRef.current = setTimeout(() => setShareCopied(null), 2000);
   };
 
   const handleDelete = async () => {
@@ -187,7 +197,8 @@ export function PromptDetail({
 
     await navigator.clipboard.writeText(content);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
   };
 
   if (isLoading) {

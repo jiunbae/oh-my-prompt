@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 
 interface OnboardingChecklistProps {
@@ -83,12 +83,18 @@ const STEPS: Step[] = [
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current);
+  }, []);
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard API may not be available
     }
@@ -214,10 +220,17 @@ export function OnboardingChecklist({ hasAnySessions }: OnboardingChecklistProps
                 className="rounded-lg border border-border/50 overflow-hidden"
               >
                 {/* Step header */}
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => toggleExpand(step.id)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-accent/50 transition-colors"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggleExpand(step.id);
+                    }
+                  }}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-accent/50 transition-colors cursor-pointer"
                 >
                   {/* Checkbox */}
                   <button
@@ -258,7 +271,7 @@ export function OnboardingChecklist({ hasAnySessions }: OnboardingChecklistProps
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
-                </button>
+                </div>
 
                 {/* Step content */}
                 {isExpanded && (
