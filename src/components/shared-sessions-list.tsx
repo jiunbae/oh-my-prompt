@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/dialog";
 
 interface SharedSession {
   id: string;
@@ -45,6 +46,8 @@ export function SharedSessionsList() {
   const [error, setError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -82,7 +85,15 @@ export function SharedSessionsList() {
   };
 
   const handleRevoke = async (id: string) => {
-    if (!confirm("Revoke this share link? It will no longer be accessible.")) return;
+    setConfirmTarget(id);
+    setConfirmOpen(true);
+  };
+
+  const executeRevoke = async () => {
+    if (!confirmTarget) return;
+    const id = confirmTarget;
+    setConfirmOpen(false);
+    setConfirmTarget(null);
     try {
       setRevokingId(id);
       const res = await fetch(`/api/share/sessions?id=${id}`, { method: "DELETE" });
@@ -231,6 +242,17 @@ export function SharedSessionsList() {
           </div>
         );
       })}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => { setConfirmOpen(false); setConfirmTarget(null); }}
+        onConfirm={executeRevoke}
+        title="Revoke share link"
+        description="Revoke this share link? It will no longer be accessible."
+        confirmLabel="Revoke"
+        variant="destructive"
+        loading={revokingId !== null}
+      />
     </div>
   );
 }

@@ -325,7 +325,7 @@ export function SessionFilters({
             </span>
           )}
           {(currentFrom || currentTo) && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-500/20 text-orange-300 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-4/20 text-chart-4 rounded-full text-xs">
               Date: {currentFrom ?? "..."} - {currentTo ?? "..."}
               <button
                 type="button"
@@ -333,7 +333,7 @@ export function SessionFilters({
                   handleFilterChange("from", undefined);
                   handleFilterChange("to", undefined);
                 }}
-                className="hover:text-orange-100"
+                className="hover:text-foreground"
               >
                 x
               </button>

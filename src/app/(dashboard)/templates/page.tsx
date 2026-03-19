@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { useUser } from "@/contexts/user-context";
 
 interface TemplateVariable {
@@ -58,6 +59,8 @@ export default function TemplatesPage() {
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const [previewResult, setPreviewResult] = useState<string>("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -176,7 +179,15 @@ export default function TemplatesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this template?")) return;
+    setConfirmTarget(id);
+    setConfirmOpen(true);
+  };
+
+  const executeDelete = async () => {
+    if (!confirmTarget) return;
+    const id = confirmTarget;
+    setConfirmOpen(false);
+    setConfirmTarget(null);
     try {
       const res = await fetch(`/api/templates/${id}`, { method: "DELETE" });
       if (res.ok) {
@@ -562,6 +573,16 @@ export default function TemplatesPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => { setConfirmOpen(false); setConfirmTarget(null); }}
+        onConfirm={executeDelete}
+        title="Delete template"
+        description="Are you sure you want to delete this template?"
+        confirmLabel="Delete"
+        variant="destructive"
+      />
     </div>
   );
 }

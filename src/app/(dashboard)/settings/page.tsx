@@ -209,7 +209,7 @@ export default function SettingsPage() {
                   >
                     {copied ? (
                       <svg
-                        className="h-4 w-4 text-green-400"
+                        className="h-4 w-4 text-green-500"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"

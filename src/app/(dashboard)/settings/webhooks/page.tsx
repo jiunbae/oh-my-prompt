@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/dialog";
 
 interface Webhook {
   id: string;
@@ -86,6 +87,10 @@ export default function WebhooksSettingsPage() {
   const [logsWebhookId, setLogsWebhookId] = useState<string | null>(null);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
 
   // Test state
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -181,7 +186,15 @@ export default function WebhooksSettingsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this webhook?")) return;
+    setConfirmTarget(id);
+    setConfirmOpen(true);
+  };
+
+  const executeDelete = async () => {
+    if (!confirmTarget) return;
+    const id = confirmTarget;
+    setConfirmOpen(false);
+    setConfirmTarget(null);
     try {
       const res = await fetch(`/api/webhooks/${id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -680,6 +693,16 @@ export default function WebhooksSettingsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => { setConfirmOpen(false); setConfirmTarget(null); }}
+        onConfirm={executeDelete}
+        title="Delete webhook"
+        description="Are you sure you want to delete this webhook?"
+        confirmLabel="Delete"
+        variant="destructive"
+      />
     </div>
   );
 }

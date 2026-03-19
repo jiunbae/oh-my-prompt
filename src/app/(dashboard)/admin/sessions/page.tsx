@@ -376,9 +376,9 @@ function AdminSessionsContent() {
               </span>
             )}
             {(currentFrom || currentTo) && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-500/20 text-orange-300 rounded-full text-xs">
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-4/20 text-chart-4 rounded-full text-xs">
                 Date: {currentFrom || "..."} - {currentTo || "..."}
-                <button type="button" onClick={() => updateParams({ from: undefined, to: undefined })} className="hover:text-orange-100">x</button>
+                <button type="button" onClick={() => updateParams({ from: undefined, to: undefined })} className="hover:text-foreground">x</button>
               </span>
             )}
             <button

@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Allow: /share/
+Disallow: /dashboard
+Disallow: /sessions
+Disallow: /analytics
+Disallow: /insights
+Disallow: /search
+Disallow: /templates
+Disallow: /settings
+Disallow: /admin
+Disallow: /api/
+
+Sitemap: https://prompt.jiun.dev/sitemap.xml

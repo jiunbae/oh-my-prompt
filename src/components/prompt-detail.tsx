@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonDetail } from "@/components/ui/skeleton";
 import { MarkdownContent } from "@/components/markdown-content";
+import { ConfirmDialog } from "@/components/ui/dialog";
 import { useRouter } from "next/navigation";
 
 interface Tag {
@@ -96,6 +97,7 @@ export function PromptDetail({
   const [shareLoading, setShareLoading] = useState(false);
   const [shareCopied, setShareCopied] = useState<string | null>(null);
   const [shareExpiry, setShareExpiry] = useState<string>("never");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const shareCopyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -169,10 +171,11 @@ export function PromptDetail({
   };
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this prompt? This action cannot be undone.")) {
-      return;
-    }
+    setConfirmOpen(true);
+  };
 
+  const executeDelete = async () => {
+    setConfirmOpen(false);
     setIsDeleting(true);
     try {
       const res = await fetch(`/api/prompts/${_id}`, { method: "DELETE" });
@@ -374,7 +377,7 @@ export function PromptDetail({
                         onClick={() => copyShareLink(link.shareToken)}
                       >
                         {shareCopied === link.shareToken ? (
-                          <svg className="h-4 w-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
                         ) : (
@@ -505,6 +508,17 @@ export function PromptDetail({
           </div>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={executeDelete}
+        title="Delete prompt"
+        description="Are you sure you want to delete this prompt? This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        loading={isDeleting}
+      />
     </div>
   );
 }
