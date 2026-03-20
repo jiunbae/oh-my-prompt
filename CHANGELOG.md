@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.320.3] - 2026-03-20
+
+### Changed
+- **CLI**: Migrate from `better-sqlite3` (native C++) to `sql.js` (WebAssembly) — no more node-gyp or Xcode CLT required
+- **CLI**: `openDb()` is now async; all callers updated
+- **CLI**: FTS5 → FTS4 fallback for search (sql.js default build includes FTS4)
+- **CLI**: Search gracefully falls back to LIKE queries when FTS is unavailable
+
 ## [2026.320.2] - 2026-03-20
 
 ### Fixed
