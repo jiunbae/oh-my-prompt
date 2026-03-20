@@ -39,6 +39,7 @@ export interface SessionPayload {
   email: string;
   token: string; // User's API token
   isAdmin: boolean;
+  iat: number; // Issued-at timestamp (ms since epoch)
 }
 
 /**
@@ -46,7 +47,7 @@ export interface SessionPayload {
  * @param payload - Session data
  * @returns Signed session token (payload.signature)
  */
-export function createSessionToken(payload: SessionPayload): string {
+export function createSessionToken(payload: Omit<SessionPayload, "iat">): string {
   if (!EFFECTIVE_SECRET) {
     throw new Error("SESSION_SECRET is not configured. Cannot create session tokens.");
   }
@@ -105,6 +106,7 @@ export function parseSessionToken(token: string): SessionPayload | null {
       email: parsed.email,
       token: parsed.token,
       isAdmin: parsed.isAdmin ?? false,
+      iat: parsed.iat,
     };
   } catch {
     return null;
@@ -194,5 +196,17 @@ export async function updateLastLogin(userId: string) {
   await db
     .update(users)
     .set({ lastLoginAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+/**
+ * Update user's passwordChangedAt timestamp.
+ * Called when the user changes their password or regenerates their API token.
+ * Any session issued before this timestamp will be rejected.
+ */
+export async function updatePasswordChangedAt(userId: string) {
+  await db
+    .update(users)
+    .set({ passwordChangedAt: new Date() })
     .where(eq(users.id, userId));
 }

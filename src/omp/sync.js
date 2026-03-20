@@ -57,7 +57,32 @@ function rowToUploadRecord(row) {
   };
 }
 
-function postJson(url, headers, body, method = "POST") {
+// Error codes that indicate transient network failures worth retrying
+const TRANSIENT_CODES = ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EPIPE", "EAI_AGAIN"];
+
+// HTTP status codes that should NOT be retried (permanent failures)
+const NO_RETRY_STATUSES = [401, 403, 413];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function computeBackoffDelay(attempt, baseDelay) {
+  const exponential = baseDelay * Math.pow(2, attempt);
+  // Add jitter: 0.5x to 1.5x of the exponential delay
+  const jitter = exponential * (0.5 + Math.random());
+  return Math.round(jitter);
+}
+
+function isTransientError(err) {
+  return TRANSIENT_CODES.includes(err.code) || err.message === "Request timed out";
+}
+
+function isTransientStatus(status) {
+  return status >= 500 && !NO_RETRY_STATUSES.includes(status);
+}
+
+function postJsonOnce(url, headers, body, method) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const transport = parsed.protocol === "https:" ? https : http;
@@ -100,6 +125,53 @@ function postJson(url, headers, body, method = "POST") {
   });
 }
 
+async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
+  const maxRetries = retryOpts.retries ?? 3;
+  const baseDelay = retryOpts.retryBaseDelay ?? 1000;
+
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await postJsonOnce(url, headers, body, method);
+
+      // Don't retry permanent failure statuses
+      if (NO_RETRY_STATUSES.includes(response.status)) {
+        return response;
+      }
+
+      // Retry on transient HTTP statuses (5xx)
+      if (isTransientStatus(response.status) && attempt < maxRetries) {
+        const delay = computeBackoffDelay(attempt, baseDelay);
+        process.stderr.write(
+          `[omp] Retry ${attempt + 1}/${maxRetries} after ${response.status} response (backoff ${delay}ms)\n`
+        );
+        await sleep(delay);
+        lastError = new Error(`Server error (${response.status})`);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      lastError = err;
+
+      // Only retry transient network errors
+      if (isTransientError(err) && attempt < maxRetries) {
+        const delay = computeBackoffDelay(attempt, baseDelay);
+        process.stderr.write(
+          `[omp] Retry ${attempt + 1}/${maxRetries} after ${err.code || err.message} (backoff ${delay}ms)\n`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  // All retries exhausted
+  throw lastError;
+}
+
 async function syncToServer(config, options = {}) {
   const serverUrl = config.server?.url;
   const serverToken = config.server?.token;
@@ -130,6 +202,10 @@ async function syncToServer(config, options = {}) {
   let chunks = 0;
   const errors = [];
 
+  const maxRetries = config.sync?.retries ?? 3;
+  const retryBaseDelay = config.sync?.retryBaseDelay ?? 1000;
+  const retryOpts = { retries: maxRetries, retryBaseDelay };
+
   const logId = createSyncLog(config, since, "server");
   const uploadUrl = `${serverUrl.replace(/\/$/, "")}/api/sync/upload`;
   const headers = { "X-User-Token": serverToken };
@@ -156,7 +232,7 @@ async function syncToServer(config, options = {}) {
       const response = await postJson(uploadUrl, headers, {
         records,
         deviceId: getDeviceId(config),
-      });
+      }, "POST", retryOpts);
 
       if (response.status === 401) {
         throw new Error("Authentication failed. Check server.token.");
@@ -194,10 +270,13 @@ async function syncToServer(config, options = {}) {
       rejected: totalRejected,
       chunks,
       since,
+      retries: maxRetries,
       errors: errors.slice(0, 10),
     };
   } catch (error) {
-    finishSyncLog(config, logId, "failed", error.message || "sync failed", chunks, totalAccepted);
+    const msg = `Sync failed after ${maxRetries} retries. Last error: ${error.message || "unknown"}`;
+    finishSyncLog(config, logId, "failed", msg, chunks, totalAccepted);
+    error.message = msg;
     throw error;
   }
 }

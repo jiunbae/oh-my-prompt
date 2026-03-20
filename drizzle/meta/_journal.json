@@ -36,6 +36,20 @@
       "when": 1770862200000,
       "tag": "0004_add_quality_dimensions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774070400000,
+      "tag": "0007_add_password_changed_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774070401000,
+      "tag": "0008_add_password_reset_tokens",
+      "breakpoints": true
     }
   ]
 }

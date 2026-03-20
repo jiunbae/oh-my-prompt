@@ -41,6 +41,8 @@ function defaultConfig() {
       auto: false,
       debounce: 30,
       interval: 300,
+      retries: 3,
+      retryBaseDelay: 1000,
       userToken: "",
       deviceId: "",
       // Redact only when uploading to server (default ON).

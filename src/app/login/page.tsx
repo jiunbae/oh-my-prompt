@@ -85,6 +85,14 @@ export default function LoginPage() {
               {loading ? "..." : "Sign In"}
             </Button>
           </form>
+          <div className="mt-3 text-center">
+            <Link
+              href="/forgot-password"
+              className="text-xs text-muted-foreground hover:text-primary"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <div className="mt-4 text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}
             <Link href="/register" className="text-primary hover:text-primary/80">

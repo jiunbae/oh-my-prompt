@@ -18,6 +18,7 @@ const { getQueueStats } = require("./queue");
 const { loadState } = require("./state");
 const { getStats } = require("./stats");
 const { exportData } = require("./export");
+const { runSearch } = require("./search");
 const { syncToServer, postJson } = require("./sync");
 const { getSyncStatus, updateSyncState } = require("./sync-log");
 const { openDb } = require("./db");
@@ -66,6 +67,7 @@ ${cmd("backfill", "Import from Claude transcripts / Codex history")}
 ${cmd("import", "Import from external sources")}
 ${cmd("ingest", "Ingest a raw JSON payload (used by hooks)")}
 
+${cmd("search <query>", "Full-text search prompts locally")}
 ${cmd("stats", "Show prompt statistics")}
 ${cmd("report", "Generate summary report for a time range")}
 ${cmd("analyze [id]", "Analyze a prompt (default: most recent)")}
@@ -2113,6 +2115,45 @@ async function main() {
         break;
       }
       handleReport(options);
+      break;
+    }
+    case "search": {
+      if (options.help || options.h) {
+        console.log(`
+  omp search — Full-text search prompts locally
+
+  USAGE
+    omp search <query> [options]
+    omp search --stats
+
+  SEARCH MODES
+    Default: FTS5 match (supports AND, OR, NOT, "phrase queries")
+    --exact: Substring match (LIKE %query%)
+
+  OPTIONS
+    --exact             Exact substring match instead of FTS5
+    --limit <n>         Max results (default: 10)
+    --since <date>      Filter from date (YYYY-MM-DD or ISO)
+    --until <date>      Filter to date (YYYY-MM-DD or ISO)
+    --project <name>    Filter by project name
+    --source <source>   Filter by source (e.g. claude, codex)
+    --stats             Show FTS index health
+    --json              Output as JSON
+
+  EXAMPLES
+    omp search "error handling"
+    omp search "refactor OR cleanup" --limit 20
+    omp search "bug fix" --project my-app --since 2025-01-01
+    omp search --exact "TODO"
+    omp search --stats
+`);
+        break;
+      }
+      const searchQuery = positional.join(" ").trim();
+      const result = runSearch(searchQuery || null, options);
+      if (options.json && result !== null) {
+        printJson(result);
+      }
       break;
     }
     default:

@@ -9,6 +9,7 @@ interface SessionPayload {
   email: string;
   token: string;
   isAdmin: boolean;
+  iat: number;
 }
 
 /**
@@ -75,6 +76,7 @@ async function verifySessionToken(
       email: parsed.email,
       token: parsed.token,
       isAdmin: parsed.isAdmin ?? false,
+      iat: parsed.iat,
     };
   } catch {
     return null;
@@ -89,6 +91,9 @@ const publicRoutes = [
   "/api/auth/cli-login",
   "/api/auth/register",
   "/api/auth/logout",
+  "/api/auth/reset-password",
+  "/forgot-password",
+  "/reset-password",
   "/share",
   "/api/share",
 ];

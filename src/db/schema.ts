@@ -37,6 +37,7 @@ export const users = pgTable(
       .default(sql`gen_random_uuid()`), // for API auth
     name: varchar("name", { length: 100 }),
     isAdmin: boolean("is_admin").default(false),
+    passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   },
@@ -396,6 +397,34 @@ export const sharedSessionsRelations = relations(sharedSessions, ({ one }) => ({
   }),
 }));
 
+// Password reset tokens table
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 255 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_password_reset_tokens_user").on(table.userId),
+    index("idx_password_reset_tokens_expires").on(table.expiresAt),
+  ]
+);
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetTokens.userId],
+    references: [users.id],
+  }),
+}));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -418,3 +447,5 @@ export type SharedPrompt = typeof sharedPrompts.$inferSelect;
 export type NewSharedPrompt = typeof sharedPrompts.$inferInsert;
 export type SharedSession = typeof sharedSessions.$inferSelect;
 export type NewSharedSession = typeof sharedSessions.$inferInsert;
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;

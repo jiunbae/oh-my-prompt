@@ -7,6 +7,28 @@ import { eq } from "drizzle-orm";
 export { type SessionPayload };
 
 /**
+ * Check whether a session was issued before the user's last password change.
+ * If so, the session is stale and should be rejected.
+ */
+async function isSessionInvalidatedByPasswordChange(
+  session: SessionPayload,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ passwordChangedAt: schema.users.passwordChangedAt })
+    .from(schema.users)
+    .where(eq(schema.users.id, session.userId))
+    .limit(1);
+
+  if (!row) return true; // User not found — treat as invalid
+
+  // If passwordChangedAt is null the user never changed their password
+  if (!row.passwordChangedAt) return false;
+
+  // Session was issued before the password change — reject it
+  return row.passwordChangedAt.getTime() > session.iat;
+}
+
+/**
  * Extract and verify the current user's session from cookies.
  * Throws AuthError if not authenticated or token is invalid.
  */
@@ -20,6 +42,12 @@ export async function requireAuth(): Promise<SessionPayload> {
   if (!session) {
     throw new AuthError("Invalid session", 401);
   }
+
+  // Reject sessions issued before the last password change
+  if (await isSessionInvalidatedByPasswordChange(session)) {
+    throw new AuthError("Session invalidated by password change", 401);
+  }
+
   return session;
 }
 
@@ -62,7 +90,13 @@ export async function getSessionUser(): Promise<SessionPayload | null> {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(AUTH_COOKIE_NAME)?.value;
   if (!sessionToken) return null;
-  return parseSessionToken(sessionToken);
+  const session = parseSessionToken(sessionToken);
+  if (!session) return null;
+
+  // Reject sessions issued before the last password change
+  if (await isSessionInvalidatedByPasswordChange(session)) return null;
+
+  return session;
 }
 
 export class AuthError extends Error {

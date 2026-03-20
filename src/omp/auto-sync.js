@@ -265,6 +265,9 @@ function runDaemonLoop(configPath) {
   writePidInfo(process.pid);
   appendLog("daemon started (pid=" + process.pid + ", debounce=" + (debounceMs / 1000) + "s, interval=" + (intervalMs / 1000) + "s)");
 
+  const MAX_BACKOFF_INTERVAL_MS = 3600 * 1000; // 1 hour max
+  const CONSECUTIVE_FAIL_THRESHOLD = 3;
+
   let debounceTimer = null;
   let intervalTimer = null;
   let syncing = false;
@@ -272,6 +275,45 @@ function runDaemonLoop(configPath) {
   let shuttingDown = false;
   let lastTriggerMtime = 0;
   let activeLockPath = null;
+  let consecutiveFailures = 0;
+  let currentIntervalMs = intervalMs;
+
+  function adjustIntervalOnFailure() {
+    consecutiveFailures++;
+    if (consecutiveFailures >= CONSECUTIVE_FAIL_THRESHOLD) {
+      const newInterval = Math.min(currentIntervalMs * 2, MAX_BACKOFF_INTERVAL_MS);
+      if (newInterval !== currentIntervalMs) {
+        currentIntervalMs = newInterval;
+        appendLog(
+          "backing off interval to " + (currentIntervalMs / 1000) + "s after " +
+          consecutiveFailures + " consecutive failures"
+        );
+        resetIntervalTimer();
+      }
+    }
+  }
+
+  function resetIntervalOnSuccess() {
+    if (consecutiveFailures > 0) {
+      consecutiveFailures = 0;
+      if (currentIntervalMs !== intervalMs) {
+        currentIntervalMs = intervalMs;
+        appendLog("interval reset to " + (intervalMs / 1000) + "s after successful sync");
+        resetIntervalTimer();
+      }
+    }
+  }
+
+  function resetIntervalTimer() {
+    if (intervalTimer) clearInterval(intervalTimer);
+    if (shuttingDown) return;
+    intervalTimer = setInterval(() => {
+      if (!syncing && !shuttingDown) {
+        appendLog("interval sync triggered");
+        doSync();
+      }
+    }, currentIntervalMs);
+  }
 
   async function doSync() {
     if (shuttingDown) return;
@@ -312,8 +354,10 @@ function runDaemonLoop(configPath) {
         " duplicates=" + (result.duplicates || 0) +
         " chunks=" + result.chunks
       );
+      resetIntervalOnSuccess();
     } catch (err) {
       appendLog("sync failed: " + (err.message || "unknown error"));
+      adjustIntervalOnFailure();
     } finally {
       releaseSyncLock(lock.lockPath);
       activeLockPath = null;
@@ -353,12 +397,7 @@ function runDaemonLoop(configPath) {
   }, 2000);
 
   // Max interval timer: sync at least every `interval` seconds
-  intervalTimer = setInterval(() => {
-    if (!syncing && !shuttingDown) {
-      appendLog("interval sync triggered");
-      doSync();
-    }
-  }, intervalMs);
+  resetIntervalTimer();
 
   // Graceful shutdown: drain active sync, release lock, then exit
   let shutdownInProgress = false;
