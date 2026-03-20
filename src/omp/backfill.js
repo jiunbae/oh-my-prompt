@@ -134,7 +134,7 @@ function scanTranscriptPaths(customPath) {
   return results;
 }
 
-function backfillTranscripts(config, options = {}) {
+async function backfillTranscripts(config, options = {}) {
   const paths = scanTranscriptPaths(options.path);
   let totalImported = 0;
   let totalSkipped = 0;
@@ -185,7 +185,7 @@ function backfillTranscripts(config, options = {}) {
         continue;
       }
 
-      const result = ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config);
       if (result.ok) {
         if (result.deduped) {
           duplicates++;
@@ -301,7 +301,7 @@ function parseCodexSession(filePath) {
   return { sessionId, cwd, turns };
 }
 
-function backfillCodex(config, options = {}) {
+async function backfillCodex(config, options = {}) {
   const sessionPaths = scanCodexSessionPaths();
   const historyPath = getCodexHistoryPath();
 
@@ -400,7 +400,7 @@ function backfillCodex(config, options = {}) {
         continue;
       }
 
-      const result = ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config);
       if (result.ok) {
         if (result.deduped) {
           duplicates++;
@@ -429,20 +429,14 @@ function getOpenCodeDbPath() {
   return path.join(xdg, "opencode", "opencode.db");
 }
 
-function backfillOpenCode(config, options = {}) {
+async function backfillOpenCode(config, options = {}) {
   const dbPath = getOpenCodeDbPath();
   if (!fs.existsSync(dbPath)) {
     return { sessions: 0, imported: 0, skipped: 0, duplicates: 0, error: "OpenCode database not found" };
   }
 
-  let Database;
-  try {
-    Database = require("better-sqlite3");
-  } catch {
-    return { sessions: 0, imported: 0, skipped: 0, duplicates: 0, error: "better-sqlite3 not available" };
-  }
-
-  const ocDb = new Database(dbPath, { readonly: true });
+  const { openDatabase } = require("./db-driver");
+  const ocDb = await openDatabase(dbPath, { readonly: true });
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
@@ -531,7 +525,7 @@ function backfillOpenCode(config, options = {}) {
         continue;
       }
 
-      const result = ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config);
       if (result.ok) {
         if (result.deduped) duplicates++;
         else imported++;
@@ -631,7 +625,7 @@ function extractGeminiContent(content) {
   return "";
 }
 
-function backfillGemini(config, options = {}) {
+async function backfillGemini(config, options = {}) {
   const chatFiles = scanGeminiChatFiles();
   if (chatFiles.length === 0) {
     return { sessions: 0, imported: 0, skipped: 0, duplicates: 0 };
@@ -719,7 +713,7 @@ function backfillGemini(config, options = {}) {
         continue;
       }
 
-      const result = ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config);
       if (result.ok) {
         if (result.deduped) duplicates++;
         else imported++;

@@ -1,6 +1,6 @@
 {
   "name": "oh-my-prompt",
-  "version": "2026.320.2",
+  "version": "2026.320.3",
   "description": "CLI prompt journal for AI coding assistants — capture, analyze, and sync your prompts",
   "keywords": [
     "cli",
@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",
-    "better-sqlite3": "^11.6.0",
+    "sql.js": "^1.14.1",
     "picocolors": "^1.1.1"
   },
   "engines": {

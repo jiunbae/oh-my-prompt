@@ -30,13 +30,13 @@ describe("ingestPayload", () => {
       cli_name: "test-cli",
     });
 
-    const result = ingestPayload(payload, config);
+    const result = await ingestPayload(payload, config);
     expect(result.ok).toBe(true);
 
-    const result2 = ingestPayload(payload, config);
+    const result2 = await ingestPayload(payload, config);
     expect(result2.ok).toBe(true);
 
-    const db = openDb(dbPath);
+    const db = await openDb(dbPath);
     const row = db.prepare("SELECT prompt_text, source FROM prompts LIMIT 1").get();
     const count = db.prepare("SELECT COUNT(*) as count FROM prompts").get();
     db.close();

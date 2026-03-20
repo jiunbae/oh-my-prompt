@@ -151,14 +151,14 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
   );
 }
 
-function ingestPayload(rawPayload, config) {
+async function ingestPayload(rawPayload, config) {
   const payload = typeof rawPayload === "string" ? parsePayload(rawPayload) : rawPayload;
   if (!payload) {
     return { ok: false, error: "Invalid JSON payload" };
   }
 
   const record = normalizePayload(payload, config);
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
 
   try {
     if (record.role === "assistant" && record.session_id) {
@@ -202,6 +202,32 @@ function ingestPayload(rawPayload, config) {
       }
     }
 
+    // Content-based dedup: catch duplicates from different sources (hooks vs backfill)
+    // that have different event_ids but identical content within the same session
+    if (record.session_id && record.content_hash) {
+      const contentDup = db
+        .prepare(
+          `SELECT id, response_text FROM prompts
+           WHERE session_id = ? AND role = ? AND content_hash = ?
+           LIMIT 1`
+        )
+        .get(record.session_id, record.role, record.content_hash);
+      if (contentDup) {
+        if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
+          updatePromptWithResponse(
+            db,
+            contentDup.id,
+            record.response_text,
+            record.token_estimate_response,
+            record.word_count_response
+          );
+          touchTrigger();
+          return { ok: true, id: contentDup.id, updated: true, deduped: true };
+        }
+        return { ok: true, id: contentDup.id, updated: false, deduped: true };
+      }
+    }
+
     const insertResult = insertPrompt(db, record);
     if (insertResult.changes === 0) {
       const existing = db
@@ -234,7 +260,7 @@ function ingestPayload(rawPayload, config) {
   }
 }
 
-function replayQueue(config) {
+async function replayQueue(config) {
   const queueDir = require("./paths").getQueueDir();
   if (!fs.existsSync(queueDir)) {
     return { processed: 0, failed: 0 };
@@ -250,7 +276,7 @@ function replayQueue(config) {
     let fileFailed = false;
 
     for (const line of lines) {
-      const result = ingestPayload(line, config);
+      const result = await ingestPayload(line, config);
       if (result.ok) {
         processed += 1;
       } else {

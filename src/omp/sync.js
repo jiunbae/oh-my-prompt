@@ -184,8 +184,8 @@ async function syncToServer(config, options = {}) {
     );
   }
 
-  const db = openDb(config.storage.sqlite.path);
-  const state = getSyncState(config);
+  const db = await openDb(config.storage.sqlite.path);
+  const state = await getSyncState(config);
   const since = options.since || state.lastSyncedAt || null;
   const rows = fetchRows(db, since, state.lastSyncedId);
   db.close();
@@ -206,7 +206,7 @@ async function syncToServer(config, options = {}) {
   const retryBaseDelay = config.sync?.retryBaseDelay ?? 1000;
   const retryOpts = { retries: maxRetries, retryBaseDelay };
 
-  const logId = createSyncLog(config, since, "server");
+  const logId = await createSyncLog(config, since, "server");
   const uploadUrl = `${serverUrl.replace(/\/$/, "")}/api/sync/upload`;
   const headers = { "X-User-Token": serverToken };
 
@@ -284,10 +284,10 @@ async function syncToServer(config, options = {}) {
     // This prevents permanently skipping records when the server is temporarily down
     const lastRow = rows[rows.length - 1];
     if (!options.dryRun && lastRow?.created_at && (totalAccepted > 0 || totalDuplicates > 0 || totalSkipped > 0)) {
-      updateSyncState(config, lastRow.created_at, lastRow.id);
+      await updateSyncState(config, lastRow.created_at, lastRow.id);
     }
 
-    finishSyncLog(config, logId, "success", null, chunks, totalAccepted);
+    await finishSyncLog(config, logId, "success", null, chunks, totalAccepted);
     return {
       uploaded: totalAccepted,
       duplicates: totalDuplicates,
@@ -298,7 +298,7 @@ async function syncToServer(config, options = {}) {
       errors: errors.slice(0, 10),
     };
   } catch (error) {
-    finishSyncLog(config, logId, "failed", error.message || "unknown", chunks, totalAccepted);
+    await finishSyncLog(config, logId, "failed", error.message || "unknown", chunks, totalAccepted);
     throw error;
   }
 }

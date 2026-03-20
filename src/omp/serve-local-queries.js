@@ -5,8 +5,8 @@ const { openDb } = require("./db");
 
 const PAGE_SIZE = 30;
 
-function getDb(config) {
-  return openDb(config.storage.sqlite.path);
+async function getDb(config) {
+  return await openDb(config.storage.sqlite.path);
 }
 
 function listPrompts(db, { page = 1 } = {}) {

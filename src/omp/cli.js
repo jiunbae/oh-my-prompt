@@ -489,14 +489,14 @@ async function handleUninstall(options) {
   return removed;
 }
 
-function handleStatus(options) {
+async function handleStatus(options) {
   const config = loadConfig();
   const hooks = listHookStatus();
   const summary = getConfigSummary(config);
   const state = loadState();
   const queueStats = getQueueStats();
 
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   const lastRow = db
     .prepare("SELECT created_at FROM prompts ORDER BY created_at DESC LIMIT 1")
     .get();
@@ -786,13 +786,13 @@ async function handleImport(options, positional) {
   }
 }
 
-function handleStats(options) {
+async function handleStats(options) {
   let statsView;
   let stats;
   try {
     statsView = resolveStatsView(options.view, options["group-by"]);
     const config = loadConfig();
-    stats = getStats(config, {
+    stats = await getStats(config, {
       since: options.since,
       until: options.until,
       groupBy: statsView.groupBy,
@@ -916,9 +916,9 @@ function handleStats(options) {
   console.log("");
 }
 
-function handleExport(options) {
+async function handleExport(options) {
   const config = loadConfig();
-  const result = exportData(config, {
+  const result = await exportData(config, {
     format: options.format,
     since: options.since,
     until: options.until,
@@ -985,9 +985,9 @@ async function handleSync(options) {
   }
 }
 
-function handleSyncStatus(options) {
+async function handleSyncStatus(options) {
   const config = loadConfig();
-  const status = getSyncStatus(config, options.limit ? Number(options.limit) : 5);
+  const status = await getSyncStatus(config, options.limit ? Number(options.limit) : 5);
   if (options.json) {
     printJson(status);
     return;
@@ -1060,7 +1060,7 @@ async function handleSyncFlush(options) {
     }
 
     // Reset local sync state so next sync re-uploads everything
-    updateSyncState(config, null, null);
+    await updateSyncState(config, null, null);
 
     if (options.json) {
       printJson({ flushed: true, deleted: response.body.deleted || 0 });
@@ -1139,7 +1139,7 @@ function handleSyncAuto(options, positional) {
 async function handleIngest(options) {
   const config = loadConfig();
   if (options.replay) {
-    const result = replayQueue(config);
+    const result = await replayQueue(config);
     if (options.json) {
       printJson(result);
     } else {
@@ -1159,7 +1159,7 @@ async function handleIngest(options) {
     return;
   }
 
-  const result = ingestPayload(rawPayload, config);
+  const result = await ingestPayload(rawPayload, config);
   if (options.json === true) {
     printJson(result);
   } else if (!result.ok) {
@@ -1251,9 +1251,9 @@ async function handleAsk(options, positional) {
   }
 }
 
-function handleAnalyze(options, positional) {
+async function handleAnalyze(options, positional) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   const promptId = positional[0];
 
   let row;
@@ -1350,9 +1350,9 @@ function handleAnalyze(options, positional) {
   console.log("");
 }
 
-function handleReport(options) {
+async function handleReport(options) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
 
   const where = [];
   const params = [];
@@ -1494,7 +1494,7 @@ function handleReport(options) {
 
 async function handleDelete(options, positional) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
 
   // --all-session mode: delete all prompts in a session
   if (options["all-session"]) {
@@ -1581,9 +1581,9 @@ async function handleDelete(options, positional) {
   }
 }
 
-function handleTag(options, positional) {
+async function handleTag(options, positional) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   const crypto = require("crypto");
 
   // --list: show all tags with usage counts
@@ -1844,7 +1844,7 @@ async function main() {
 `);
         break;
       }
-      handleStatus(options);
+      await handleStatus(options);
       break;
     }
     case "stats": {
@@ -1865,7 +1865,7 @@ async function main() {
 `);
         break;
       }
-      handleStats(options);
+      await handleStats(options);
       break;
     }
     case "export": {
@@ -1885,7 +1885,7 @@ async function main() {
 `);
         break;
       }
-      handleExport(options);
+      await handleExport(options);
       break;
     }
     case "sync": {
@@ -1903,7 +1903,7 @@ async function main() {
 `);
           break;
         }
-        handleSyncStatus(options);
+        await handleSyncStatus(options);
       } else if (positional[0] === "flush") {
         await handleSyncFlush(options);
       } else if (positional[0] === "auto") {
@@ -2054,19 +2054,19 @@ async function main() {
       let geminiResult = null;
 
       if (!hasFilter || claudeOnly) {
-        claudeResult = backfillTranscripts(config, {
+        claudeResult = await backfillTranscripts(config, {
           path: options.path,
           dryRun,
         });
       }
       if ((!hasFilter || codexOnly) && !options.path) {
-        codexResult = backfillCodex(config, { dryRun });
+        codexResult = await backfillCodex(config, { dryRun });
       }
       if ((!hasFilter || opencodeOnly) && !options.path) {
-        opencodeResult = backfillOpenCode(config, { dryRun });
+        opencodeResult = await backfillOpenCode(config, { dryRun });
       }
       if ((!hasFilter || geminiOnly) && !options.path) {
-        geminiResult = backfillGemini(config, { dryRun });
+        geminiResult = await backfillGemini(config, { dryRun });
       }
 
       if (options.json) {
@@ -2105,16 +2105,16 @@ async function main() {
         if (totalImported > 0) {
           const { getSyncState, updateSyncState } = require("./sync-log");
           const { openDb } = require("./db");
-          const state = getSyncState(config);
+          const state = await getSyncState(config);
           if (state.lastSyncedAt) {
             // Find the earliest backfilled record to reset cursor before it
-            const db = openDb(config.storage.sqlite.path);
+            const db = await openDb(config.storage.sqlite.path);
             const earliest = db
               .prepare("SELECT MIN(created_at) as earliest FROM prompts")
               .get();
             db.close();
             if (earliest && earliest.earliest && earliest.earliest < state.lastSyncedAt) {
-              updateSyncState(config, earliest.earliest, null);
+              await updateSyncState(config, earliest.earliest, null);
               console.log(`\nSync cursor reset — run ${c.cyan("omp sync")} to upload backfilled records.`);
             }
           }
@@ -2144,7 +2144,7 @@ async function main() {
       if (action === "migrate") {
         const { migrateDatabase } = require("./migrate");
         const config = loadConfig();
-        const result = migrateDatabase(config);
+        const result = await migrateDatabase(config);
         if (options.json) {
           printJson(result);
         } else {
@@ -2160,7 +2160,7 @@ async function main() {
           process.exitCode = 1;
           break;
         }
-        const db = openDb(config.storage.sqlite.path);
+        const db = await openDb(config.storage.sqlite.path);
         db.exec("DELETE FROM prompts");
         db.exec("DELETE FROM sync_log");
         db.exec("DELETE FROM sync_state");
@@ -2196,7 +2196,7 @@ async function main() {
       }
       const { runDoctor } = require("./doctor");
       const config = loadConfig();
-      const report = runDoctor(config);
+      const report = await runDoctor(config);
       if (options.json) {
         printJson(report);
       } else {
@@ -2313,7 +2313,7 @@ async function main() {
 `);
         break;
       }
-      handleAnalyze(options, positional);
+      await handleAnalyze(options, positional);
       break;
     }
     case "report": {
@@ -2339,7 +2339,7 @@ async function main() {
 `);
         break;
       }
-      handleReport(options);
+      await handleReport(options);
       break;
     }
     case "search": {
@@ -2375,7 +2375,7 @@ async function main() {
         break;
       }
       const searchQuery = positional.join(" ").trim();
-      const result = runSearch(searchQuery || null, options);
+      const result = await runSearch(searchQuery || null, options);
       if (options.json && result !== null) {
         printJson(result);
       }
@@ -2426,7 +2426,7 @@ async function main() {
 `);
         break;
       }
-      handleTag(options, positional);
+      await handleTag(options, positional);
       break;
     }
     default:

@@ -71,11 +71,11 @@ function searchFts(db, query, options) {
   const whereClause = `WHERE ${allConditions.join(" AND ")}`;
 
   const sql = `
-    SELECT p.*, rank
+    SELECT p.*
     FROM prompts p
     JOIN prompts_fts ON prompts_fts.rowid = p.rowid
     ${whereClause}
-    ORDER BY rank
+    ORDER BY p.created_at DESC
     LIMIT ?
   `;
 
@@ -162,9 +162,9 @@ function formatResult(row, query, index) {
 /**
  * Run the search command.
  */
-function runSearch(query, options) {
+async function runSearch(query, options) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
 
   try {
     // --stats mode: show FTS index health
@@ -194,13 +194,21 @@ function runSearch(query, options) {
       return null;
     }
 
-    const results = options.exact
-      ? searchExact(db, query, options)
-      : searchFts(db, query, options);
+    let results;
+    if (options.exact) {
+      results = searchExact(db, query, options);
+    } else {
+      try {
+        results = searchFts(db, query, options);
+      } catch {
+        // FTS not available (e.g., fts5 table from better-sqlite3) — fall back to LIKE
+        results = searchExact(db, query, options);
+      }
+    }
 
     if (options.json) {
       const output = results.map((row) => {
-        const { rank, ...rest } = row;
+        const rest = row;
         return rest;
       });
       return output;

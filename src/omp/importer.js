@@ -79,7 +79,7 @@ async function importCodexHistory(config, options = {}) {
       continue;
     }
 
-    const result = ingestPayload(JSON.stringify(payload), config);
+    const result = await ingestPayload(JSON.stringify(payload), config);
     if (result.ok) {
       imported += 1;
     } else {

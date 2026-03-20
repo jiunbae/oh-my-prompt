@@ -19,8 +19,8 @@ function makeTempConfig() {
   };
 }
 
-function insertPrompt(config, payload) {
-  const result = ingestPayload(payload, config);
+async function insertPrompt(config, payload) {
+  const result = await ingestPayload(payload, config);
   expect(result.ok).toBe(true);
 }
 
@@ -29,10 +29,10 @@ describe("getStats", () => {
     vi.useRealTimers();
   });
 
-  it("computes richer CLI analytics from local prompt history", () => {
+  it("computes richer CLI analytics from local prompt history", async () => {
     const { config } = makeTempConfig();
 
-    insertPrompt(config, {
+    await insertPrompt(config, {
       timestamp: "2026-03-01T09:00:00Z",
       source: "codex",
       project: "alpha",
@@ -43,7 +43,7 @@ describe("getStats", () => {
       token_estimate_response: 50,
     });
 
-    insertPrompt(config, {
+    await insertPrompt(config, {
       timestamp: "2026-03-01T09:10:00Z",
       source: "codex",
       project: "alpha",
@@ -52,7 +52,7 @@ describe("getStats", () => {
       token_estimate: 80,
     });
 
-    insertPrompt(config, {
+    await insertPrompt(config, {
       timestamp: "2026-03-01T11:00:00Z",
       source: "claude",
       project: "beta",
@@ -63,7 +63,7 @@ describe("getStats", () => {
       token_estimate_response: 60,
     });
 
-    insertPrompt(config, {
+    await insertPrompt(config, {
       timestamp: "2026-03-02T10:00:00Z",
       source: "codex",
       project: "beta",
@@ -74,7 +74,7 @@ describe("getStats", () => {
       token_estimate_response: 40,
     });
 
-    const stats = getStats(config, { groupBy: "project", limit: 5 });
+    const stats = await getStats(config, { groupBy: "project", limit: 5 });
 
     expect(stats.overall).toMatchObject({
       total_prompts: 4,
@@ -148,13 +148,13 @@ describe("getStats", () => {
     ]);
   });
 
-  it("supports relative Nd date filters", () => {
+  it("supports relative Nd date filters", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-09T12:00:00Z"));
 
     const { config } = makeTempConfig();
 
-    insertPrompt(config, {
+    await insertPrompt(config, {
       timestamp: "2026-03-03T08:00:00Z",
       source: "codex",
       project: "recent",
@@ -163,7 +163,7 @@ describe("getStats", () => {
       token_estimate: 50,
     });
 
-    insertPrompt(config, {
+    await insertPrompt(config, {
       timestamp: "2026-02-28T08:00:00Z",
       source: "codex",
       project: "old",
@@ -172,7 +172,7 @@ describe("getStats", () => {
       token_estimate: 70,
     });
 
-    const stats = getStats(config, { since: "7d" });
+    const stats = await getStats(config, { since: "7d" });
 
     expect(stats.overall.total_prompts).toBe(1);
     expect(stats.overall.total_tokens).toBe(50);

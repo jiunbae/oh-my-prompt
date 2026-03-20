@@ -36,7 +36,7 @@ describe("importCodexHistory", () => {
     const result = await importCodexHistory(config, { path: historyPath });
     expect(result.imported).toBe(1);
 
-    const db = openDb(dbPath);
+    const db = await openDb(dbPath);
     const row = db.prepare("SELECT prompt_text, response_text FROM prompts LIMIT 1").get();
     db.close();
 

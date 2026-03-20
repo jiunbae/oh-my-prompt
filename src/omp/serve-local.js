@@ -23,17 +23,17 @@ function send(res, status, html) {
   res.end(html);
 }
 
-function startLocalServer(config, port = 3000, { host = "127.0.0.1" } = {}) {
-  const db = queries.getDb(config);
+async function startLocalServer(config, port = 3000, { host = "127.0.0.1" } = {}) {
+  const db = await queries.getDb(config);
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const { pathname, query } = parseQuery(req);
     const page = Math.max(1, parseInt(query.page, 10) || 1);
 
     try {
       // Dashboard
       if (pathname === "/" || pathname === "/dashboard") {
-        const stats = getStats(config, { since: null, until: null });
+        const stats = await getStats(config, { since: null, until: null });
         return send(res, 200, views.dashboardPage(stats));
       }
 

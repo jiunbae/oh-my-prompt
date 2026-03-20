@@ -44,7 +44,7 @@ function validateConfig(config) {
   return { ok: errors.length === 0, errors, warnings };
 }
 
-function runDoctor(config) {
+async function runDoctor(config) {
   const report = {
     ok: true,
     errors: [],
@@ -58,7 +58,7 @@ function runDoctor(config) {
 
   // DB check
   try {
-    const db = openDb(config.storage.sqlite.path);
+    const db = await openDb(config.storage.sqlite.path);
     db.close();
     report.checks.db = "ok";
   } catch (error) {
@@ -88,7 +88,7 @@ function runDoctor(config) {
 
   // Sync status
   try {
-    report.checks.sync = getSyncStatus(config, 1);
+    report.checks.sync = await getSyncStatus(config, 1);
   } catch (error) {
     report.warnings.push("sync status unavailable");
   }

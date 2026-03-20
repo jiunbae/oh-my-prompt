@@ -65,7 +65,7 @@ describe("syncToServer", () => {
         cli_name: "test",
       });
 
-      ingestPayload(payload, config);
+      await ingestPayload(payload, config);
       await syncToServer(config, { dryRun: false });
 
       const checkpoint = getSyncState(config);
@@ -145,9 +145,9 @@ describe("syncToServer", () => {
         cli_name: "test",
       });
 
-      ingestPayload(payload, config);
+      await ingestPayload(payload, config);
 
-      const db = require("../db").openDb(dbPath);
+      const db = await require("../db").openDb(dbPath);
       const row = db.prepare("SELECT prompt_text FROM prompts LIMIT 1").get();
       db.close();
       expect(row.prompt_text).toContain(secret);
