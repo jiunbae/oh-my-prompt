@@ -194,7 +194,7 @@ async function syncToServer(config, options = {}) {
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
   }
 
-  const chunkSize = options.chunkSize || 500;
+  const chunkSize = options.chunkSize || 200;
   let totalAccepted = 0;
   let totalDuplicates = 0;
   let totalRejected = 0;
@@ -239,7 +239,31 @@ async function syncToServer(config, options = {}) {
       }
 
       if (response.status === 413) {
-        throw new Error("Request too large. Try reducing chunk size.");
+        // Auto-reduce chunk size and retry this chunk
+        const smallerChunk = Math.max(10, Math.floor(records.length / 4));
+        process.stderr.write(
+          `[omp] Request too large (${records.length} records). Splitting into chunks of ${smallerChunk}...\n`
+        );
+        for (let j = 0; j < records.length; j += smallerChunk) {
+          const subChunk = records.slice(j, j + smallerChunk);
+          const subResp = await postJson(uploadUrl, headers, {
+            records: subChunk,
+            deviceId: getDeviceId(config),
+          }, "POST", retryOpts);
+          if (subResp.status === 413) {
+            throw new Error(`Request too large even with ${subChunk.length} records. Try reducing chunk size further.`);
+          }
+          if (subResp.status >= 400) {
+            throw new Error(`Server error (${subResp.status}): ${JSON.stringify(subResp.body)}`);
+          }
+          const subResult = subResp.body;
+          totalAccepted += subResult.accepted || 0;
+          totalDuplicates += subResult.duplicates || 0;
+          totalRejected += subResult.rejected || 0;
+          if (subResult.errors?.length) errors.push(...subResult.errors);
+        }
+        chunks++;
+        continue;
       }
 
       if (response.status >= 400) {
@@ -274,9 +298,7 @@ async function syncToServer(config, options = {}) {
       errors: errors.slice(0, 10),
     };
   } catch (error) {
-    const msg = `Sync failed after ${maxRetries} retries. Last error: ${error.message || "unknown"}`;
-    finishSyncLog(config, logId, "failed", msg, chunks, totalAccepted);
-    error.message = msg;
+    finishSyncLog(config, logId, "failed", error.message || "unknown", chunks, totalAccepted);
     throw error;
   }
 }
