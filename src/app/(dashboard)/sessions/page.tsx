@@ -7,7 +7,7 @@ import { getSessionUser } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -44,7 +44,7 @@ interface SessionRow {
   total_tokens: number;
 }
 
-async function getSessions(params: SearchParams, userId: string) {
+async function getSessions(params: SearchParams, userId: string, onlyFavoriteIds?: Set<string>) {
 
   const page = parseInt(params.page ?? "1", 10);
   const pageSize = 20;
@@ -54,6 +54,14 @@ async function getSessions(params: SearchParams, userId: string) {
     eq(schema.prompts.userId, userId),
     sql`${schema.prompts.sessionId} IS NOT NULL`,
   ];
+
+  // Filter to favorites only
+  if (onlyFavoriteIds !== undefined) {
+    if (onlyFavoriteIds.size === 0) {
+      return { sessions: [], totalCount: 0, projects: [], sources: [], devices: [], workspaces: [] };
+    }
+    conditions.push(inArray(schema.prompts.sessionId, [...onlyFavoriteIds]));
+  }
 
   if (params.project) conditions.push(eq(schema.prompts.projectName, params.project));
   if (params.source) conditions.push(eq(schema.prompts.source, params.source));
@@ -253,10 +261,18 @@ export default async function SessionsPage({
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const activeTab = params.tab === "shared" ? "shared" : "all";
+  const activeTab = params.tab === "shared" ? "shared" : params.tab === "favorites" ? "favorites" : "all";
   const viewMode = (params.view as ViewMode) || "list";
-  const { sessions, totalCount, projects, sources, devices, workspaces, error } = activeTab === "all"
-    ? await getSessions(params, user.userId)
+
+  // Fetch user's favorite session IDs
+  const favoriteRows = await db
+    .select({ sessionId: schema.favoriteSessions.sessionId })
+    .from(schema.favoriteSessions)
+    .where(eq(schema.favoriteSessions.userId, user.userId));
+  const favoriteSessionIds = new Set(favoriteRows.map((f) => f.sessionId));
+
+  const { sessions, totalCount, projects, sources, devices, workspaces, error } = activeTab === "all" || activeTab === "favorites"
+    ? await getSessions(params, user.userId, activeTab === "favorites" ? favoriteSessionIds : undefined)
     : { sessions: [], totalCount: 0, projects: [], sources: [], devices: [], workspaces: [], error: false };
   const currentPage = parseInt(params.page ?? "1", 10);
   const pageSize = 20;
@@ -265,6 +281,7 @@ export default async function SessionsPage({
   const buildPageUrl = (page: number) => {
     const p = new URLSearchParams();
     if (page > 1) p.set("page", String(page));
+    if (params.tab) p.set("tab", params.tab);
     if (params.search) p.set("search", params.search);
     if (params.searchMode) p.set("searchMode", params.searchMode);
     if (params.project) p.set("project", params.project);
@@ -286,10 +303,12 @@ export default async function SessionsPage({
           <p className="text-sm text-muted-foreground mt-1">
             {activeTab === "shared"
               ? "Manage your shared session links"
+              : activeTab === "favorites"
+              ? `Your favorite sessions (${totalCount} total)`
               : `Browse your Claude Code sessions (${totalCount} total)`}
           </p>
         </div>
-        {activeTab === "all" && <SessionViewToggle currentView={viewMode} />}
+        {(activeTab === "all" || activeTab === "favorites") && <SessionViewToggle currentView={viewMode} />}
       </div>
 
       {/* Tab navigation */}
@@ -303,6 +322,24 @@ export default async function SessionsPage({
           }`}
         >
           All Sessions
+        </Link>
+        <Link
+          href="/sessions?tab=favorites"
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === "favorites"
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+          Favorites
+          {favoriteSessionIds.size > 0 && (
+            <span className="text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
+              {favoriteSessionIds.size}
+            </span>
+          )}
         </Link>
         <Link
           href="/sessions?tab=shared"
@@ -346,7 +383,11 @@ export default async function SessionsPage({
       ) : sessions.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
           <p>No sessions found.</p>
-          <p className="text-sm mt-1">Sessions are created when prompts share a session ID.</p>
+          <p className="text-sm mt-1">
+            {activeTab === "favorites"
+              ? "Star a session to add it to your favorites."
+              : "Sessions are created when prompts share a session ID."}
+          </p>
         </div>
       ) : viewMode === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -365,6 +406,7 @@ export default async function SessionsPage({
               deviceName={s.device_name}
               totalTokens={s.total_tokens}
               variant="grid"
+              isFavorited={favoriteSessionIds.has(s.session_id)}
             />
           ))}
         </div>
@@ -387,6 +429,7 @@ export default async function SessionsPage({
               deviceName={s.device_name}
               totalTokens={s.total_tokens}
               variant="list"
+              isFavorited={favoriteSessionIds.has(s.session_id)}
             />
           ))}
         </div>

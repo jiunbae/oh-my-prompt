@@ -22,11 +22,35 @@ const STOP_TIMEOUT_MS = SHUTDOWN_TIMEOUT_MS + 5000; // total wait for stop (drai
 
 const DAEMON_PROCESS_TITLE = "omp-auto-sync";
 
+const LOG_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+const LOG_MAX_ROTATED = 3; // keep .log.1, .log.2, .log.3
+
+function rotateLogIfNeeded() {
+  try {
+    if (!fs.existsSync(LOG_FILE)) return;
+    const stat = fs.statSync(LOG_FILE);
+    if (stat.size < LOG_MAX_SIZE) return;
+
+    // Rotate: .log.2 → .log.3, .log.1 → .log.2, .log → .log.1
+    for (let i = LOG_MAX_ROTATED - 1; i >= 1; i--) {
+      const src = `${LOG_FILE}.${i}`;
+      const dst = `${LOG_FILE}.${i + 1}`;
+      if (fs.existsSync(src)) {
+        fs.renameSync(src, dst);
+      }
+    }
+    fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
+  } catch {
+    // ignore rotation failures
+  }
+}
+
 function appendLog(message) {
   const ts = new Date().toISOString();
   const line = `[${ts}] ${message}\n`;
   try {
     ensureDir(path.dirname(LOG_FILE));
+    rotateLogIfNeeded();
     fs.appendFileSync(LOG_FILE, line);
   } catch {
     // ignore log write failures

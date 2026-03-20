@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
-import { users } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { users, prompts } from "@/db/schema";
+import { eq, desc, sql, count } from "drizzle-orm";
 import { z } from "zod";
 
 /**
@@ -26,7 +26,32 @@ export async function GET() {
       .from(users)
       .orderBy(desc(users.createdAt));
 
-    return NextResponse.json({ users: allUsers });
+    // Fetch per-user prompt stats in a single query
+    const userStats = await db
+      .select({
+        userId: prompts.userId,
+        promptCount: count(),
+        totalTokens: sql<number>`coalesce(sum(${prompts.tokenEstimate}), 0) + coalesce(sum(${prompts.tokenEstimateResponse}), 0)`,
+        totalStorageBytes: sql<number>`coalesce(sum(${prompts.promptLength}), 0) + coalesce(sum(${prompts.responseLength}), 0)`,
+      })
+      .from(prompts)
+      .groupBy(prompts.userId);
+
+    const statsMap = new Map(
+      userStats.map((s) => [s.userId, s])
+    );
+
+    const enrichedUsers = allUsers.map((u) => {
+      const stats = statsMap.get(u.id);
+      return {
+        ...u,
+        promptCount: stats ? Number(stats.promptCount) : 0,
+        totalTokens: stats ? Number(stats.totalTokens) : 0,
+        totalStorageBytes: stats ? Number(stats.totalStorageBytes) : 0,
+      };
+    });
+
+    return NextResponse.json({ users: enrichedUsers });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

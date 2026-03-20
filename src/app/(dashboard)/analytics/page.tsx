@@ -4,6 +4,7 @@ import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
 import { TokenUsageChart } from "@/components/charts/token-usage-chart";
 import { ProjectActivityChart } from "@/components/charts/project-activity-chart";
 import { SessionChart } from "@/components/charts/session-chart";
+import { AnalyticsFilters } from "@/components/analytics-filters";
 import { getSessionUser } from "@/lib/with-auth";
 import { getAnalytics, formatNumber } from "@/lib/analytics";
 
@@ -12,6 +13,12 @@ export const dynamic = "force-dynamic";
 
 const getCurrentUser = getSessionUser;
 
+const RANGE_DAYS: Record<string, number> = {
+  "7": 7,
+  "30": 30,
+  "90": 90,
+  "365": 365,
+};
 
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -22,12 +29,42 @@ function formatDate(date: Date): string {
   }).format(new Date(date));
 }
 
-export default async function AnalyticsPage() {
+interface SearchParams {
+  range?: string;
+  from?: string;
+  to?: string;
+  project?: string;
+}
+
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const params = await searchParams;
+
   // Get current user from session
   const user = await getCurrentUser();
   const userId = user?.userId ?? null;
 
-  const data = await getAnalytics(userId);
+  // Parse date range from search params
+  const rangeParam = params.range ?? "30";
+  const isCustom = rangeParam === "custom";
+
+  const dateRange = isCustom
+    ? {
+        from: params.from ? new Date(params.from) : undefined,
+        to: params.to ? new Date(params.to + "T23:59:59.999Z") : undefined,
+        days: 30,
+      }
+    : {
+        days: RANGE_DAYS[rangeParam] ?? 30,
+      };
+
+  const data = await getAnalytics(userId, {
+    dateRange,
+    project: params.project,
+  });
 
   if (!data) {
     return (
@@ -48,6 +85,18 @@ export default async function AnalyticsPage() {
           See how you prompt and where to improve
         </p>
       </div>
+
+      {/* Filter Bar */}
+      <AnalyticsFilters
+        currentRange={rangeParam}
+        currentFrom={params.from}
+        currentTo={params.to}
+        currentProject={params.project}
+        projects={projectStats.map((p) => ({
+          project: p.project ?? "No project",
+          count: Number(p.count),
+        }))}
+      />
 
       {/* User Prompt Stats */}
       <div>
@@ -185,11 +234,11 @@ export default async function AnalyticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityHeatmap 
-              data={dailyStats.map(d => ({ 
-                date: d.date, 
-                count: Number(d.count ?? 0) 
-              }))} 
+            <ActivityHeatmap
+              data={dailyStats.map(d => ({
+                date: d.date,
+                count: Number(d.count ?? 0)
+              }))}
             />
           </CardContent>
         </Card>
@@ -222,7 +271,7 @@ export default async function AnalyticsPage() {
           <CardContent>
             {projectActivity.length === 0 ? (
               <div className="py-8 text-center text-muted-foreground text-sm">
-                No project activity in the last 30 days.
+                No project activity in the selected period.
               </div>
             ) : (
               <ProjectActivityChart
@@ -248,7 +297,7 @@ export default async function AnalyticsPage() {
               <div>
                 <div className="grid grid-cols-3 gap-3 text-sm">
                   <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                    <div className="text-xs text-muted-foreground">Sessions (30d)</div>
+                    <div className="text-xs text-muted-foreground">Sessions</div>
                     <div className="text-foreground font-medium">
                       {sessions.summary.sessions}
                     </div>

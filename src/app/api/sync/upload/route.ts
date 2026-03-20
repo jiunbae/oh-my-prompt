@@ -6,6 +6,7 @@ import type { UploadRecord } from "@/services/upload";
 import { dispatchWebhook } from "@/services/webhook";
 import { logger } from "@/lib/logger";
 import { rateLimiters } from "@/lib/rate-limit";
+import { maybeCleanupExpiredShares } from "@/lib/share-cleanup";
 import { env } from "@/env";
 
 const MAX_BODY_SIZE = env.OMP_MAX_BODY_SIZE_MB * 1024 * 1024;
@@ -139,6 +140,9 @@ export async function POST(request: NextRequest) {
         logger.error({ err, userId: user.id }, "Non-blocking webhook dispatch failed");
       });
     }
+
+    // Piggyback: deactivate expired shares (at most once/hour, non-blocking)
+    maybeCleanupExpiredShares();
 
     return NextResponse.json(result, {
       status: result.success ? 200 : 207, // 207 Multi-Status for partial success

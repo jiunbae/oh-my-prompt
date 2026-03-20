@@ -60,34 +60,66 @@ export function getLastNDays(end: Date, days: number) {
 
 export { formatNumber } from "@/lib/format";
 
-export async function getAnalytics(userId: string | null): Promise<AnalyticsData | null> {
+export interface AnalyticsDateRange {
+  from?: Date;
+  to?: Date;
+  days?: number;
+}
+
+export interface AnalyticsFilters {
+  dateRange?: AnalyticsDateRange;
+  project?: string;
+}
+
+export async function getAnalytics(
+  userId: string | null,
+  filters?: AnalyticsFilters
+): Promise<AnalyticsData | null> {
   try {
+    const dateRange = filters?.dateRange;
+    const projectName = filters?.project;
+
     // Build user filter condition
     const userFilter = userId
       ? eq(schema.prompts.userId, userId)
+      : undefined;
+
+    const projectFilter = projectName
+      ? eq(schema.prompts.projectName, projectName)
       : undefined;
 
     const userProjectFilter = userId
       ? sql`project_name is not null AND user_id = ${userId}`
       : sql`project_name is not null`;
 
-    const rangeTo = new Date();
-    const rangeFrom = new Date(rangeTo);
-    rangeFrom.setUTCDate(rangeFrom.getUTCDate() - 29);
-    rangeFrom.setUTCHours(0, 0, 0, 0);
+    const rangeTo = dateRange?.to ?? new Date();
+    const days = dateRange?.days ?? 30;
+    const rangeFrom = dateRange?.from ?? (() => {
+      const d = new Date(rangeTo);
+      d.setUTCDate(d.getUTCDate() - (days - 1));
+      d.setUTCHours(0, 0, 0, 0);
+      return d;
+    })();
 
     const dateExpr = sql<string>`date(${schema.prompts.timestamp})`;
 
     const rangeWhere = and(
       ...(userFilter ? [userFilter] : []),
+      ...(projectFilter ? [projectFilter] : []),
       gte(schema.prompts.timestamp, rangeFrom),
       lt(schema.prompts.timestamp, rangeTo),
       eq(schema.prompts.promptType, "user_input")
     );
 
+    // Base filter for stats (user + optional project, no date range)
+    const baseFilter = and(
+      ...(userFilter ? [userFilter] : []),
+      ...(projectFilter ? [projectFilter] : []),
+    );
+
     const [stats, responseStatsRows, dailySeries, projectStats, typeStats, recentPrompts, projectActivityRows, sessionPromptRows] =
       await Promise.all([
-      // Overall stats - filtered by user
+      // Overall stats - filtered by user and optional project
       db
         .select({
           totalPrompts: sql<number>`count(*)`,
@@ -97,9 +129,9 @@ export async function getAnalytics(userId: string | null): Promise<AnalyticsData
           avgPromptLength: sql<number>`avg(prompt_length)`,
         })
         .from(schema.prompts)
-        .where(userFilter),
+        .where(baseFilter),
 
-      // Response stats - filtered by user
+      // Response stats - filtered by user and optional project
       db
         .select({
           totalResponses: sql<number>`count(response_text)`,
@@ -109,7 +141,7 @@ export async function getAnalytics(userId: string | null): Promise<AnalyticsData
           totalRows: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(userFilter),
+        .where(baseFilter),
 
       db
         .select({
@@ -137,17 +169,17 @@ export async function getAnalytics(userId: string | null): Promise<AnalyticsData
         .orderBy(desc(sql`count(*)`))
         .limit(10),
 
-      // Prompt types distribution - filtered by user
+      // Prompt types distribution - filtered by user and optional project
       db
         .select({
           type: schema.prompts.promptType,
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(userFilter)
+        .where(baseFilter)
         .groupBy(schema.prompts.promptType),
 
-      // Recent activity (last 5 prompts) - filtered by user
+      // Recent activity (last 5 prompts) - filtered by user and optional project
       db
         .select({
           id: schema.prompts.id,
@@ -158,7 +190,7 @@ export async function getAnalytics(userId: string | null): Promise<AnalyticsData
           hasResponse: sql<boolean>`response_text is not null`,
         })
         .from(schema.prompts)
-        .where(userFilter)
+        .where(baseFilter)
         .orderBy(desc(schema.prompts.timestamp))
         .limit(5),
 
@@ -184,8 +216,9 @@ export async function getAnalytics(userId: string | null): Promise<AnalyticsData
         .orderBy(schema.prompts.timestamp),
     ]);
 
-    // Fill last 30d daily series (even if some days have no data)
-    const dayKeys = getLastNDays(rangeTo, 30);
+    // Fill daily series (even if some days have no data)
+    const actualDays = Math.ceil((rangeTo.getTime() - rangeFrom.getTime()) / (24 * 60 * 60 * 1000));
+    const dayKeys = getLastNDays(rangeTo, Math.max(actualDays, 1));
     const dailyMap = new Map(
       dailySeries.map((d) => [d.date, {
         count: Number(d.count ?? 0),

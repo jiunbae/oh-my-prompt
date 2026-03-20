@@ -27,6 +27,9 @@ interface UserInfo {
   isAdmin: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  promptCount: number;
+  totalTokens: number;
+  totalStorageBytes: number;
 }
 
 interface ResetLinkInfo {
@@ -51,6 +54,32 @@ function formatDateTime(dateStr: string): string {
     minute: "2-digit",
     hour12: true,
   }).format(new Date(dateStr));
+}
+
+function timeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.round(ms / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(ms / 3_600_000);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(ms / 86_400_000);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  return `${months}mo ago`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(1)} KB`;
+  return `${bytes} B`;
 }
 
 export default function AdminUsersPage() {
@@ -232,12 +261,15 @@ export default function AdminUsersPage() {
           ) : (
             <div className="divide-y divide-border">
               {/* Header */}
-              <div className="hidden md:grid md:grid-cols-[1fr_1fr_100px_120px_120px_140px] gap-4 py-2 text-xs text-muted-foreground font-medium">
+              <div className="hidden md:grid md:grid-cols-[1fr_1fr_80px_110px_100px_80px_80px_80px_140px] gap-4 py-2 text-xs text-muted-foreground font-medium">
                 <span>Email</span>
                 <span>Name</span>
                 <span>Role</span>
                 <span>Created</span>
                 <span>Last Login</span>
+                <span>Prompts</span>
+                <span>Tokens</span>
+                <span>Storage</span>
                 <span></span>
               </div>
               {users.map((u) => {
@@ -245,7 +277,7 @@ export default function AdminUsersPage() {
                 return (
                   <div
                     key={u.id}
-                    className="flex flex-col md:grid md:grid-cols-[1fr_1fr_100px_120px_120px_140px] gap-2 md:gap-4 py-4 md:items-center"
+                    className="flex flex-col md:grid md:grid-cols-[1fr_1fr_80px_110px_100px_80px_80px_80px_140px] gap-2 md:gap-4 py-4 md:items-center"
                   >
                     <div className="min-w-0">
                       <p className="text-foreground text-sm truncate">
@@ -275,8 +307,23 @@ export default function AdminUsersPage() {
                       </span>
                     </div>
                     <div>
-                      <span className="text-xs text-muted-foreground">
-                        {u.lastLoginAt ? formatDateTime(u.lastLoginAt) : "Never"}
+                      <span className="text-xs text-muted-foreground" title={u.lastLoginAt ? formatDateTime(u.lastLoginAt) : undefined}>
+                        {u.lastLoginAt ? timeAgo(u.lastLoginAt) : "Never"}
+                      </span>
+                    </div>
+                    <div>
+                      <Badge variant="secondary" className="text-xs font-mono">
+                        {u.promptCount.toLocaleString()}
+                      </Badge>
+                    </div>
+                    <div>
+                      <Badge variant="outline" className="text-xs font-mono">
+                        {formatTokens(u.totalTokens)}
+                      </Badge>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {formatBytes(u.totalStorageBytes)}
                       </span>
                     </div>
                     <div className="flex gap-1">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { FavoriteSessionButton } from "@/components/favorite-session-button";
 
 interface SessionCardProps {
   sessionId: string;
@@ -15,6 +16,7 @@ interface SessionCardProps {
   deviceName?: string | null;
   totalTokens?: number;
   variant?: "list" | "grid";
+  isFavorited?: boolean;
 }
 
 function formatDate(dateStr: string): string {
@@ -53,6 +55,7 @@ export function SessionCard({
   source,
   totalTokens,
   variant = "list",
+  isFavorited = false,
 }: SessionCardProps) {
   if (variant === "grid") {
     return (
@@ -62,9 +65,12 @@ export function SessionCard({
           <div className="h-1 bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)]" />
           <CardContent className="p-4">
             {/* Title */}
-            <h3 className="text-sm font-semibold text-foreground line-clamp-1 mb-1">
-              {displayName || "Untitled Session"}
-            </h3>
+            <div className="flex items-start justify-between gap-1 mb-1">
+              <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
+                {displayName || "Untitled Session"}
+              </h3>
+              <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
+            </div>
             {/* Preview */}
             <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-line mb-3">
               {firstPrompt || "Empty prompt"}
@@ -120,9 +126,12 @@ export function SessionCard({
           <CardContent className="p-4 flex-1 min-w-0">
             {/* Top section: name + time */}
             <div className="flex items-start justify-between gap-4 mb-1">
-              <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
-                {displayName || firstPrompt || "Empty prompt"}
-              </h3>
+              <div className="flex items-center gap-1 min-w-0">
+                <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
+                <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
+                  {displayName || firstPrompt || "Empty prompt"}
+                </h3>
+              </div>
               <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
                 {formatDate(startedAt)}
               </span>

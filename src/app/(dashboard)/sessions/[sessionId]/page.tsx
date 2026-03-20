@@ -10,6 +10,7 @@ import { SessionThread } from "@/components/session-thread";
 import { SessionStoryButton } from "@/components/insights/session-story-button";
 import { SessionNameEditor } from "@/components/session-name-editor";
 import { ShareSessionButton } from "@/components/share-session-button";
+import { FavoriteSessionButton } from "@/components/favorite-session-button";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,19 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         )
         .limit(1)
     : [];
+  // Check if session is favorited
+  const [favoriteRow] = await db
+    .select({ id: schema.favoriteSessions.id })
+    .from(schema.favoriteSessions)
+    .where(
+      and(
+        eq(schema.favoriteSessions.userId, user.userId),
+        eq(schema.favoriteSessions.sessionId, sessionId)
+      )
+    )
+    .limit(1);
+  const isFavorited = !!favoriteRow;
+
   const fallbackName = buildSessionFallbackName(sessionId, first.projectName, first.promptText);
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
   const totalOutputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
@@ -138,6 +152,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
               editable={canRename}
             />
             <div className="flex items-center gap-2 shrink-0">
+              <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
               <ShareSessionButton sessionId={sessionId} />
               <SessionStoryButton sessionId={sessionId} />
             </div>
