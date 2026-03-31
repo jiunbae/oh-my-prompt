@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.331.0] - 2026-03-31
+
+### Fixed
+- **CLI**: Fix `omp backfill` and `omp sync` hanging indefinitely after sql.js migration — add explicit `process.exit()` since WebAssembly context keeps the event loop alive
+
 ## [2026.320.3] - 2026-03-20
 
 ### Changed

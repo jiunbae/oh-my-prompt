@@ -18,6 +18,7 @@ const { getQueueStats } = require("./queue");
 const { loadState } = require("./state");
 const { getStats } = require("./stats");
 const { exportData } = require("./export");
+const { runSearch } = require("./search");
 const { syncToServer, postJson } = require("./sync");
 const { getSyncStatus, updateSyncState } = require("./sync-log");
 const { openDb } = require("./db");
@@ -66,6 +67,7 @@ ${cmd("backfill", "Import from Claude transcripts / Codex history")}
 ${cmd("import", "Import from external sources")}
 ${cmd("ingest", "Ingest a raw JSON payload (used by hooks)")}
 
+${cmd("search <query>", "Full-text search prompts locally")}
 ${cmd("stats", "Show prompt statistics")}
 ${cmd("report", "Generate summary report for a time range")}
 ${cmd("analyze [id]", "Analyze a prompt (default: most recent)")}
@@ -80,6 +82,9 @@ ${cmd("serve logs", "Tail local server logs")}
 ${cmd("config get [key]", "Read config value (omit key for full dump)")}
 ${cmd("config set <k> <v>", "Write config value")}
 ${cmd("config validate", "Validate configuration")}
+
+${cmd("delete <prompt-id>", "Delete a prompt by ID")}
+${cmd("tag <id> <name>", "Add/remove tags on prompts")}
 
 ${cmd("db migrate", "Run database migrations")}
 ${cmd("db flush", "Delete all local records (destructive)")}
@@ -484,14 +489,14 @@ async function handleUninstall(options) {
   return removed;
 }
 
-function handleStatus(options) {
+async function handleStatus(options) {
   const config = loadConfig();
   const hooks = listHookStatus();
   const summary = getConfigSummary(config);
   const state = loadState();
   const queueStats = getQueueStats();
 
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   const lastRow = db
     .prepare("SELECT created_at FROM prompts ORDER BY created_at DESC LIMIT 1")
     .get();
@@ -781,13 +786,13 @@ async function handleImport(options, positional) {
   }
 }
 
-function handleStats(options) {
+async function handleStats(options) {
   let statsView;
   let stats;
   try {
     statsView = resolveStatsView(options.view, options["group-by"]);
     const config = loadConfig();
-    stats = getStats(config, {
+    stats = await getStats(config, {
       since: options.since,
       until: options.until,
       groupBy: statsView.groupBy,
@@ -911,9 +916,9 @@ function handleStats(options) {
   console.log("");
 }
 
-function handleExport(options) {
+async function handleExport(options) {
   const config = loadConfig();
-  const result = exportData(config, {
+  const result = await exportData(config, {
     format: options.format,
     since: options.since,
     until: options.until,
@@ -980,9 +985,9 @@ async function handleSync(options) {
   }
 }
 
-function handleSyncStatus(options) {
+async function handleSyncStatus(options) {
   const config = loadConfig();
-  const status = getSyncStatus(config, options.limit ? Number(options.limit) : 5);
+  const status = await getSyncStatus(config, options.limit ? Number(options.limit) : 5);
   if (options.json) {
     printJson(status);
     return;
@@ -1055,7 +1060,7 @@ async function handleSyncFlush(options) {
     }
 
     // Reset local sync state so next sync re-uploads everything
-    updateSyncState(config, null, null);
+    await updateSyncState(config, null, null);
 
     if (options.json) {
       printJson({ flushed: true, deleted: response.body.deleted || 0 });
@@ -1134,7 +1139,7 @@ function handleSyncAuto(options, positional) {
 async function handleIngest(options) {
   const config = loadConfig();
   if (options.replay) {
-    const result = replayQueue(config);
+    const result = await replayQueue(config);
     if (options.json) {
       printJson(result);
     } else {
@@ -1154,7 +1159,7 @@ async function handleIngest(options) {
     return;
   }
 
-  const result = ingestPayload(rawPayload, config);
+  const result = await ingestPayload(rawPayload, config);
   if (options.json === true) {
     printJson(result);
   } else if (!result.ok) {
@@ -1246,9 +1251,9 @@ async function handleAsk(options, positional) {
   }
 }
 
-function handleAnalyze(options, positional) {
+async function handleAnalyze(options, positional) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   const promptId = positional[0];
 
   let row;
@@ -1345,9 +1350,9 @@ function handleAnalyze(options, positional) {
   console.log("");
 }
 
-function handleReport(options) {
+async function handleReport(options) {
   const config = loadConfig();
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
 
   const where = [];
   const params = [];
@@ -1487,6 +1492,228 @@ function handleReport(options) {
   console.log("");
 }
 
+async function handleDelete(options, positional) {
+  const config = loadConfig();
+  const db = await openDb(config.storage.sqlite.path);
+
+  // --all-session mode: delete all prompts in a session
+  if (options["all-session"]) {
+    const sessionId = options["all-session"];
+    const rows = db
+      .prepare("SELECT id, prompt_text FROM prompts WHERE session_id = ?")
+      .all(sessionId);
+
+    if (!rows.length) {
+      db.close();
+      console.log(fail(`No prompts found for session ${c.dim(sessionId)}`));
+      process.exitCode = 1;
+      return;
+    }
+
+    if (!options.yes && !options.y) {
+      console.log(`\n  Found ${c.bold(String(rows.length))} prompt(s) in session ${c.dim(sessionId)}\n`);
+      for (const row of rows.slice(0, 5)) {
+        const preview = (row.prompt_text || "").slice(0, 100).replace(/\n/g, " ");
+        console.log(`  ${c.dim(row.id.slice(0, 8))}  ${preview}`);
+      }
+      if (rows.length > 5) {
+        console.log(`  ${c.dim(`... and ${rows.length - 5} more`)}`);
+      }
+      console.log("");
+      const confirmed = await askConfirm(`Delete all ${rows.length} prompt(s)?`, false);
+      if (!confirmed) {
+        db.close();
+        console.log("  Cancelled.");
+        return;
+      }
+    }
+
+    const result = db
+      .prepare("DELETE FROM prompts WHERE session_id = ?")
+      .run(sessionId);
+    db.close();
+
+    if (options.json) {
+      printJson({ deleted: result.changes, session_id: sessionId });
+    } else {
+      console.log(pass(`Deleted ${c.bold(String(result.changes))} prompt(s) from session ${c.dim(sessionId)}`));
+    }
+    return;
+  }
+
+  // Single prompt delete
+  const promptId = positional[0];
+  if (!promptId) {
+    db.close();
+    console.error("Usage: omp delete <prompt-id> [--yes]");
+    console.error("       omp delete --all-session <session-id> [--yes]");
+    process.exitCode = 2;
+    return;
+  }
+
+  const row = db.prepare("SELECT id, prompt_text FROM prompts WHERE id = ?").get(promptId);
+  if (!row) {
+    db.close();
+    console.log(fail(`Prompt not found: ${c.dim(promptId)}`));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!options.yes && !options.y) {
+    const preview = (row.prompt_text || "").slice(0, 100).replace(/\n/g, " ");
+    console.log(`\n  ${c.dim("ID:")} ${row.id}`);
+    console.log(`  ${c.dim("Preview:")} ${preview}\n`);
+    const confirmed = await askConfirm("Delete this prompt?", false);
+    if (!confirmed) {
+      db.close();
+      console.log("  Cancelled.");
+      return;
+    }
+  }
+
+  db.prepare("DELETE FROM prompts WHERE id = ?").run(promptId);
+  db.close();
+
+  if (options.json) {
+    printJson({ deleted: 1, id: promptId });
+  } else {
+    console.log(pass(`Deleted prompt ${c.dim(promptId)}`));
+  }
+}
+
+async function handleTag(options, positional) {
+  const config = loadConfig();
+  const db = await openDb(config.storage.sqlite.path);
+  const crypto = require("crypto");
+
+  // --list: show all tags with usage counts
+  if (options.list) {
+    const rows = db
+      .prepare(
+        `SELECT t.id, t.name, t.color, COUNT(pt.prompt_id) as usage_count
+         FROM tags t
+         LEFT JOIN prompt_tags pt ON pt.tag_id = t.id
+         GROUP BY t.id
+         ORDER BY usage_count DESC, t.name ASC`
+      )
+      .all();
+
+    db.close();
+
+    if (options.json) {
+      printJson(rows);
+      return;
+    }
+
+    if (!rows.length) {
+      console.log(info("No tags found."));
+      return;
+    }
+
+    console.log("");
+    console.log(`  ${c.bold(c.cyan("Tags"))}\n`);
+    for (const row of rows) {
+      const color = row.color ? c.dim(` (${row.color})`) : "";
+      console.log(`  ${c.bold(row.name)}${color}  ${c.dim(String(row.usage_count))} prompt(s)`);
+    }
+    console.log("");
+    return;
+  }
+
+  // --remove: remove a tag from a prompt
+  if (options.remove) {
+    const promptId = positional[0];
+    const tagName = positional[1];
+    if (!promptId || !tagName) {
+      db.close();
+      console.error("Usage: omp tag --remove <prompt-id> <tag-name>");
+      process.exitCode = 2;
+      return;
+    }
+
+    const prompt = db.prepare("SELECT id FROM prompts WHERE id = ?").get(promptId);
+    if (!prompt) {
+      db.close();
+      console.log(fail(`Prompt not found: ${c.dim(promptId)}`));
+      process.exitCode = 1;
+      return;
+    }
+
+    const tag = db.prepare("SELECT id FROM tags WHERE name = ?").get(tagName);
+    if (!tag) {
+      db.close();
+      console.log(fail(`Tag not found: ${c.dim(tagName)}`));
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = db
+      .prepare("DELETE FROM prompt_tags WHERE prompt_id = ? AND tag_id = ?")
+      .run(promptId, tag.id);
+    db.close();
+
+    if (options.json) {
+      printJson({ removed: result.changes > 0, prompt_id: promptId, tag: tagName });
+    } else if (result.changes > 0) {
+      console.log(pass(`Removed tag ${c.bold(tagName)} from prompt ${c.dim(promptId)}`));
+    } else {
+      console.log(warn(`Tag ${c.bold(tagName)} was not on prompt ${c.dim(promptId)}`));
+    }
+    return;
+  }
+
+  // Default: add a tag to a prompt
+  const promptId = positional[0];
+  const tagName = positional[1];
+  if (!promptId || !tagName) {
+    db.close();
+    console.error("Usage: omp tag <prompt-id> <tag-name>");
+    console.error("       omp tag --remove <prompt-id> <tag-name>");
+    console.error("       omp tag --list");
+    process.exitCode = 2;
+    return;
+  }
+
+  const prompt = db.prepare("SELECT id FROM prompts WHERE id = ?").get(promptId);
+  if (!prompt) {
+    db.close();
+    console.log(fail(`Prompt not found: ${c.dim(promptId)}`));
+    process.exitCode = 1;
+    return;
+  }
+
+  // Find or create the tag
+  let tag = db.prepare("SELECT id FROM tags WHERE name = ?").get(tagName);
+  if (!tag) {
+    const tagId = crypto.randomUUID();
+    db.prepare("INSERT INTO tags (id, name) VALUES (?, ?)").run(tagId, tagName);
+    tag = { id: tagId };
+  }
+
+  // Check if already tagged
+  const existing = db
+    .prepare("SELECT 1 FROM prompt_tags WHERE prompt_id = ? AND tag_id = ?")
+    .get(promptId, tag.id);
+  if (existing) {
+    db.close();
+    if (options.json) {
+      printJson({ added: false, prompt_id: promptId, tag: tagName, already_exists: true });
+    } else {
+      console.log(warn(`Prompt ${c.dim(promptId)} already has tag ${c.bold(tagName)}`));
+    }
+    return;
+  }
+
+  db.prepare("INSERT INTO prompt_tags (prompt_id, tag_id) VALUES (?, ?)").run(promptId, tag.id);
+  db.close();
+
+  if (options.json) {
+    printJson({ added: true, prompt_id: promptId, tag: tagName });
+  } else {
+    console.log(pass(`Tagged prompt ${c.dim(promptId)} with ${c.bold(tagName)}`));
+  }
+}
+
 async function main() {
   const { command, options, positional } = parseArgs(process.argv.slice(2));
 
@@ -1617,7 +1844,7 @@ async function main() {
 `);
         break;
       }
-      handleStatus(options);
+      await handleStatus(options);
       break;
     }
     case "stats": {
@@ -1638,7 +1865,7 @@ async function main() {
 `);
         break;
       }
-      handleStats(options);
+      await handleStats(options);
       break;
     }
     case "export": {
@@ -1658,7 +1885,7 @@ async function main() {
 `);
         break;
       }
-      handleExport(options);
+      await handleExport(options);
       break;
     }
     case "sync": {
@@ -1676,7 +1903,7 @@ async function main() {
 `);
           break;
         }
-        handleSyncStatus(options);
+        await handleSyncStatus(options);
       } else if (positional[0] === "flush") {
         await handleSyncFlush(options);
       } else if (positional[0] === "auto") {
@@ -1827,19 +2054,19 @@ async function main() {
       let geminiResult = null;
 
       if (!hasFilter || claudeOnly) {
-        claudeResult = backfillTranscripts(config, {
+        claudeResult = await backfillTranscripts(config, {
           path: options.path,
           dryRun,
         });
       }
       if ((!hasFilter || codexOnly) && !options.path) {
-        codexResult = backfillCodex(config, { dryRun });
+        codexResult = await backfillCodex(config, { dryRun });
       }
       if ((!hasFilter || opencodeOnly) && !options.path) {
-        opencodeResult = backfillOpenCode(config, { dryRun });
+        opencodeResult = await backfillOpenCode(config, { dryRun });
       }
       if ((!hasFilter || geminiOnly) && !options.path) {
-        geminiResult = backfillGemini(config, { dryRun });
+        geminiResult = await backfillGemini(config, { dryRun });
       }
 
       if (options.json) {
@@ -1878,16 +2105,16 @@ async function main() {
         if (totalImported > 0) {
           const { getSyncState, updateSyncState } = require("./sync-log");
           const { openDb } = require("./db");
-          const state = getSyncState(config);
+          const state = await getSyncState(config);
           if (state.lastSyncedAt) {
             // Find the earliest backfilled record to reset cursor before it
-            const db = openDb(config.storage.sqlite.path);
+            const db = await openDb(config.storage.sqlite.path);
             const earliest = db
               .prepare("SELECT MIN(created_at) as earliest FROM prompts")
               .get();
             db.close();
             if (earliest && earliest.earliest && earliest.earliest < state.lastSyncedAt) {
-              updateSyncState(config, earliest.earliest, null);
+              await updateSyncState(config, earliest.earliest, null);
               console.log(`\nSync cursor reset — run ${c.cyan("omp sync")} to upload backfilled records.`);
             }
           }
@@ -1917,7 +2144,7 @@ async function main() {
       if (action === "migrate") {
         const { migrateDatabase } = require("./migrate");
         const config = loadConfig();
-        const result = migrateDatabase(config);
+        const result = await migrateDatabase(config);
         if (options.json) {
           printJson(result);
         } else {
@@ -1933,7 +2160,7 @@ async function main() {
           process.exitCode = 1;
           break;
         }
-        const db = openDb(config.storage.sqlite.path);
+        const db = await openDb(config.storage.sqlite.path);
         db.exec("DELETE FROM prompts");
         db.exec("DELETE FROM sync_log");
         db.exec("DELETE FROM sync_state");
@@ -1969,7 +2196,7 @@ async function main() {
       }
       const { runDoctor } = require("./doctor");
       const config = loadConfig();
-      const report = runDoctor(config);
+      const report = await runDoctor(config);
       if (options.json) {
         printJson(report);
       } else {
@@ -2086,7 +2313,7 @@ async function main() {
 `);
         break;
       }
-      handleAnalyze(options, positional);
+      await handleAnalyze(options, positional);
       break;
     }
     case "report": {
@@ -2112,7 +2339,94 @@ async function main() {
 `);
         break;
       }
-      handleReport(options);
+      await handleReport(options);
+      break;
+    }
+    case "search": {
+      if (options.help || options.h) {
+        console.log(`
+  omp search — Full-text search prompts locally
+
+  USAGE
+    omp search <query> [options]
+    omp search --stats
+
+  SEARCH MODES
+    Default: FTS5 match (supports AND, OR, NOT, "phrase queries")
+    --exact: Substring match (LIKE %query%)
+
+  OPTIONS
+    --exact             Exact substring match instead of FTS5
+    --limit <n>         Max results (default: 10)
+    --since <date>      Filter from date (YYYY-MM-DD or ISO)
+    --until <date>      Filter to date (YYYY-MM-DD or ISO)
+    --project <name>    Filter by project name
+    --source <source>   Filter by source (e.g. claude, codex)
+    --stats             Show FTS index health
+    --json              Output as JSON
+
+  EXAMPLES
+    omp search "error handling"
+    omp search "refactor OR cleanup" --limit 20
+    omp search "bug fix" --project my-app --since 2025-01-01
+    omp search --exact "TODO"
+    omp search --stats
+`);
+        break;
+      }
+      const searchQuery = positional.join(" ").trim();
+      const result = await runSearch(searchQuery || null, options);
+      if (options.json && result !== null) {
+        printJson(result);
+      }
+      break;
+    }
+    case "delete": {
+      if (options.help || options.h) {
+        console.log(`
+  omp delete — Delete prompts from local database
+
+  USAGE
+    omp delete <prompt-id> [options]
+    omp delete --all-session <session-id> [options]
+
+  OPTIONS
+    --all-session <id>  Delete all prompts in a session
+    --yes, -y           Skip confirmation prompt
+    --json              Output as JSON
+
+  EXAMPLES
+    omp delete abc123-def456
+    omp delete --all-session sess-001 --yes
+`);
+        break;
+      }
+      await handleDelete(options, positional);
+      break;
+    }
+    case "tag": {
+      if (options.help || options.h) {
+        console.log(`
+  omp tag — Manage tags on prompts
+
+  USAGE
+    omp tag <prompt-id> <tag-name>           Add a tag to a prompt
+    omp tag --remove <prompt-id> <tag-name>  Remove a tag from a prompt
+    omp tag --list                           Show all tags with usage counts
+
+  OPTIONS
+    --remove            Remove a tag instead of adding
+    --list              List all tags
+    --json              Output as JSON
+
+  EXAMPLES
+    omp tag abc123 "bug-fix"
+    omp tag --remove abc123 "bug-fix"
+    omp tag --list
+`);
+        break;
+      }
+      await handleTag(options, positional);
       break;
     }
     default:
@@ -2122,7 +2436,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    process.exit(process.exitCode || 0);
+  });
