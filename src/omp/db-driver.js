@@ -65,9 +65,13 @@ class StatementWrapper {
       this._db.run(this._sql);
     }
     const changes = this._db.getRowsModified();
-    // Auto-save after writes (outside transactions)
+    // Auto-save after writes (outside transactions, not in batch mode)
     if (!this._wrapper._inTransaction) {
-      this._wrapper._save();
+      if (this._wrapper._batchMode) {
+        this._wrapper._batchDirty = true;
+      } else {
+        this._wrapper._save();
+      }
     }
     return { changes };
   }
@@ -113,6 +117,25 @@ class DatabaseWrapper {
     this._filePath = filePath;
     this._readonly = !!options.readonly;
     this._inTransaction = false;
+    this._batchMode = false;
+    this._batchDirty = false;
+  }
+
+  /** Enable batch mode: suppress auto-save after each write. Call flush() to persist. */
+  setBatchMode(enabled) {
+    this._batchMode = enabled;
+    if (!enabled && this._batchDirty) {
+      this._save();
+      this._batchDirty = false;
+    }
+  }
+
+  /** Persist to disk now (useful in batch mode). */
+  flush() {
+    if (this._batchDirty) {
+      this._save();
+      this._batchDirty = false;
+    }
   }
 
   prepare(sql) {
@@ -122,7 +145,11 @@ class DatabaseWrapper {
   exec(sql) {
     this._db.exec(sql);
     if (!this._inTransaction) {
-      this._save();
+      if (this._batchMode) {
+        this._batchDirty = true;
+      } else {
+        this._save();
+      }
     }
   }
 

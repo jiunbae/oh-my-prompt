@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { hashContent } = require("./db");
+const { openDb, hashContent } = require("./db");
 const { ingestPayload } = require("./ingest");
 
 const SYSTEM_PREFIXES = [
@@ -140,8 +140,13 @@ async function backfillTranscripts(config, options = {}) {
   let totalSkipped = 0;
   let totalDuplicates = 0;
   const fileResults = [];
+  const onProgress = options.onProgress;
+  const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
+  if (db) db.setBatchMode(true);
 
-  for (const filePath of paths) {
+  try {
+  for (let fileIdx = 0; fileIdx < paths.length; fileIdx++) {
+    const filePath = paths[fileIdx];
     let lines;
     try {
       lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
@@ -185,7 +190,7 @@ async function backfillTranscripts(config, options = {}) {
         continue;
       }
 
-      const result = await ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config, { db });
       if (result.ok) {
         if (result.deduped) {
           duplicates++;
@@ -207,6 +212,12 @@ async function backfillTranscripts(config, options = {}) {
     totalImported += imported;
     totalSkipped += skipped;
     totalDuplicates += duplicates;
+
+    if (db) db.flush();
+
+    if (onProgress) {
+      onProgress({ fileIdx: fileIdx + 1, totalFiles: paths.length, filePath, turns: turns.length, imported, skipped, duplicates });
+    }
   }
 
   return {
@@ -216,6 +227,9 @@ async function backfillTranscripts(config, options = {}) {
     totalDuplicates,
     fileResults,
   };
+  } finally {
+    if (db) db.close();
+  }
 }
 
 function getCodexHome() {
@@ -329,6 +343,7 @@ async function backfillCodex(config, options = {}) {
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
+  const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
 
   // Group history entries by session to match with transcript turns
   const sessionHistories = new Map();
@@ -400,7 +415,7 @@ async function backfillCodex(config, options = {}) {
         continue;
       }
 
-      const result = await ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config, { db });
       if (result.ok) {
         if (result.deduped) {
           duplicates++;
@@ -413,6 +428,7 @@ async function backfillCodex(config, options = {}) {
     }
   }
 
+  if (db) db.close();
   return {
     entries: lines.length - skipped,
     imported,
@@ -437,6 +453,7 @@ async function backfillOpenCode(config, options = {}) {
 
   const { openDatabase } = require("./db-driver");
   const ocDb = await openDatabase(dbPath, { readonly: true });
+  const ompDb = options.dryRun ? null : await openDb(config.storage.sqlite.path);
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
@@ -525,7 +542,7 @@ async function backfillOpenCode(config, options = {}) {
         continue;
       }
 
-      const result = await ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config, { db: ompDb });
       if (result.ok) {
         if (result.deduped) duplicates++;
         else imported++;
@@ -536,6 +553,7 @@ async function backfillOpenCode(config, options = {}) {
   }
 
   ocDb.close();
+  if (ompDb) ompDb.close();
   return { sessions: sessions.length, imported, skipped, duplicates };
 }
 
@@ -635,6 +653,7 @@ async function backfillGemini(config, options = {}) {
   let skipped = 0;
   let duplicates = 0;
   let sessionCount = 0;
+  const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
 
   for (const { path: filePath, projectHash } of chatFiles) {
     let chat;
@@ -713,7 +732,7 @@ async function backfillGemini(config, options = {}) {
         continue;
       }
 
-      const result = await ingestPayload(payload, config);
+      const result = await ingestPayload(payload, config, { db });
       if (result.ok) {
         if (result.deduped) duplicates++;
         else imported++;
@@ -723,6 +742,7 @@ async function backfillGemini(config, options = {}) {
     }
   }
 
+  if (db) db.close();
   return { sessions: sessionCount, imported, skipped, duplicates };
 }
 

@@ -278,6 +278,10 @@ async function syncToServer(config, options = {}) {
         errors.push(...result.errors);
       }
       chunks++;
+
+      if (options.onProgress) {
+        options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: Math.min(i + chunkSize, rows.length) });
+      }
     }
 
     // Only advance sync state if the server actually accepted records

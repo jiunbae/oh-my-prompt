@@ -961,6 +961,9 @@ async function handleSync(options) {
       dryRun: !!options["dry-run"],
       since: options.since,
       chunkSize: options["chunk-size"] ? Number(options["chunk-size"]) : undefined,
+      onProgress: s ? ({ uploaded, duplicates, chunks, totalRows, sent }) => {
+        s.message(`Syncing... ${sent}/${totalRows} records (chunk ${chunks}, ${uploaded} accepted)`);
+      } : undefined,
     };
 
     const result = await syncToServer(config, syncOptions);
@@ -2054,10 +2057,15 @@ async function main() {
       let geminiResult = null;
 
       if (!hasFilter || claudeOnly) {
+        const showProgress = !options.json && process.stderr.isTTY;
         claudeResult = await backfillTranscripts(config, {
           path: options.path,
           dryRun,
+          onProgress: showProgress ? ({ fileIdx, totalFiles, turns, imported, duplicates }) => {
+            process.stderr.write(`\r[Claude] ${fileIdx}/${totalFiles} files processed (${imported} new, ${duplicates} dedup)    `);
+          } : undefined,
         });
+        if (showProgress) process.stderr.write("\n");
       }
       if ((!hasFilter || codexOnly) && !options.path) {
         codexResult = await backfillCodex(config, { dryRun });
