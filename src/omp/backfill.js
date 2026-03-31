@@ -344,7 +344,9 @@ async function backfillCodex(config, options = {}) {
   let skipped = 0;
   let duplicates = 0;
   const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
+  if (db) db.setBatchMode(true);
 
+  try {
   // Group history entries by session to match with transcript turns
   const sessionHistories = new Map();
   for (const line of lines) {
@@ -428,7 +430,6 @@ async function backfillCodex(config, options = {}) {
     }
   }
 
-  if (db) db.close();
   return {
     entries: lines.length - skipped,
     imported,
@@ -436,6 +437,9 @@ async function backfillCodex(config, options = {}) {
     duplicates,
     sessions: sessionResponses.size,
   };
+  } finally {
+    if (db) db.close();
+  }
 }
 
 // ── OpenCode backfill (SQLite) ──────────────────────────────────────
@@ -454,10 +458,12 @@ async function backfillOpenCode(config, options = {}) {
   const { openDatabase } = require("./db-driver");
   const ocDb = await openDatabase(dbPath, { readonly: true });
   const ompDb = options.dryRun ? null : await openDb(config.storage.sqlite.path);
+  if (ompDb) ompDb.setBatchMode(true);
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
 
+  try {
   // Get all sessions with their messages
   const sessions = ocDb.prepare(
     "SELECT id, title, directory, time_created FROM session ORDER BY time_created ASC"
@@ -552,9 +558,11 @@ async function backfillOpenCode(config, options = {}) {
     }
   }
 
-  ocDb.close();
-  if (ompDb) ompDb.close();
   return { sessions: sessions.length, imported, skipped, duplicates };
+  } finally {
+    ocDb.close();
+    if (ompDb) ompDb.close();
+  }
 }
 
 // ── Gemini backfill (chat JSON files) ───────────────────────────────
@@ -654,7 +662,9 @@ async function backfillGemini(config, options = {}) {
   let duplicates = 0;
   let sessionCount = 0;
   const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
+  if (db) db.setBatchMode(true);
 
+  try {
   for (const { path: filePath, projectHash } of chatFiles) {
     let chat;
     try {
@@ -742,8 +752,10 @@ async function backfillGemini(config, options = {}) {
     }
   }
 
-  if (db) db.close();
   return { sessions: sessionCount, imported, skipped, duplicates };
+  } finally {
+    if (db) db.close();
+  }
 }
 
 module.exports = {

@@ -121,19 +121,15 @@ const MIGRATIONS = [
       // fails with "SQL logic error", making UPDATE/DELETE triggers unusable.
       // Remove content-table FTS and triggers entirely. Search falls back to
       // LIKE queries which work reliably with sql.js.
-      //
-      // Use raw _db.exec() to avoid DatabaseWrapper._save() which can fail
-      // when FTS triggers are still active during the transition.
-      const rawDb = db._db;
-      rawDb.exec("DROP TRIGGER IF EXISTS prompts_ai");
-      rawDb.exec("DROP TRIGGER IF EXISTS prompts_ad");
-      rawDb.exec("DROP TRIGGER IF EXISTS prompts_au");
+      db.exec("DROP TRIGGER IF EXISTS prompts_ai");
+      db.exec("DROP TRIGGER IF EXISTS prompts_ad");
+      db.exec("DROP TRIGGER IF EXISTS prompts_au");
 
       const hasFts = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
         .get();
       if (hasFts) {
-        rawDb.exec("DROP TABLE IF EXISTS prompts_fts");
+        db.exec("DROP TABLE IF EXISTS prompts_fts");
       }
     },
   },

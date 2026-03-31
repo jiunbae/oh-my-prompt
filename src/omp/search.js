@@ -107,12 +107,21 @@ function searchExact(db, query, options) {
 }
 
 /**
- * Get FTS index health statistics.
+ * Get search statistics.
  */
 function getSearchStats(db) {
-  const totalIndexed = db
-    .prepare("SELECT COUNT(*) as count FROM prompts_fts")
+  const hasFts = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
     .get();
+
+  let totalIndexed = { count: 0 };
+  if (hasFts) {
+    try {
+      totalIndexed = db.prepare("SELECT COUNT(*) as count FROM prompts_fts").get();
+    } catch {
+      // FTS table may exist but be broken (e.g. sql.js FTS4 content-table issues)
+    }
+  }
 
   const totalPrompts = db
     .prepare("SELECT COUNT(*) as count FROM prompts")
@@ -125,7 +134,8 @@ function getSearchStats(db) {
   return {
     total_indexed: totalIndexed.count,
     total_prompts: totalPrompts.count,
-    in_sync: totalIndexed.count === totalPrompts.count,
+    fts_available: !!hasFts,
+    in_sync: hasFts ? totalIndexed.count === totalPrompts.count : false,
     last_updated: lastUpdated.last || null,
   };
 }
