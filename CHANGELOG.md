@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.331.3] - 2026-03-31
+
+### Fixed
+- **CLI**: Fix `omp search --stats` crash after FTS removal
+- **CLI**: Add batch mode and proper resource cleanup to all backfill functions (Codex, OpenCode, Gemini)
+
 ## [2026.331.2] - 2026-03-31
 
 ### Fixed
