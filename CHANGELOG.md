@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.331.2] - 2026-03-31
+
+### Fixed
+- **CLI**: Fix assistant response capture — sql.js FTS4 content-table `delete` command is broken, causing silent "SQL logic error" on every UPDATE. Remove FTS triggers entirely; search falls back to LIKE queries
+
 ## [2026.331.1] - 2026-03-31
 
 ### Performance
