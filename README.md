@@ -23,7 +23,7 @@ A self-hosted prompt journal + CLI that captures every interaction<br />with Cla
 
 <br />
 
-**[Quickstart for Agents](#quickstart-for-agents)** · **[Start with Human](#start-with-human)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Local Mode](#-local-dashboard)** · **[Server Deploy](#-server-deployment)** · **[Contributing](#-contributing)**
+**[Quickstart for Agents](#quickstart-for-agents)** · **[Start with Human](#start-with-human)** · **[CLI](#-cli)** · **[Dashboard](#-dashboard)** · **[Local Mode](#-local-dashboard)** · **[Server Deploy](#-server-deployment)** · **[Realtime: muxa](#-realtime-companion-muxa)** · **[Contributing](#-contributing)**
 
 <br />
 
@@ -611,6 +611,25 @@ oh-my-prompt/
 <td>Docker · Kubernetes · ArgoCD · Gitea CI</td>
 </tr>
 </table>
+
+<br />
+
+## 🔭 Realtime Companion: muxa
+
+[`muxa`](https://github.com/Open330/muxa) is `omp`'s natural counterpart on the realtime side. Where `omp` captures every prompt over time and turns the history into searchable analytics, `muxa` watches your tmux panes **live** — agent state (working / waiting / idle / error), pane-to-session correlation, status-line glyphs, a fullscreen TUI, and an HTTP dashboard that surfaces every tmux pane on your machine in one tab.
+
+Same four agents on both sides; opposite axes — `omp` owns the history layer, `muxa` owns the live layer. They're complementary, not competitive.
+
+`muxa` can also push `PromptSubmitted` events straight into your `omp` instance, so your prompt journal stays current without an extra hook setup. Add this to `muxa`'s config:
+
+```toml
+[sinks.oh_my_prompt]
+enabled  = true
+endpoint = "https://prompt.jiun.dev"   # or your self-hosted URL
+# token comes from $OMP_SERVER_TOKEN
+```
+
+Then run `muxad` and prompts flow into `omp`'s ingest endpoint with retry, backoff, and dedup. See [muxa's `docs/SINKS.md`](https://github.com/Open330/muxa/blob/main/docs/SINKS.md) for the full setup.
 
 <br />
 
