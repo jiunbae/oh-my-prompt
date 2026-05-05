@@ -37,6 +37,7 @@ export const users = pgTable(
       .default(sql`gen_random_uuid()`), // for API auth
     name: varchar("name", { length: 100 }),
     isAdmin: boolean("is_admin").default(false),
+    dataRetentionDays: integer("data_retention_days").default(365),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
@@ -293,6 +294,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   sharedPrompts: many(sharedPrompts),
   sharedSessions: many(sharedSessions),
   favoriteSessions: many(favoriteSessions),
+  favoritePrompts: many(favoritePrompts),
+  sessionNotes: many(sessionNotes),
 }));
 
 export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
@@ -305,6 +308,7 @@ export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
 export const promptsRelations = relations(prompts, ({ one, many }) => ({
   promptTags: many(promptTags),
   sharedPrompts: many(sharedPrompts),
+  favoritePrompts: many(favoritePrompts),
   user: one(users, {
     fields: [prompts.userId],
     references: [users.id],
@@ -421,6 +425,27 @@ export const favoriteSessions = pgTable(
   ]
 );
 
+// Session notes table
+export const sessionNotes = pgTable(
+  "session_notes",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: varchar("session_id", { length: 255 }).notNull(),
+    content: text("content").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_session_notes_user_session").on(table.userId, table.sessionId),
+    index("idx_session_notes_user").on(table.userId),
+  ]
+);
+
 // Password reset tokens table
 export const passwordResetTokens = pgTable(
   "password_reset_tokens",
@@ -456,6 +481,45 @@ export const favoriteSessionsRelations = relations(favoriteSessions, ({ one }) =
   }),
 }));
 
+// Favorite prompts table
+export const favoritePrompts = pgTable(
+  "favorite_prompts",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_favorite_prompts_user_prompt").on(table.userId, table.promptId),
+    index("idx_favorite_prompts_user").on(table.userId),
+  ]
+);
+
+export const favoritePromptsRelations = relations(favoritePrompts, ({ one }) => ({
+  user: one(users, {
+    fields: [favoritePrompts.userId],
+    references: [users.id],
+  }),
+  prompt: one(prompts, {
+    fields: [favoritePrompts.promptId],
+    references: [prompts.id],
+  }),
+}));
+
+export const sessionNotesRelations = relations(sessionNotes, ({ one }) => ({
+  user: one(users, {
+    fields: [sessionNotes.userId],
+    references: [users.id],
+  }),
+}));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -482,3 +546,7 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert;
 export type FavoriteSession = typeof favoriteSessions.$inferSelect;
 export type NewFavoriteSession = typeof favoriteSessions.$inferInsert;
+export type SessionNote = typeof sessionNotes.$inferSelect;
+export type NewSessionNote = typeof sessionNotes.$inferInsert;
+export type FavoritePrompt = typeof favoritePrompts.$inferSelect;
+export type NewFavoritePrompt = typeof favoritePrompts.$inferInsert;

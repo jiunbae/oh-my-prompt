@@ -71,6 +71,27 @@
       "when": 1746441600000,
       "tag": "0011_add_webhook_log_attempt_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1746441601000,
+      "tag": "0012_add_session_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1746460800000,
+      "tag": "0015_add_data_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1746460801000,
+      "tag": "0013_add_favorite_prompts",
+      "breakpoints": true
     }
   ]
 }

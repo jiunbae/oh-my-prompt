@@ -37,6 +37,7 @@ interface PromptData {
 interface SessionThreadProps {
   prompts: PromptData[];
   responseCount: number;
+  hasNote?: boolean;
   selectable?: boolean;
 }
 
@@ -78,7 +79,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function SessionThread({ prompts, responseCount, selectable = false }: SessionThreadProps) {
+export function SessionThread({ prompts, responseCount, hasNote = false, selectable = false }: SessionThreadProps) {
   const router = useRouter();
   const [showResponses, setShowResponses] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);

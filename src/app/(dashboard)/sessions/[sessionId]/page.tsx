@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { SessionThread } from "@/components/session-thread";
+import { SessionNotes } from "@/components/session-notes";
 import { SessionStoryButton } from "@/components/insights/session-story-button";
 import { SessionNameEditor } from "@/components/session-name-editor";
 import { ShareSessionButton } from "@/components/share-session-button";
@@ -114,6 +115,23 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
     )
     .limit(1);
   const isFavorited = !!favoriteRow;
+
+  // Check if session has notes
+  const [noteRow] = await db
+    .select({
+      id: schema.sessionNotes.id,
+      content: schema.sessionNotes.content,
+      createdAt: schema.sessionNotes.createdAt,
+      updatedAt: schema.sessionNotes.updatedAt,
+    })
+    .from(schema.sessionNotes)
+    .where(
+      and(
+        eq(schema.sessionNotes.userId, user.userId),
+        eq(schema.sessionNotes.sessionId, sessionId)
+      )
+    )
+    .limit(1);
 
   const fallbackName = buildSessionFallbackName(sessionId, first.projectName, first.promptText);
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
@@ -262,7 +280,14 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
           })),
         }))}
         responseCount={responseCount}
+        hasNote={!!noteRow}
         selectable
+      />
+
+      {/* Session notes */}
+      <SessionNotes
+        sessionId={sessionId}
+        initialNote={noteRow ?? null}
       />
     </div>
   );

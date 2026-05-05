@@ -31,6 +31,7 @@ const {
 } = require("./templates");
 const { getSyncStatus, updateSyncState } = require("./sync-log");
 const { openDb } = require("./db");
+const { startWatch, stopWatch, isWatching, getStatus, getRecentFiles } = require("./watch");
 
 // ---------------------------------------------------------------------------
 // Version & Help
@@ -75,6 +76,10 @@ ${cmd("sync auto status", "Show auto-sync daemon status")}
 ${cmd("backfill", "Import from Claude transcripts / Codex history")}
 ${cmd("import", "Import from external sources")}
 ${cmd("ingest", "Ingest a raw JSON payload (used by hooks)")}
+${cmd("watch", "Watch transcript directories for new files")}
+${cmd("watch start", "Start file watcher daemon")}
+${cmd("watch stop", "Stop file watcher")}
+${cmd("watch status", "Show watcher status")}
 
 ${cmd("search <query>", "Full-text search prompts locally")}
 ${cmd("stats", "Show prompt statistics")}
@@ -2744,6 +2749,107 @@ async function main() {
       } catch (err) {
         console.error(fail(err.message));
         process.exitCode = 1;
+      }
+      break;
+    }
+    case "watch": {
+      const subCmd = positional[0] || "start";
+      const config = loadConfig();
+
+      if (options.help || options.h) {
+        console.log(`
+  omp watch — Watch transcript directories for new files
+
+  USAGE
+    omp watch [start|stop|status|list]
+
+  SUBCOMMANDS
+    start     Start watching (foreground; use --daemon for background)
+    stop      Stop the watcher daemon
+    status    Show current watch status
+    list      Show recently processed files
+
+  OPTIONS
+    --daemon  Run in background (start only)
+    --json    Output as JSON
+`);
+        break;
+      }
+
+      if (subCmd === "stop") {
+        const result = stopWatch();
+        if (options.json) {
+          printJson(result);
+        } else {
+          console.log(result.stopped ? pass("Watcher stopped.") : warn("Watcher was not running."));
+        }
+        break;
+      }
+
+      if (subCmd === "status") {
+        const status = getStatus(config);
+        if (options.json) {
+          printJson(status);
+        } else {
+          console.log(label("Status", status.watching ? c.green("watching") : c.dim("inactive")));
+          console.log(label("Processed", String(status.processedCount)));
+          if (status.dirs.length) {
+            console.log(c.yellow("Watched directories:"));
+            for (const dir of status.dirs) {
+              console.log(`  ${c.dim(dir)}`);
+            }
+          }
+        }
+        break;
+      }
+
+      if (subCmd === "list") {
+        const files = getRecentFiles(config, 20);
+        if (options.json) {
+          printJson(files);
+        } else {
+          if (!files.length) {
+            console.log(info("No files processed yet."));
+          } else {
+            console.log(c.yellow("Recently processed files:"));
+            for (const f of files) {
+              console.log(`  ${c.dim(f.processed_at)}  ${f.path}`);
+            }
+          }
+        }
+        break;
+      }
+
+      // start (default)
+      if (options.daemon) {
+        // Fork to background
+        const { spawn } = require("child_process");
+        const child = spawn(process.argv[0], [process.argv[1], "watch", "start"], {
+          detached: true,
+          stdio: "ignore",
+        });
+        child.unref();
+        console.log(pass(`Watcher daemon started (pid: ${child.pid})`));
+        break;
+      }
+
+      const result = startWatch(config);
+      if (options.json) {
+        printJson(result);
+      } else {
+        if (result.started) {
+          console.log(pass("Watcher started."));
+          console.log(label("Directories", String(result.dirs.length)));
+          if (result.initialCount > 0) {
+            console.log(label("Initial scan", `${result.initialCount} prompts processed`));
+          }
+          console.log(c.dim("Press Ctrl+C to stop watching."));
+          // Keep process alive
+          process.stdin.resume();
+        } else {
+          console.error(fail(result.error || "Failed to start watcher"));
+          process.exitCode = 1;
+        }
       }
       break;
     }
