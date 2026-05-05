@@ -64,6 +64,13 @@
       "when": 1778236800000,
       "tag": "0010_add_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1746441600000,
+      "tag": "0011_add_webhook_log_attempt_retry",
+      "breakpoints": true
     }
   ]
 }
