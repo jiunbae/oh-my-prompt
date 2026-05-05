@@ -48,6 +48,8 @@ export async function GET(
         statusCode: schema.webhookLogs.statusCode,
         responseBody: schema.webhookLogs.responseBody,
         duration: schema.webhookLogs.duration,
+        attempt: schema.webhookLogs.attempt,
+        retryOf: schema.webhookLogs.retryOf,
         createdAt: schema.webhookLogs.createdAt,
       })
       .from(schema.webhookLogs)

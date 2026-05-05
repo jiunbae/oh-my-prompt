@@ -353,9 +353,12 @@ export const webhookLogs = pgTable("webhook_logs", {
   statusCode: integer("status_code"),
   responseBody: text("response_body"),
   duration: integer("duration"),  // ms
+  attempt: integer("attempt").default(1),  // 1 = original, 2+ = retry attempts
+  retryOf: uuid("retry_of"),  // references the original failed log entry
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 }, (table) => [
   index("idx_webhook_logs_webhook_created").on(table.webhookId, table.createdAt),
+  index("idx_webhook_logs_retry_of").on(table.retryOf),
 ]);
 
 // Webhook relations

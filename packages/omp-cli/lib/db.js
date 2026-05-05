@@ -114,76 +114,36 @@ const MIGRATIONS = [
       addColumnIfMissing(db, "sync_state", "last_synced_id", "TEXT");
     },
   },
+  {
+    version: 4,
+    run: (db) => {
+      // sql.js FTS4 content-table mode is broken: the 'delete' command always
+      // fails with "SQL logic error", making UPDATE/DELETE triggers unusable.
+      // Remove content-table FTS and triggers entirely. Search falls back to
+      // LIKE queries which work reliably with sql.js.
+      db.exec("DROP TRIGGER IF EXISTS prompts_ai");
+      db.exec("DROP TRIGGER IF EXISTS prompts_ad");
+      db.exec("DROP TRIGGER IF EXISTS prompts_au");
+
+      const hasFts = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
+        .get();
+      if (hasFts) {
+        db.exec("DROP TABLE IF EXISTS prompts_fts");
+      }
+    },
+  },
 ];
 
 /**
- * Create FTS virtual table and sync triggers.
- * Tries fts5 first; falls back to fts4 if the module is unavailable
- * (the default sql.js WASM build ships fts4 but not fts5).
+ * FTS setup is intentionally skipped for sql.js.
+ * sql.js FTS4 content-table mode has a broken 'delete' command that causes
+ * "SQL logic error" on every UPDATE/DELETE, making triggers unusable.
+ * Search falls back to LIKE queries which work reliably.
  */
-function createFts(db) {
-  // Check if prompts_fts already exists
-  const existing = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
-    .get();
-
-  if (existing) {
-    // Check if existing FTS table uses fts5 (incompatible with sql.js default build)
-    const sqlRow = db
-      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
-      .get();
-    if (sqlRow && sqlRow.sql && /fts5/i.test(sqlRow.sql)) {
-      // sql.js cannot DROP fts5 virtual tables — skip FTS entirely
-      // Search will fall back to LIKE queries
-      return;
-    }
-    return;
-  }
-
-  const fts5Sql = `
-    CREATE VIRTUAL TABLE prompts_fts USING fts5(
-      prompt_text,
-      response_text,
-      project,
-      content='prompts',
-      content_rowid='rowid'
-    );
-  `;
-
-  const fts4Sql = `
-    CREATE VIRTUAL TABLE prompts_fts USING fts4(
-      prompt_text,
-      response_text,
-      project,
-      content='prompts'
-    );
-  `;
-
-  try {
-    db.exec(fts5Sql);
-  } catch {
-    db.exec(fts4Sql);
-  }
-
-  // Triggers work the same for both fts4 and fts5 content tables
-  db.exec(`
-    CREATE TRIGGER IF NOT EXISTS prompts_ai AFTER INSERT ON prompts BEGIN
-      INSERT INTO prompts_fts(rowid, prompt_text, response_text, project)
-      VALUES (new.rowid, new.prompt_text, new.response_text, new.project);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS prompts_ad AFTER DELETE ON prompts BEGIN
-      INSERT INTO prompts_fts(prompts_fts, rowid, prompt_text, response_text, project)
-      VALUES('delete', old.rowid, old.prompt_text, old.response_text, old.project);
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS prompts_au AFTER UPDATE ON prompts BEGIN
-      INSERT INTO prompts_fts(prompts_fts, rowid, prompt_text, response_text, project)
-      VALUES('delete', old.rowid, old.prompt_text, old.response_text, old.project);
-      INSERT INTO prompts_fts(rowid, prompt_text, response_text, project)
-      VALUES (new.rowid, new.prompt_text, new.response_text, new.project);
-    END;
-  `);
+function createFts(_db) {
+  // No-op: FTS disabled for sql.js compatibility.
+  // Migration v4 drops any existing FTS tables and triggers.
 }
 
 async function openDb(dbPath) {

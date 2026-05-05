@@ -7,6 +7,9 @@ import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { validateWebhookUrl } from "@/services/webhook";
 import { VALID_EVENTS } from "../shared";
+import { getRetryQueue, cancelRetries } from "@/lib/webhook-retry";
+
+export const dynamic = "force-dynamic";
 
 const updateWebhookSchema = z.object({
   name: z.string().min(1).max(255).optional(),
@@ -19,6 +22,67 @@ const updateWebhookSchema = z.object({
     .optional(),
   isActive: z.boolean().optional(),
 });
+
+/**
+ * GET /api/webhooks/[id] - Get a webhook with pending retry info
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const session = await requireAuth();
+
+    const [webhook] = await db
+      .select({
+        id: schema.webhooks.id,
+        name: schema.webhooks.name,
+        url: schema.webhooks.url,
+        events: schema.webhooks.events,
+        isActive: schema.webhooks.isActive,
+        lastTriggeredAt: schema.webhooks.lastTriggeredAt,
+        lastStatus: schema.webhooks.lastStatus,
+        failCount: schema.webhooks.failCount,
+        createdAt: schema.webhooks.createdAt,
+      })
+      .from(schema.webhooks)
+      .where(
+        and(
+          eq(schema.webhooks.id, id),
+          eq(schema.webhooks.userId, session.userId)
+        )
+      )
+      .limit(1);
+
+    if (!webhook) {
+      return NextResponse.json(
+        { error: "Webhook not found" },
+        { status: 404 }
+      );
+    }
+
+    // Include pending retries from the in-memory queue
+    const pendingRetries = getRetryQueue(id);
+
+    return NextResponse.json({
+      webhook: {
+        ...webhook,
+        pendingRetries: pendingRetries.length,
+        pendingRetryDetails: pendingRetries,
+      },
+    });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    logger.error({ err: error }, "Webhook fetch error");
+    return NextResponse.json(
+      { error: "Failed to fetch webhook" },
+      { status: 500 }
+    );
+  }
+}
 
 /**
  * PUT /api/webhooks/[id] - Update a webhook
@@ -84,6 +148,9 @@ export async function PUT(
       // Reset fail count when re-enabling
       if (updates.isActive) {
         setValues.failCount = 0;
+      } else {
+        // Cancel pending retries when disabling
+        cancelRetries(id);
       }
     }
 
@@ -162,6 +229,9 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    // Cancel any pending retries for this webhook
+    cancelRetries(id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

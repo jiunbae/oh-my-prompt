@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import dns from "node:dns";
-import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -8,8 +7,8 @@ import net from "net";
 import { env } from "@/env";
 import { redactText } from "@/lib/redact";
 import type { WebhookEvent } from "@/app/api/webhooks/shared";
+import { executeWebhookDelivery, scheduleRetry } from "@/lib/webhook-retry";
 
-const MAX_FAIL_COUNT = env.OMP_WEBHOOK_MAX_FAIL_COUNT;
 const WEBHOOK_TIMEOUT_MS = env.OMP_WEBHOOK_TIMEOUT_MS;
 
 /**
@@ -309,155 +308,28 @@ export async function dispatchWebhook(
       data: redactedPayload,
     };
 
-    const bodyString = JSON.stringify(deliveryPayload);
-
     // Fire all webhooks concurrently
     await Promise.allSettled(
       activeWebhooks.map(async (webhook) => {
-        const startTime = Date.now();
-        let statusCode: number | null = null;
-        let responseBody: string | null = null;
+        const result = await executeWebhookDelivery({
+          webhookId: webhook.id,
+          url: webhook.url,
+          secret: webhook.secret,
+          event,
+          payload: deliveryPayload,
+          attempt: 1,
+        });
 
-        try {
-          // SSRF check before dispatch
-          const urlCheck = await validateWebhookUrl(webhook.url);
-          if (!urlCheck.valid) {
-            throw new Error(`SSRF blocked: ${urlCheck.error}`);
-          }
-
-          const headers: Record<string, string> = {
-            "Content-Type": "application/json",
-            "User-Agent": "oh-my-prompt/webhooks",
-            "X-Webhook-Event": event,
-            "X-Webhook-Id": webhook.id,
-          };
-
-          // Add HMAC signature if secret is configured
-          if (webhook.secret) {
-            const signature = signPayload(bodyString, webhook.secret);
-            headers["X-Webhook-Signature"] = `sha256=${signature}`;
-          }
-
-          // Pre-flight DNS re-check right before fetch to mitigate TOCTOU / DNS rebinding
-          const preFlightErr = await preFlightDnsCheck(webhook.url);
-          if (preFlightErr) {
-            throw new Error(`SSRF blocked (pre-flight): ${preFlightErr}`);
-          }
-
-          const controller = new AbortController();
-          const timeoutId = setTimeout(
-            () => controller.abort(),
-            WEBHOOK_TIMEOUT_MS
-          );
-
-          const response = await fetch(webhook.url, {
-            method: "POST",
-            headers,
-            body: bodyString,
-            signal: controller.signal,
-            redirect: "error",  // Disable redirects to prevent SSRF via redirect
-          });
-
-          clearTimeout(timeoutId);
-
-          statusCode = response.status;
-          responseBody = await response.text().catch(() => null);
-
-          // Truncate response body for storage
-          if (responseBody && responseBody.length > 4096) {
-            responseBody = responseBody.slice(0, 4096) + "...(truncated)";
-          }
-
-          const duration = Date.now() - startTime;
-
-          // Log the delivery
-          await db.insert(schema.webhookLogs).values({
-            webhookId: webhook.id,
+        // On failure, schedule a retry with exponential backoff
+        if (!result.success) {
+          await scheduleRetry(
+            webhook.id,
+            webhook.url,
+            webhook.secret,
             event,
-            payload: deliveryPayload,
-            statusCode,
-            responseBody,
-            duration,
-          });
-
-          // Update webhook status based on response (atomic operations)
-          if (statusCode >= 200 && statusCode < 300) {
-            // Success: reset fail count atomically
-            await db
-              .update(schema.webhooks)
-              .set({
-                lastTriggeredAt: new Date(),
-                lastStatus: statusCode,
-                failCount: 0,
-              })
-              .where(eq(schema.webhooks.id, webhook.id));
-          } else {
-            // Non-2xx: increment fail count atomically and derive is_active from DB state
-            await db.execute(
-              sql`UPDATE webhooks SET
-                last_triggered_at = NOW(),
-                last_status = ${statusCode},
-                fail_count = fail_count + 1,
-                is_active = CASE WHEN fail_count + 1 >= ${MAX_FAIL_COUNT} THEN false ELSE is_active END
-              WHERE id = ${webhook.id}`
-            );
-
-            // Check if we just hit the threshold for logging purposes
-            const [updated] = await db
-              .select({ failCount: schema.webhooks.failCount })
-              .from(schema.webhooks)
-              .where(eq(schema.webhooks.id, webhook.id))
-              .limit(1);
-
-            if (updated && (updated.failCount ?? 0) >= MAX_FAIL_COUNT) {
-              logger.warn(
-                { webhookId: webhook.id, failCount: updated.failCount },
-                "Webhook auto-disabled after repeated failures"
-              );
-            }
-          }
-        } catch (error) {
-          const duration = Date.now() - startTime;
-          const errorMessage =
-            error instanceof Error ? error.message : "Unknown error";
-
-          // Log the failed delivery
-          await db.insert(schema.webhookLogs).values({
-            webhookId: webhook.id,
-            event,
-            payload: deliveryPayload,
-            statusCode: null,
-            responseBody: `Error: ${errorMessage}`,
-            duration,
-          });
-
-          // Increment fail count atomically and derive is_active from DB state
-          await db.execute(
-            sql`UPDATE webhooks SET
-              last_triggered_at = NOW(),
-              last_status = NULL,
-              fail_count = fail_count + 1,
-              is_active = CASE WHEN fail_count + 1 >= ${MAX_FAIL_COUNT} THEN false ELSE is_active END
-            WHERE id = ${webhook.id}`
-          );
-
-          // Check if we just hit the threshold for logging purposes
-          const [updated] = await db
-            .select({ failCount: schema.webhooks.failCount })
-            .from(schema.webhooks)
-            .where(eq(schema.webhooks.id, webhook.id))
-            .limit(1);
-
-          if (updated && (updated.failCount ?? 0) >= MAX_FAIL_COUNT) {
-            logger.warn(
-              { webhookId: webhook.id, failCount: updated.failCount },
-              "Webhook auto-disabled after repeated failures"
-            );
-          }
-
-          logger.error(
-            { err: error, webhookId: webhook.id, url: webhook.url },
-            "Webhook delivery failed"
+            deliveryPayload,
+            1,
+            result.logId,
           );
         }
       })

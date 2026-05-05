@@ -151,14 +151,15 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
   );
 }
 
-async function ingestPayload(rawPayload, config) {
+async function ingestPayload(rawPayload, config, options = {}) {
   const payload = typeof rawPayload === "string" ? parsePayload(rawPayload) : rawPayload;
   if (!payload) {
     return { ok: false, error: "Invalid JSON payload" };
   }
 
   const record = normalizePayload(payload, config);
-  const db = await openDb(config.storage.sqlite.path);
+  const externalDb = options.db;
+  const db = externalDb || await openDb(config.storage.sqlite.path);
 
   try {
     if (record.role === "assistant" && record.session_id) {
@@ -256,7 +257,7 @@ async function ingestPayload(rawPayload, config) {
     updateState({ lastError: error.message || "Failed to ingest" });
     return { ok: false, error: error.message || "Failed to ingest" };
   } finally {
-    db.close();
+    if (!externalDb) db.close();
   }
 }
 

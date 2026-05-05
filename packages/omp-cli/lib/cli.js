@@ -19,7 +19,16 @@ const { loadState } = require("./state");
 const { getStats } = require("./stats");
 const { exportData } = require("./export");
 const { runSearch } = require("./search");
-const { syncToServer, postJson } = require("./sync");
+const { syncToServer, postJson, getJson } = require("./sync");
+const {
+  listTemplates,
+  showTemplate,
+  renderTemplate,
+  createTemplate,
+  deleteTemplate,
+  formatTable,
+  showTemplateDetails,
+} = require("./templates");
 const { getSyncStatus, updateSyncState } = require("./sync-log");
 const { openDb } = require("./db");
 
@@ -78,6 +87,12 @@ ${cmd("serve", "Start local dashboard server (Docker)")}
 ${cmd("serve stop", "Stop local dashboard server")}
 ${cmd("serve status", "Show local server status")}
 ${cmd("serve logs", "Tail local server logs")}
+
+${cmd("templates", "List prompt templates")}
+${cmd("templates show <id>", "Show template details")}
+${cmd("templates render <id>", "Render a template with variables")}
+${cmd("templates create", "Create a new template")}
+${cmd("templates delete <id>", "Delete a template")}
 
 ${cmd("config get [key]", "Read config value (omit key for full dump)")}
 ${cmd("config set <k> <v>", "Write config value")}
@@ -961,6 +976,9 @@ async function handleSync(options) {
       dryRun: !!options["dry-run"],
       since: options.since,
       chunkSize: options["chunk-size"] ? Number(options["chunk-size"]) : undefined,
+      onProgress: s ? ({ uploaded, duplicates, chunks, totalRows, sent }) => {
+        s.message(`Syncing... ${sent}/${totalRows} records (chunk ${chunks}, ${uploaded} accepted)`);
+      } : undefined,
     };
 
     const result = await syncToServer(config, syncOptions);
@@ -2054,10 +2072,15 @@ async function main() {
       let geminiResult = null;
 
       if (!hasFilter || claudeOnly) {
+        const showProgress = !options.json && process.stderr.isTTY;
         claudeResult = await backfillTranscripts(config, {
           path: options.path,
           dryRun,
+          onProgress: showProgress ? ({ fileIdx, totalFiles, turns, imported, duplicates }) => {
+            process.stderr.write(`\r[Claude] ${fileIdx}/${totalFiles} files processed (${imported} new, ${duplicates} dedup)    `);
+          } : undefined,
         });
+        if (showProgress) process.stderr.write("\n");
       }
       if ((!hasFilter || codexOnly) && !options.path) {
         codexResult = await backfillCodex(config, { dryRun });
@@ -2187,7 +2210,7 @@ async function main() {
   USAGE
     omp doctor [options]
 
-  Checks hooks, config, database, and server connectivity.
+  Checks config, database, server connectivity, migrations, and disk space.
 
   OPTIONS
     --json    Output as JSON
@@ -2200,7 +2223,128 @@ async function main() {
       if (options.json) {
         printJson(report);
       } else {
-        if (report.ok) console.log(pass("Doctor: all checks passed"));
+        // Config file
+        const cfg = report.checks.config;
+        if (cfg) {
+          if (!cfg.exists) {
+            console.log(label("Config", c.yellow("not found (using defaults)")));
+          } else if (!cfg.valid) {
+            console.log(label("Config", c.red(`invalid JSON — ${cfg.parseError || "parse error"}`)));
+          } else {
+            console.log(label("Config", pass(`valid (${cfg.path})`)));
+          }
+        }
+
+        // Database
+        const db = report.checks.database;
+        if (db) {
+          if (db.status === "new") {
+            console.log(label("Database", c.yellow("new (will be created on first use)")));
+          } else if (db.status === "open_error") {
+            console.log(label("Database", c.red("failed to open")));
+          } else {
+            const parts = [];
+            if (db.promptCount !== undefined) parts.push(`${db.promptCount} prompts`);
+            if (db.tagCount !== undefined) parts.push(`${db.tagCount} tags`);
+            if (db.fileSizeFormatted) parts.push(db.fileSizeFormatted);
+            const detail = parts.length ? ` (${parts.join(", ")})` : "";
+            const integ = db.integrity === "ok" || db.integrity === "ok_lightweight"
+              ? ""
+              : db.integrity === "unsupported"
+                ? ""
+                : c.red(" integrity check failed!");
+            console.log(label("Database", pass(`ok${detail}`) + integ));
+            if (db.missingTables?.length) {
+              console.log(`  ${c.yellow("Missing tables:")} ${db.missingTables.join(", ")}`);
+            }
+          }
+        }
+
+        // Migrations
+        const mig = report.checks.migrations;
+        if (mig && mig.status !== "no_path") {
+          if (mig.status === "pending") {
+            console.log(label("Migrations", c.yellow(`${mig.pending} pending (v${mig.currentVersion} -> v${mig.latestVersion})`)));
+          } else if (mig.status === "up_to_date") {
+            console.log(label("Migrations", pass(`up to date (v${mig.currentVersion})`)));
+          } else if (mig.status === "new_db") {
+            console.log(label("Migrations", c.dim(`${mig.pending} pending (new database)`)));
+          }
+        }
+
+        // Server
+        const srv = report.checks.server;
+        if (srv) {
+          if (srv.status === "not_configured") {
+            console.log(label("Server", c.yellow("not configured")));
+          } else if (srv.status === "misconfigured") {
+            console.log(label("Server", c.red("misconfigured (url and token must both be set)")));
+          } else if (srv.status === "connected") {
+            const parts = [c.green("connected")];
+            if (srv.latencyMs !== undefined) parts.push(`${srv.latencyMs}ms`);
+            if (srv.serverVersion) parts.push(`v${srv.serverVersion}`);
+            if (srv.user) parts.push(srv.user);
+            console.log(label("Server", parts.join(" | ")));
+          } else if (srv.status === "timeout") {
+            console.log(label("Server", c.red("timeout (10s)")));
+          } else if (srv.status === "auth_failed") {
+            console.log(label("Server", c.red("authentication failed")));
+          } else {
+            console.log(label("Server", c.red(srv.error || srv.status)));
+          }
+        }
+
+        // Disk space
+        const disk = report.checks.disk;
+        if (disk) {
+          if (disk.status === "ok") {
+            console.log(label("Disk", pass(`${disk.availableFormatted} available`)));
+          } else if (disk.status === "low") {
+            console.log(label("Disk", c.yellow(`LOW — ${disk.availableFormatted} available`)));
+          } else if (disk.status === "error") {
+            console.log(label("Disk", c.yellow("could not check")));
+          } else if (disk.status === "skipped") {
+            // silent — not notable
+          }
+        }
+
+        // Queue
+        const q = report.checks.queue;
+        if (q) {
+          const qDetail = q.count > 0
+            ? c.yellow(`${q.count} pending (${q.bytesFormatted || q.bytes + " bytes"})`)
+            : pass("empty");
+          console.log(label("Queue", qDetail));
+        }
+
+        // Hooks
+        const hk = report.checks.hooks;
+        if (hk) {
+          const entries = Object.entries(hk).map(([k, v]) => `${k}: ${v ? c.green("ok") : c.dim("--")}`);
+          console.log(label("Hooks", entries.join("  ")));
+        }
+
+        // Auto-sync
+        const as = report.checks.autoSync;
+        if (as) {
+          const asParts = [];
+          if (as.enabled) {
+            asParts.push(as.running ? c.green("running") : c.yellow("not running"));
+            if (as.pid) asParts.push(`pid ${as.pid}`);
+          } else {
+            asParts.push(c.dim("disabled"));
+          }
+          console.log(label("Auto-sync", asParts.join(" | ")));
+        }
+
+        // Summary
+        console.log("");
+        if (report.ok) {
+          console.log(pass("All checks passed"));
+        } else {
+          console.log(fail(`${report.errors.length} error(s), ${report.warnings.length} warning(s)`));
+        }
+
         if (report.errors.length) {
           console.log(c.red("\nErrors:"));
           report.errors.forEach((e) => console.log(fail(e)));
@@ -2427,6 +2571,180 @@ async function main() {
         break;
       }
       await handleTag(options, positional);
+      break;
+    }
+    case "templates": {
+      const subCmd = positional[0];
+
+      if (options.help || options.h) {
+        console.log(`
+  omp templates — Manage prompt templates
+
+  USAGE
+    omp templates                                        List all templates
+    omp templates show <id>                              Show template details
+    omp templates render <id> [--var k=v ...]            Render a template
+    omp templates create --title "..." --template "..."  Create a new template
+    omp templates delete <id>                            Delete a template
+
+  SUBCOMMANDS
+    list      List all templates (default)
+    show      Show full template with variables
+    render    Render a template with provided variable values
+    create    Create a new template on the server
+    delete    Delete a template you own
+
+  OPTIONS
+    --title <title>          Template title (create)
+    --template <text>        Template body text (create)
+    --category <cat>         Category: debugging, code-review, feature, refactoring, testing, documentation, other
+    --description <text>     Short description (create)
+    --public                 Mark template as public (create)
+    --var key=value          Variable substitution (render, repeatable)
+    --category <cat>         Filter by category (list)
+    --json                   Output as JSON
+
+  EXAMPLES
+    omp templates
+    omp templates show abc123
+    omp templates render abc123 --var name=UserService --var action=refactor
+    omp templates create --title "Code Review" --template "Review {{file}} for {{concern}}" --category code-review
+    omp templates delete abc123
+`);
+        break;
+      }
+
+      const action = subCmd && subCmd !== "list" ? subCmd : "list";
+
+      if (action === "show") {
+        const tmplId = positional[1];
+        if (!tmplId) {
+          console.error("Usage: omp templates show <id>");
+          process.exitCode = 2;
+          break;
+        }
+        try {
+          const config = loadConfig();
+          const tmpl = await showTemplate(config, tmplId);
+          if (options.json) {
+            printJson(tmpl);
+          } else {
+            showTemplateDetails(tmpl);
+          }
+        } catch (err) {
+          console.error(fail(err.message));
+          process.exitCode = 1;
+        }
+        break;
+      }
+
+      if (action === "render") {
+        const tmplId = positional[1];
+        if (!tmplId) {
+          console.error("Usage: omp templates render <id> [--var key=value ...]");
+          process.exitCode = 2;
+          break;
+        }
+        // Collect --var values (can be repeated)
+        const vars = {};
+        const rawVar = options.var;
+        if (rawVar) {
+          const entries = Array.isArray(rawVar) ? rawVar : [rawVar];
+          for (const entry of entries) {
+            const eqIdx = entry.indexOf("=");
+            if (eqIdx === -1) {
+              console.error(`Invalid --var format: "${entry}". Expected key=value.`);
+              process.exitCode = 2;
+              break;
+            }
+            vars[entry.slice(0, eqIdx)] = entry.slice(eqIdx + 1);
+          }
+        }
+        if (process.exitCode === 2) break;
+
+        try {
+          const config = loadConfig();
+          const rendered = await renderTemplate(config, tmplId, vars);
+          if (options.json) {
+            printJson({ rendered });
+          } else {
+            console.log(rendered);
+          }
+        } catch (err) {
+          console.error(fail(err.message));
+          process.exitCode = 1;
+        }
+        break;
+      }
+
+      if (action === "create") {
+        if (!options.title || !options.template) {
+          console.error("Usage: omp templates create --title \"...\" --template \"...\" [--category ...] [--description ...]");
+          process.exitCode = 2;
+          break;
+        }
+        try {
+          const config = loadConfig();
+          const tmpl = await createTemplate(config, {
+            title: options.title,
+            template: options.template,
+            category: options.category || undefined,
+            description: options.description || undefined,
+            isPublic: !!options.public,
+          });
+          if (options.json) {
+            printJson(tmpl);
+          } else {
+            console.log(pass(`Template created: ${c.bold(tmpl.title)} (${c.cyan(String(tmpl.id).slice(0, 8))})`));
+          }
+        } catch (err) {
+          console.error(fail(err.message));
+          process.exitCode = 1;
+        }
+        break;
+      }
+
+      if (action === "delete") {
+        const tmplId = positional[1];
+        if (!tmplId) {
+          console.error("Usage: omp templates delete <id>");
+          process.exitCode = 2;
+          break;
+        }
+        try {
+          const config = loadConfig();
+          await deleteTemplate(config, tmplId);
+          if (options.json) {
+            printJson({ deleted: true, id: tmplId });
+          } else {
+            console.log(pass(`Template deleted: ${c.dim(tmplId)}`));
+          }
+        } catch (err) {
+          console.error(fail(err.message));
+          process.exitCode = 1;
+        }
+        break;
+      }
+
+      // Default: list
+      try {
+        const config = loadConfig();
+        const templates = await listTemplates(config, {
+          category: options.category || undefined,
+        });
+        if (options.json) {
+          printJson(templates);
+        } else {
+          if (!templates.length) {
+            console.log(info("No templates found."));
+          } else {
+            formatTable(templates);
+          }
+        }
+      } catch (err) {
+        console.error(fail(err.message));
+        process.exitCode = 1;
+      }
       break;
     }
     default:

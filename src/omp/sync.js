@@ -125,6 +125,89 @@ function postJsonOnce(url, headers, body, method) {
   });
 }
 
+function getJsonOnce(url, headers) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const transport = parsed.protocol === "https:" ? https : http;
+
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      timeout: 30000,
+      family: 4,
+    };
+
+    const req = transport.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try {
+          const json = data ? JSON.parse(data) : {};
+          resolve({ status: res.statusCode, body: json });
+        } catch {
+          reject(new Error(`Failed to parse JSON response (status: ${res.statusCode}): ${data.slice(0, 200)}`));
+        }
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("Request timed out"));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+async function getJson(url, headers, retryOpts = {}) {
+  const maxRetries = retryOpts.retries ?? 3;
+  const baseDelay = retryOpts.retryBaseDelay ?? 1000;
+
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await getJsonOnce(url, headers);
+
+      if (NO_RETRY_STATUSES.includes(response.status)) {
+        return response;
+      }
+
+      if (isTransientStatus(response.status) && attempt < maxRetries) {
+        const delay = computeBackoffDelay(attempt, baseDelay);
+        process.stderr.write(
+          `[omp] Retry ${attempt + 1}/${maxRetries} after ${response.status} response (backoff ${delay}ms)\n`
+        );
+        await sleep(delay);
+        lastError = new Error(`Server error (${response.status})`);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      lastError = err;
+
+      if (isTransientError(err) && attempt < maxRetries) {
+        const delay = computeBackoffDelay(attempt, baseDelay);
+        process.stderr.write(
+          `[omp] Retry ${attempt + 1}/${maxRetries} after ${err.code || err.message} (backoff ${delay}ms)\n`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  throw lastError;
+}
+
 async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
   const maxRetries = retryOpts.retries ?? 3;
   const baseDelay = retryOpts.retryBaseDelay ?? 1000;
@@ -310,4 +393,5 @@ async function syncToServer(config, options = {}) {
 module.exports = {
   syncToServer,
   postJson,
+  getJson,
 };

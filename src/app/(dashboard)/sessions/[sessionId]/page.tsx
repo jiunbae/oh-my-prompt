@@ -262,6 +262,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
           })),
         }))}
         responseCount={responseCount}
+        selectable
       />
     </div>
   );
