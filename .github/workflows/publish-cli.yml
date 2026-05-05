@@ -75,7 +75,20 @@ jobs:
           cd packages/omp-cli
           npm pack --dry-run
 
+      - name: Check if version already published
+        id: check
+        run: |
+          NPM_VERSION="${{ steps.version.outputs.npm }}"
+          EXISTING=$(npm view "oh-my-prompt@$NPM_VERSION" version 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "Version $NPM_VERSION already published, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Publish to npm
+        if: steps.check.outputs.skip != 'true'
         run: |
           cd packages/omp-cli
           npm publish --access public
