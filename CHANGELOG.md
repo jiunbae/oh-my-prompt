@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.505.2] - 2026-05-05
+
+### Added
+- **CLI**: `omp watch` for real-time transcript directory monitoring with debounce and daemon mode
+- **Session notes**: Per-session markdown notes with GET/POST/DELETE API and editable UI
+- **Prompt favorites**: Individual prompt starring, favorites listing page, sidebar link
+- **Data retention**: Per-user configurable retention days with automatic cleanup
+- **Admin monitoring**: Rate limit status, webhook health, sync overview, system health dashboard
+- **API docs**: Searchable endpoint reference page with curl examples, OpenAPI 3.0 JSON endpoint at `/api/openapi`
+
+### Migration
+- `0012_add_session_notes` — Add `session_notes` table
+- `0013_add_favorite_prompts` — Add `favorite_prompts` table
+- `0015_add_data_retention` — Add `data_retention_days` to users table
+
 ## [2026.505.1] - 2026-05-05
 
 ### Added
