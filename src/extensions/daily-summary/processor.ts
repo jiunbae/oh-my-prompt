@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import type {
   ProcessorInput,
   InsightResult,
@@ -32,6 +32,7 @@ async function queryDailyStats(
     eq(schema.prompts.userId, userId),
     gte(schema.prompts.timestamp, from),
     lt(schema.prompts.timestamp, to),
+    isNull(schema.prompts.deletedAt),
   );
 
   const [overview, hourly, projects] = await Promise.all([

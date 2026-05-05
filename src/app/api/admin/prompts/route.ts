@@ -3,7 +3,7 @@ import { requireAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { desc, eq, and, gte, lte, sql, inArray } from "drizzle-orm";
+import { desc, eq, and, gte, lte, sql, inArray, isNull } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const pageSize = 20;
     const offset = (page - 1) * pageSize;
 
-    const conditions = [];
+    const conditions = [isNull(schema.prompts.deletedAt)];
 
     if (userId) {
       conditions.push(eq(schema.prompts.userId, userId));

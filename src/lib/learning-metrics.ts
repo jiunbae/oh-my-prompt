@@ -4,7 +4,7 @@
 
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 
 export interface WeeklyMetrics {
   weekStart: string; // ISO date string (YYYY-MM-DD)
@@ -92,6 +92,7 @@ async function fetchWeekPrompts(
         eq(schema.prompts.promptType, "user_input"),
         gte(schema.prompts.timestamp, weekStart),
         lt(schema.prompts.timestamp, weekEnd),
+        isNull(schema.prompts.deletedAt),
       ),
     );
 }
@@ -115,6 +116,7 @@ async function fetchWeekAggregates(
         eq(schema.prompts.promptType, "user_input"),
         gte(schema.prompts.timestamp, weekStart),
         lt(schema.prompts.timestamp, weekEnd),
+        isNull(schema.prompts.deletedAt),
       ),
     );
 

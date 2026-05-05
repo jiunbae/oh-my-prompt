@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import { checkIsAdmin, getSessionUser } from "@/lib/with-auth";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
@@ -67,8 +67,8 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
   const isAdmin = await checkIsAdmin(user.userId);
 
   const sessionConditions = isAdmin
-    ? eq(schema.prompts.sessionId, sessionId)
-    : and(eq(schema.prompts.userId, user.userId), eq(schema.prompts.sessionId, sessionId));
+    ? and(eq(schema.prompts.sessionId, sessionId), isNull(schema.prompts.deletedAt))
+    : and(eq(schema.prompts.userId, user.userId), eq(schema.prompts.sessionId, sessionId), isNull(schema.prompts.deletedAt));
 
   const prompts = await db.query.prompts.findMany({
     where: sessionConditions,

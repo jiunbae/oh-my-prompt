@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { desc, sql, eq, and, gte, lt } from "drizzle-orm";
+import { desc, sql, eq, and, gte, lt, isNull } from "drizzle-orm";
 import { computeSessions } from "@/lib/session-analysis";
 import { logger } from "@/lib/logger";
 
@@ -89,8 +89,8 @@ export async function getAnalytics(
       : undefined;
 
     const userProjectFilter = userId
-      ? sql`project_name is not null AND user_id = ${userId}`
-      : sql`project_name is not null`;
+      ? sql`project_name is not null AND user_id = ${userId} AND deleted_at IS NULL`
+      : sql`project_name is not null AND deleted_at IS NULL`;
 
     const rangeTo = dateRange?.to ?? new Date();
     const days = dateRange?.days ?? 30;
@@ -108,13 +108,15 @@ export async function getAnalytics(
       ...(projectFilter ? [projectFilter] : []),
       gte(schema.prompts.timestamp, rangeFrom),
       lt(schema.prompts.timestamp, rangeTo),
-      eq(schema.prompts.promptType, "user_input")
+      eq(schema.prompts.promptType, "user_input"),
+      isNull(schema.prompts.deletedAt)
     );
 
     // Base filter for stats (user + optional project, no date range)
     const baseFilter = and(
       ...(userFilter ? [userFilter] : []),
       ...(projectFilter ? [projectFilter] : []),
+      isNull(schema.prompts.deletedAt),
     );
 
     const [stats, responseStatsRows, dailySeries, projectStats, typeStats, recentPrompts, projectActivityRows, sessionPromptRows] =

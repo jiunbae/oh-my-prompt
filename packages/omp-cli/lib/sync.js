@@ -57,7 +57,32 @@ function rowToUploadRecord(row) {
   };
 }
 
-function postJson(url, headers, body, method = "POST") {
+// Error codes that indicate transient network failures worth retrying
+const TRANSIENT_CODES = ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EPIPE", "EAI_AGAIN"];
+
+// HTTP status codes that should NOT be retried (permanent failures)
+const NO_RETRY_STATUSES = [401, 403, 413];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function computeBackoffDelay(attempt, baseDelay) {
+  const exponential = baseDelay * Math.pow(2, attempt);
+  // Add jitter: 0.5x to 1.5x of the exponential delay
+  const jitter = exponential * (0.5 + Math.random());
+  return Math.round(jitter);
+}
+
+function isTransientError(err) {
+  return TRANSIENT_CODES.includes(err.code) || err.message === "Request timed out";
+}
+
+function isTransientStatus(status) {
+  return status >= 500 && !NO_RETRY_STATUSES.includes(status);
+}
+
+function postJsonOnce(url, headers, body, method) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const transport = parsed.protocol === "https:" ? https : http;
@@ -100,6 +125,53 @@ function postJson(url, headers, body, method = "POST") {
   });
 }
 
+async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
+  const maxRetries = retryOpts.retries ?? 3;
+  const baseDelay = retryOpts.retryBaseDelay ?? 1000;
+
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await postJsonOnce(url, headers, body, method);
+
+      // Don't retry permanent failure statuses
+      if (NO_RETRY_STATUSES.includes(response.status)) {
+        return response;
+      }
+
+      // Retry on transient HTTP statuses (5xx)
+      if (isTransientStatus(response.status) && attempt < maxRetries) {
+        const delay = computeBackoffDelay(attempt, baseDelay);
+        process.stderr.write(
+          `[omp] Retry ${attempt + 1}/${maxRetries} after ${response.status} response (backoff ${delay}ms)\n`
+        );
+        await sleep(delay);
+        lastError = new Error(`Server error (${response.status})`);
+        continue;
+      }
+
+      return response;
+    } catch (err) {
+      lastError = err;
+
+      // Only retry transient network errors
+      if (isTransientError(err) && attempt < maxRetries) {
+        const delay = computeBackoffDelay(attempt, baseDelay);
+        process.stderr.write(
+          `[omp] Retry ${attempt + 1}/${maxRetries} after ${err.code || err.message} (backoff ${delay}ms)\n`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  // All retries exhausted
+  throw lastError;
+}
+
 async function syncToServer(config, options = {}) {
   const serverUrl = config.server?.url;
   const serverToken = config.server?.token;
@@ -112,8 +184,8 @@ async function syncToServer(config, options = {}) {
     );
   }
 
-  const db = openDb(config.storage.sqlite.path);
-  const state = getSyncState(config);
+  const db = await openDb(config.storage.sqlite.path);
+  const state = await getSyncState(config);
   const since = options.since || state.lastSyncedAt || null;
   const rows = fetchRows(db, since, state.lastSyncedId);
   db.close();
@@ -122,7 +194,7 @@ async function syncToServer(config, options = {}) {
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
   }
 
-  const chunkSize = options.chunkSize || 500;
+  const chunkSize = options.chunkSize || 200;
   let totalAccepted = 0;
   let totalDuplicates = 0;
   let totalRejected = 0;
@@ -130,7 +202,11 @@ async function syncToServer(config, options = {}) {
   let chunks = 0;
   const errors = [];
 
-  const logId = createSyncLog(config, since, "server");
+  const maxRetries = config.sync?.retries ?? 3;
+  const retryBaseDelay = config.sync?.retryBaseDelay ?? 1000;
+  const retryOpts = { retries: maxRetries, retryBaseDelay };
+
+  const logId = await createSyncLog(config, since, "server");
   const uploadUrl = `${serverUrl.replace(/\/$/, "")}/api/sync/upload`;
   const headers = { "X-User-Token": serverToken };
 
@@ -156,14 +232,38 @@ async function syncToServer(config, options = {}) {
       const response = await postJson(uploadUrl, headers, {
         records,
         deviceId: getDeviceId(config),
-      });
+      }, "POST", retryOpts);
 
       if (response.status === 401) {
         throw new Error("Authentication failed. Check server.token.");
       }
 
       if (response.status === 413) {
-        throw new Error("Request too large. Try reducing chunk size.");
+        // Auto-reduce chunk size and retry this chunk
+        const smallerChunk = Math.max(10, Math.floor(records.length / 4));
+        process.stderr.write(
+          `[omp] Request too large (${records.length} records). Splitting into chunks of ${smallerChunk}...\n`
+        );
+        for (let j = 0; j < records.length; j += smallerChunk) {
+          const subChunk = records.slice(j, j + smallerChunk);
+          const subResp = await postJson(uploadUrl, headers, {
+            records: subChunk,
+            deviceId: getDeviceId(config),
+          }, "POST", retryOpts);
+          if (subResp.status === 413) {
+            throw new Error(`Request too large even with ${subChunk.length} records. Try reducing chunk size further.`);
+          }
+          if (subResp.status >= 400) {
+            throw new Error(`Server error (${subResp.status}): ${JSON.stringify(subResp.body)}`);
+          }
+          const subResult = subResp.body;
+          totalAccepted += subResult.accepted || 0;
+          totalDuplicates += subResult.duplicates || 0;
+          totalRejected += subResult.rejected || 0;
+          if (subResult.errors?.length) errors.push(...subResult.errors);
+        }
+        chunks++;
+        continue;
       }
 
       if (response.status >= 400) {
@@ -184,20 +284,21 @@ async function syncToServer(config, options = {}) {
     // This prevents permanently skipping records when the server is temporarily down
     const lastRow = rows[rows.length - 1];
     if (!options.dryRun && lastRow?.created_at && (totalAccepted > 0 || totalDuplicates > 0 || totalSkipped > 0)) {
-      updateSyncState(config, lastRow.created_at, lastRow.id);
+      await updateSyncState(config, lastRow.created_at, lastRow.id);
     }
 
-    finishSyncLog(config, logId, "success", null, chunks, totalAccepted);
+    await finishSyncLog(config, logId, "success", null, chunks, totalAccepted);
     return {
       uploaded: totalAccepted,
       duplicates: totalDuplicates,
       rejected: totalRejected,
       chunks,
       since,
+      retries: maxRetries,
       errors: errors.slice(0, 10),
     };
   } catch (error) {
-    finishSyncLog(config, logId, "failed", error.message || "sync failed", chunks, totalAccepted);
+    await finishSyncLog(config, logId, "failed", error.message || "unknown", chunks, totalAccepted);
     throw error;
   }
 }

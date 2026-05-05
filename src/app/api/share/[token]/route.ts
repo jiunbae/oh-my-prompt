@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 
 // GET /api/share/[token] - Public endpoint, no auth required
@@ -54,7 +54,7 @@ export async function GET(
         tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
       })
       .from(schema.prompts)
-      .where(eq(schema.prompts.id, shared.promptId))
+      .where(and(eq(schema.prompts.id, shared.promptId), isNull(schema.prompts.deletedAt)))
       .limit(1);
 
     if (!prompt) {

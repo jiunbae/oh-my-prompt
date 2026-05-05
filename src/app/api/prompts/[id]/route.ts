@@ -14,7 +14,8 @@ export async function DELETE(
     const session = await requireAuth();
 
     await db
-      .delete(schema.prompts)
+      .update(schema.prompts)
+      .set({ deletedAt: new Date() })
       .where(and(eq(schema.prompts.id, id), eq(schema.prompts.userId, session.userId)));
 
     return NextResponse.json({ success: true });

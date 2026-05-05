@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lt, sql, desc } from "drizzle-orm";
+import { eq, and, gte, lt, sql, desc, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import { logger } from "@/lib/logger";
 
@@ -55,6 +55,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
     weekAgoStart.setUTCDate(weekAgoStart.getUTCDate() - 6);
 
     const userFilter = eq(schema.prompts.userId, userId);
+    const notDeleted = isNull(schema.prompts.deletedAt);
 
     // Single Promise.all for all 13 queries (no data dependency between them)
     const [todayStats, yesterdayStats, dailyCounts, recentSessionsRaw, topProjectsRaw, tokenStats, dailyTokens, tokensByProject, qualityStats, qualityDistRaw, qualityTrend, topQualityRaw, topicTagsRaw] =
@@ -66,7 +67,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           projects: sql<number>`count(distinct ${schema.prompts.projectName})`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, todayStart), lt(schema.prompts.timestamp, tomorrowStart))),
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, todayStart), lt(schema.prompts.timestamp, tomorrowStart))),
 
         db.select({
           prompts: sql<number>`count(*)`,
@@ -75,14 +76,14 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           projects: sql<number>`count(distinct ${schema.prompts.projectName})`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, yesterdayStart), lt(schema.prompts.timestamp, todayStart))),
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, yesterdayStart), lt(schema.prompts.timestamp, todayStart))),
 
         db.select({
           date: sql<string>`date(${schema.prompts.timestamp})`,
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
         .groupBy(sql`date(${schema.prompts.timestamp})`)
         .orderBy(sql`date(${schema.prompts.timestamp})`),
 
@@ -102,7 +103,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           LEFT JOIN ${schema.sessionDisplayNames}
             ON ${schema.sessionDisplayNames.userId} = ${userId}
            AND ${schema.sessionDisplayNames.sessionId} = ${schema.prompts.sessionId}
-          WHERE ${schema.prompts.userId} = ${userId} AND ${schema.prompts.sessionId} IS NOT NULL
+          WHERE ${schema.prompts.userId} = ${userId} AND ${schema.prompts.sessionId} IS NOT NULL AND ${schema.prompts.deletedAt} IS NULL
           GROUP BY ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
           ORDER BY MAX(${schema.prompts.timestamp}) DESC
           LIMIT 3
@@ -115,6 +116,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
         .from(schema.prompts)
         .where(and(
           userFilter,
+          notDeleted,
           gte(schema.prompts.timestamp, weekAgoStart),
           lt(schema.prompts.timestamp, tomorrowStart),
           sql`${schema.prompts.projectName} IS NOT NULL`,
@@ -131,7 +133,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           promptCount: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart))),
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart))),
 
         // Daily token trend (7 days)
         db.select({
@@ -139,7 +141,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           tokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
         .groupBy(sql`date(${schema.prompts.timestamp})`)
         .orderBy(sql`date(${schema.prompts.timestamp})`),
 
@@ -149,7 +151,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           tokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.projectName} IS NOT NULL`))
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.projectName} IS NOT NULL`))
         .groupBy(schema.prompts.projectName)
         .orderBy(desc(sql`sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0))`))
         .limit(5),
@@ -160,7 +162,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           totalScored: sql<number>`count(${schema.prompts.qualityScore})`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`)),
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`)),
 
         // Quality score distribution (buckets of 20)
         db.execute(sql`
@@ -178,6 +180,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
             AND ${schema.prompts.timestamp} >= ${weekAgoStart.toISOString()}
             AND ${schema.prompts.timestamp} < ${tomorrowStart.toISOString()}
             AND ${schema.prompts.qualityScore} IS NOT NULL
+            AND ${schema.prompts.deletedAt} IS NULL
           GROUP BY 1
           ORDER BY 1
         `),
@@ -188,7 +191,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           avg: sql<number>`coalesce(avg(${schema.prompts.qualityScore}),0)`,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
         .groupBy(sql`date(${schema.prompts.timestamp})`)
         .orderBy(sql`date(${schema.prompts.timestamp})`),
 
@@ -199,7 +202,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
           promptText: schema.prompts.promptText,
         })
         .from(schema.prompts)
-        .where(and(userFilter, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
+        .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
         .orderBy(desc(schema.prompts.qualityScore))
         .limit(3),
 
@@ -211,6 +214,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
             AND ${schema.prompts.timestamp} >= ${weekAgoStart.toISOString()}
             AND ${schema.prompts.timestamp} < ${tomorrowStart.toISOString()}
             AND ${schema.prompts.topicTags} IS NOT NULL
+            AND ${schema.prompts.deletedAt} IS NULL
           GROUP BY tag
           ORDER BY count DESC
           LIMIT 10

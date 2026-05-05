@@ -264,7 +264,7 @@ function aggregateRows(rows, groupBy) {
   return sortGroupedRows(grouped, groupBy);
 }
 
-function getStats(config, options = {}) {
+async function getStats(config, options = {}) {
   const groupBy = options.groupBy || null;
   if (groupBy && !VALID_GROUPS.has(groupBy)) {
     throw new Error(`Invalid --group-by value "${groupBy}". Use one of: ${Array.from(VALID_GROUPS).join(", ")}.`);
@@ -272,7 +272,7 @@ function getStats(config, options = {}) {
 
   const limit = normalizeLimit(options.limit);
   const range = normalizeDateRange(options.since, options.until);
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   const { whereClause, params } = buildWhereClause(range);
 
   const rows = db

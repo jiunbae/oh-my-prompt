@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lt, sql } from "drizzle-orm";
+import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import { parseDate } from "@/lib/date-utils";
 
@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
       sql`${schema.prompts.sessionId} IS NOT NULL`,
       gte(schema.prompts.timestamp, from),
       lt(schema.prompts.timestamp, toExclusive),
+      isNull(schema.prompts.deletedAt),
     ];
 
     if (project) conditions.push(eq(schema.prompts.projectName, project));

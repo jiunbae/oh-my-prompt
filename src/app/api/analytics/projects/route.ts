@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger";
 import { parseDateRange } from "../_helpers";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql, isNull } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest) {
       eq(schema.prompts.userId, userId),
       gte(schema.prompts.timestamp, from),
       lt(schema.prompts.timestamp, to),
-      eq(schema.prompts.promptType, "user_input")
+      eq(schema.prompts.promptType, "user_input"),
+      isNull(schema.prompts.deletedAt)
     );
 
     const dateExpr = sql<string>`date(${schema.prompts.timestamp})`;

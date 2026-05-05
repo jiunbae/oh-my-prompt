@@ -1,8 +1,8 @@
 const fs = require("fs");
 const { openDb } = require("./db");
 
-function exportData(config, options = {}) {
-  const db = openDb(config.storage.sqlite.path);
+async function exportData(config, options = {}) {
+  const db = await openDb(config.storage.sqlite.path);
   const where = [];
   const params = [];
 

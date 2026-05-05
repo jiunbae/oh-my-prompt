@@ -4,7 +4,7 @@ import { db } from "@/db/client";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +24,8 @@ export async function GET(
     const prompts = await db.query.prompts.findMany({
       where: and(
         eq(schema.prompts.userId, session.userId),
-        eq(schema.prompts.sessionId, sessionId)
+        eq(schema.prompts.sessionId, sessionId),
+        isNull(schema.prompts.deletedAt)
       ),
       orderBy: [desc(schema.prompts.timestamp)],
       with: {
@@ -107,7 +108,8 @@ export async function PATCH(
       .where(
         and(
           eq(schema.prompts.userId, session.userId),
-          eq(schema.prompts.sessionId, sessionId)
+          eq(schema.prompts.sessionId, sessionId),
+          isNull(schema.prompts.deletedAt)
         )
       )
       .limit(1);

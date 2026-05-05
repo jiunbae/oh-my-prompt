@@ -101,6 +101,7 @@ export const prompts = pgTable(
     enrichedAt: timestamp("enriched_at", { withTimezone: true }),
 
     searchVector: tsvector("search_vector"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
     index("idx_prompts_timestamp").on(table.timestamp),

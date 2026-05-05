@@ -6,7 +6,7 @@ import { callLLM, getLLMConfig } from "@/extensions/llm";
 import type { InsightResult } from "@/extensions/types";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, gte, sql, desc } from "drizzle-orm";
+import { eq, and, gte, sql, desc, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 
 export const dynamic = "force-dynamic";
@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
     const baseConditions = and(
       eq(schema.prompts.userId, session.userId),
       gte(schema.prompts.timestamp, thirtyDaysAgo),
+      isNull(schema.prompts.deletedAt),
     );
 
     // Gather aggregated stats in parallel
@@ -172,6 +173,7 @@ export async function POST(request: NextRequest) {
         WHERE ${and(
           eq(schema.prompts.userId, session.userId),
           gte(schema.prompts.timestamp, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+          isNull(schema.prompts.deletedAt),
         )}
         GROUP BY date_trunc('day', ${schema.prompts.timestamp})::date
         ORDER BY day DESC

@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger";
 import { getAnalytics } from "@/lib/analytics";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql, isNull } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
         })
         .from(schema.prompts)
         .innerJoin(schema.users, eq(schema.prompts.userId, schema.users.id))
+        .where(isNull(schema.prompts.deletedAt))
         .groupBy(schema.users.id, schema.users.name, schema.users.email)
         .orderBy(desc(sql`count(*)`)),
     ]);

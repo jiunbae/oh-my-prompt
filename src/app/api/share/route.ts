@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import crypto from "crypto";
@@ -41,7 +41,8 @@ export async function POST(request: NextRequest) {
       .where(
         and(
           eq(schema.prompts.id, promptId),
-          eq(schema.prompts.userId, session.userId)
+          eq(schema.prompts.userId, session.userId),
+          isNull(schema.prompts.deletedAt)
         )
       )
       .limit(1);

@@ -3,7 +3,7 @@ import { callLLM, getLLMConfig } from "../llm";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, asc, desc, sql } from "drizzle-orm";
+import { eq, and, asc, desc, sql, isNull } from "drizzle-orm";
 import { redactText } from "@/lib/redact";
 
 interface SessionPrompt {
@@ -48,6 +48,7 @@ async function getSessionPrompts(
       and(
         eq(schema.prompts.userId, userId),
         eq(schema.prompts.sessionId, sessionId),
+        isNull(schema.prompts.deletedAt),
       ),
     )
     .orderBy(asc(schema.prompts.timestamp))

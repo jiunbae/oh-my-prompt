@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { eq, and, gte, lte, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     const conditions = [
       eq(schema.prompts.userId, session.userId),
       sql`${schema.prompts.sessionId} IS NOT NULL`,
+      isNull(schema.prompts.deletedAt),
     ];
 
     if (project) conditions.push(eq(schema.prompts.projectName, project));

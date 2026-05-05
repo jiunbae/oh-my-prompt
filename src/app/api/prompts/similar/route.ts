@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, ne, sql } from "drizzle-orm";
+import { eq, and, ne, sql, isNull } from "drizzle-orm";
 import { requireAuth, checkIsAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { computeSimilarity } from "@/lib/prompt-diff";
@@ -25,8 +25,8 @@ export async function GET(request: NextRequest) {
     // Fetch the source prompt
     const isAdmin = session.isAdmin ? await checkIsAdmin(session.userId) : false;
     const ownershipCondition = isAdmin
-      ? eq(schema.prompts.id, id)
-      : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, session.userId));
+      ? and(eq(schema.prompts.id, id), isNull(schema.prompts.deletedAt))
+      : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, session.userId), isNull(schema.prompts.deletedAt));
 
     const [sourcePrompt] = await db
       .select({
@@ -81,7 +81,8 @@ export async function GET(request: NextRequest) {
         and(
           ne(schema.prompts.id, id),
           sql`${schema.prompts.searchVector} @@ plainto_tsquery('english', ${searchText})`,
-          sql`${userFilter}`
+          sql`${userFilter}`,
+          isNull(schema.prompts.deletedAt)
         )
       )
       .orderBy(

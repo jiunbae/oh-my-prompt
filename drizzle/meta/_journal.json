@@ -57,6 +57,13 @@
       "when": 1774070402000,
       "tag": "0009_add_favorite_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778236800000,
+      "tag": "0010_add_soft_delete",
+      "breakpoints": true
     }
   ]
 }

@@ -162,7 +162,7 @@ export function SessionFilters({
                 key={m}
                 type="button"
                 onClick={() => setSearchMode(m)}
-                className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                className={`px-3 py-2 sm:px-2.5 sm:py-1 text-xs font-medium transition-colors ${
                   searchMode === m
                     ? "bg-primary text-primary-foreground"
                     : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -176,7 +176,7 @@ export function SessionFilters({
       </form>
 
       {showAdvanced && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 bg-surface/50 rounded-lg border border-border">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-4 bg-surface/50 rounded-lg border border-border">
           <div className="space-y-1">
             <label htmlFor="project-filter" className="text-xs text-muted-foreground font-medium">Project</label>
             <select

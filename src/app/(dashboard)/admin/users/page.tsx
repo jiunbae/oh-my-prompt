@@ -275,9 +275,89 @@ export default function AdminUsersPage() {
               {users.map((u) => {
                 const isSelf = u.id === user?.id;
                 return (
+                  <div key={u.id}>
+                  {/* Mobile card layout */}
                   <div
-                    key={u.id}
-                    className="flex flex-col md:grid md:grid-cols-[1fr_1fr_80px_110px_100px_80px_80px_80px_140px] gap-2 md:gap-4 py-4 md:items-center"
+                    className="md:hidden p-4 space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-foreground text-sm font-medium truncate">
+                          {u.email}
+                          {isSelf && (
+                            <span className="text-xs text-muted-foreground ml-2">(you)</span>
+                          )}
+                        </p>
+                        <p className="text-muted-foreground text-xs truncate mt-0.5">
+                          {u.name || "\u2014"}
+                        </p>
+                      </div>
+                      {u.isAdmin ? (
+                        <Badge variant="default" className="bg-chart-1/20 text-chart-1 border-chart-1/30 shrink-0">
+                          Admin
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground shrink-0">User</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Created</span>
+                        <span className="text-foreground">{formatDate(u.createdAt)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Last login</span>
+                        <span className="text-foreground" title={u.lastLoginAt ? formatDateTime(u.lastLoginAt) : undefined}>
+                          {u.lastLoginAt ? timeAgo(u.lastLoginAt) : "Never"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Prompts</span>
+                        <span className="text-foreground font-mono">{u.promptCount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Tokens</span>
+                        <span className="text-foreground font-mono">{formatTokens(u.totalTokens)}</span>
+                      </div>
+                      <div className="flex justify-between col-span-2">
+                        <span className="text-muted-foreground">Storage</span>
+                        <span className="text-foreground font-mono">{formatBytes(u.totalStorageBytes)}</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => openResetDialog(u.id, u.email)}
+                        className="text-muted-foreground hover:text-foreground text-xs min-h-[44px]"
+                      >
+                        Reset PW
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleToggleAdmin(u.id, u.isAdmin)}
+                        disabled={isSelf || togglingId === u.id}
+                        className={`min-h-[44px] ${
+                          u.isAdmin
+                            ? "text-destructive hover:text-destructive/80 hover:bg-destructive/10 text-xs"
+                            : "text-chart-1 hover:text-chart-1/80 hover:bg-chart-1/10 text-xs"
+                        }`}
+                        title={isSelf ? "Cannot change your own role" : undefined}
+                      >
+                        {togglingId === u.id ? (
+                          <span className="animate-spin h-4 w-4 border-2 border-current border-t-transparent rounded-full" />
+                        ) : u.isAdmin ? (
+                          "Revoke"
+                        ) : (
+                          "Grant"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  {/* Desktop table row */}
+                  <div
+                    className="hidden md:grid md:grid-cols-[1fr_1fr_80px_110px_100px_80px_80px_80px_140px] gap-4 py-4 items-center"
                   >
                     <div className="min-w-0">
                       <p className="text-foreground text-sm truncate">
@@ -356,6 +436,7 @@ export default function AdminUsersPage() {
                         )}
                       </Button>
                     </div>
+                  </div>
                   </div>
                 );
               })}

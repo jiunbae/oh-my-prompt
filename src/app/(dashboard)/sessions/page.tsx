@@ -7,7 +7,7 @@ import { getSessionUser } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, inArray, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -53,6 +53,7 @@ async function getSessions(params: SearchParams, userId: string, onlyFavoriteIds
   const conditions = [
     eq(schema.prompts.userId, userId),
     sql`${schema.prompts.sessionId} IS NOT NULL`,
+    isNull(schema.prompts.deletedAt),
   ];
 
   // Filter to favorites only
@@ -96,6 +97,7 @@ async function getSessions(params: SearchParams, userId: string, onlyFavoriteIds
   const baseConditions = and(
     eq(schema.prompts.userId, userId),
     sql`${schema.prompts.sessionId} IS NOT NULL`,
+    isNull(schema.prompts.deletedAt),
   );
 
   try {
@@ -202,11 +204,11 @@ function PaginationNav({
   };
 
   return (
-    <nav className="flex items-center justify-center gap-1" aria-label="Session list pagination">
+    <nav className="flex items-center justify-center gap-2 sm:gap-1" aria-label="Session list pagination">
       {currentPage > 1 && (
         <Link
           href={buildPageUrl(currentPage - 1)}
-          className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:h-9 sm:w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           aria-label="Go to previous page"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -217,14 +219,14 @@ function PaginationNav({
 
       {getPageNumbers().map((page, idx) =>
         page === "ellipsis" ? (
-          <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground text-sm">
+          <span key={`ellipsis-${idx}`} className="px-1 sm:px-2 text-muted-foreground text-sm">
             ...
           </span>
         ) : (
           <Link
             key={page}
             href={buildPageUrl(page)}
-            className={`inline-flex items-center justify-center h-9 min-w-9 px-3 rounded-lg text-sm font-medium transition-colors ${
+            className={`inline-flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-[36px] sm:h-9 px-3 rounded-lg text-sm font-medium transition-colors ${
               page === currentPage
                 ? "bg-primary text-primary-foreground"
                 : "border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -240,7 +242,7 @@ function PaginationNav({
       {currentPage < totalPages && (
         <Link
           href={buildPageUrl(currentPage + 1)}
-          className="inline-flex items-center justify-center h-9 w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:h-9 sm:w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           aria-label="Go to next page"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

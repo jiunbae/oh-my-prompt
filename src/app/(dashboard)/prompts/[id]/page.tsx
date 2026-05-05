@@ -1,7 +1,7 @@
 import { PromptDetail } from "@/components/prompt-detail";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, ne, sql } from "drizzle-orm";
+import { eq, and, ne, sql, isNull } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { computeSimilarity } from "@/lib/prompt-diff";
 import { checkIsAdmin, getSessionUser } from "@/lib/with-auth";
@@ -15,8 +15,8 @@ const getCurrentUser = getSessionUser;
 async function getPromptWithTags(id: string, userId: string, isAdmin: boolean) {
   // Admins can view any prompt; non-admins are scoped to their own prompts.
   const whereCondition = isAdmin
-    ? eq(schema.prompts.id, id)
-    : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, userId));
+    ? and(eq(schema.prompts.id, id), isNull(schema.prompts.deletedAt))
+    : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, userId), isNull(schema.prompts.deletedAt));
 
   return db.query.prompts.findFirst({
     where: whereCondition,
@@ -69,7 +69,8 @@ async function getSimilarPrompts(
         and(
           ne(schema.prompts.id, sourcePrompt.id),
           sql`${schema.prompts.searchVector} @@ plainto_tsquery('english', ${searchText})`,
-          sql`${userFilter}`
+          sql`${userFilter}`,
+          isNull(schema.prompts.deletedAt)
         )
       )
       .orderBy(

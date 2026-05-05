@@ -3,7 +3,7 @@ import { getLLMConfig, callLLM } from "../llm";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, isNull } from "drizzle-orm";
 import { scorePrompt } from "@/services/quality-scorer";
 import { dispatchWebhook } from "@/services/webhook";
 import { redactText } from "@/lib/redact";
@@ -220,6 +220,7 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
           eq(schema.prompts.userId, input.userId),
           eq(schema.prompts.promptType, "user_input"),
           sql`(${schema.prompts.enrichedAt} IS NULL OR ${schema.prompts.qualityClarity} IS NULL)`,
+          isNull(schema.prompts.deletedAt),
         ),
       )
       .limit(200);
@@ -420,6 +421,7 @@ async function getQualityStats(
       and(
         eq(schema.prompts.userId, userId),
         sql`${schema.prompts.enrichedAt} IS NOT NULL`,
+        isNull(schema.prompts.deletedAt),
       ),
     );
 

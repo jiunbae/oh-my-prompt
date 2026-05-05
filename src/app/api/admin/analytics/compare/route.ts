@@ -3,7 +3,7 @@ import { requireAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sql, eq, gte, desc, and, inArray } from "drizzle-orm";
+import { sql, eq, gte, desc, and, inArray, isNull } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       const activeUsers = await db
         .select({ userId: schema.prompts.userId })
         .from(schema.prompts)
-        .where(gte(schema.prompts.timestamp, thirtyDaysAgo))
+        .where(and(gte(schema.prompts.timestamp, thirtyDaysAgo), isNull(schema.prompts.deletedAt)))
         .groupBy(schema.prompts.userId)
         .orderBy(desc(sql`count(*)`))
         .limit(20);
@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
         and(
           inArray(schema.prompts.userId, targetUserIds),
           gte(schema.prompts.timestamp, thirtyDaysAgo),
+          isNull(schema.prompts.deletedAt),
         )
       )
       .groupBy(schema.prompts.userId, sql`date(${schema.prompts.timestamp})`)

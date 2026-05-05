@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
 import { SharedPromptView } from "@/components/shared-prompt-view";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +55,7 @@ async function getSharedPromptReadOnly(token: string): Promise<SharedPromptData 
         tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
       })
       .from(schema.prompts)
-      .where(eq(schema.prompts.id, shared.promptId))
+      .where(and(eq(schema.prompts.id, shared.promptId), isNull(schema.prompts.deletedAt)))
       .limit(1);
 
     if (!prompt) return null;
@@ -104,7 +104,7 @@ async function getSharedPromptAndIncrement(token: string): Promise<SharedPromptD
         tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
       })
       .from(schema.prompts)
-      .where(eq(schema.prompts.id, shared.promptId))
+      .where(and(eq(schema.prompts.id, shared.promptId), isNull(schema.prompts.deletedAt)))
       .limit(1);
 
     if (!prompt) return null;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, isNull } from "drizzle-orm";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { rateLimiters } from "@/lib/rate-limit";
@@ -33,7 +33,7 @@ export async function GET() {
           totalUnenriched: sql<number>`count(*) filter (where enriched_at is null and prompt_type = 'user_input')`,
         })
         .from(schema.prompts)
-        .where(eq(schema.prompts.userId, session.userId)),
+        .where(and(eq(schema.prompts.userId, session.userId), isNull(schema.prompts.deletedAt))),
 
       // Quality distribution
       db
@@ -53,6 +53,7 @@ export async function GET() {
           and(
             eq(schema.prompts.userId, session.userId),
             sql`${schema.prompts.enrichedAt} is not null`,
+            isNull(schema.prompts.deletedAt),
           ),
         )
         .groupBy(
@@ -70,6 +71,7 @@ export async function GET() {
         from ${schema.prompts}, unnest(topic_tags) as tag
         where ${schema.prompts.userId} = ${session.userId}
           and ${schema.prompts.enrichedAt} is not null
+          and ${schema.prompts.deletedAt} is null
         group by tag
         order by count desc
         limit 15

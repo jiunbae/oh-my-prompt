@@ -172,13 +172,13 @@ export function SessionCalendar({ data, selectedDate, onSelectDate }: SessionCal
       )}
 
       {/* Month labels row */}
-      <div className="flex">
+      <div className="flex overflow-x-auto">
         <div className="w-8 shrink-0" />
-        <div className="flex gap-[3px] relative">
+        <div className="flex gap-[3px] sm:gap-[3px] relative">
           {weeks.map((_, colIdx) => {
             const ml = monthLabels.find((m) => m.colIndex === colIdx);
             return (
-              <div key={colIdx} className="w-[13px] text-[10px] text-muted-foreground">
+              <div key={colIdx} className="w-[11px] sm:w-[13px] text-[10px] text-muted-foreground">
                 {ml ? ml.label : ""}
               </div>
             );
@@ -187,26 +187,27 @@ export function SessionCalendar({ data, selectedDate, onSelectDate }: SessionCal
       </div>
 
       {/* Grid: 7 rows x N columns */}
-      <div className="flex">
+      <div className="flex overflow-x-auto">
         {/* Day-of-week labels */}
-        <div className="flex flex-col gap-[3px] w-8 shrink-0">
+        <div className="flex flex-col gap-[3px] sm:gap-[3px] w-8 shrink-0">
           {dayLabels.map((label, i) => (
-            <div key={i} className="h-[13px] text-[10px] text-muted-foreground leading-[13px]">
+            <div key={i} className="h-[11px] sm:h-[13px] text-[10px] text-muted-foreground leading-[11px] sm:leading-[13px]">
               {label}
             </div>
           ))}
         </div>
 
         {/* Tile grid */}
-        <div className="flex gap-[3px]">
+        <div className="flex gap-[3px] sm:gap-[3px]">
           {weeks.map((week, colIdx) => (
-            <div key={colIdx} className="flex flex-col gap-[3px]">
+            <div key={colIdx} className="flex flex-col gap-[3px] sm:gap-[3px]">
               {week.map((day) => (
                 <div
                   key={day.date}
-                  className={`w-[13px] h-[13px] rounded-sm transition-colors ${getColor(day.count, day.inRange)} ${
+                  className={`w-[11px] h-[11px] sm:w-[13px] sm:h-[13px] rounded-sm transition-colors ${getColor(day.count, day.inRange)} ${
                     day.inRange ? "hover:ring-1 hover:ring-foreground/40 cursor-pointer" : ""
                   } ${selectedDate === day.date ? "ring-2 ring-foreground" : ""}`}
+                  style={{ touchAction: "manipulation" }}
                   onMouseEnter={(e) => handleMouseEnter(e, day)}
                   onMouseLeave={handleMouseLeave}
                   onClick={() => {

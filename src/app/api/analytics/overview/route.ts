@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger";
 import { parseDateRange } from "../_helpers";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql, isNull } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
     const whereClause = and(
       eq(schema.prompts.userId, userId),
       gte(schema.prompts.timestamp, from),
-      lt(schema.prompts.timestamp, to)
+      lt(schema.prompts.timestamp, to),
+      isNull(schema.prompts.deletedAt)
     );
 
     const [stats, topProjects, promptTypes] = await Promise.all([

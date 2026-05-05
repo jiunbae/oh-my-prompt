@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,8 @@ export async function POST(
       .where(
         and(
           eq(schema.prompts.userId, session.userId),
-          eq(schema.prompts.sessionId, sessionId)
+          eq(schema.prompts.sessionId, sessionId),
+          isNull(schema.prompts.deletedAt)
         )
       )
       .limit(1);

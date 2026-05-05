@@ -5,7 +5,7 @@ import { parseDateRange } from "../_helpers";
 import { computeSessions } from "@/lib/session-analysis";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gte, lt, isNull } from "drizzle-orm";
 
 function toDateOnlyString(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -30,7 +30,8 @@ export async function GET(request: NextRequest) {
           eq(schema.prompts.userId, userId),
           gte(schema.prompts.timestamp, from),
           lt(schema.prompts.timestamp, to),
-          eq(schema.prompts.promptType, "user_input")
+          eq(schema.prompts.promptType, "user_input"),
+          isNull(schema.prompts.deletedAt)
         )
       )
       .orderBy(schema.prompts.timestamp);

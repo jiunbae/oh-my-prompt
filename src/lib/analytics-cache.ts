@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sql, and, eq, gte } from "drizzle-orm";
+import { sql, and, eq, gte, isNull } from "drizzle-orm";
 
 /**
  * Refreshes analytics_daily for a given user and date range.
@@ -42,6 +42,7 @@ export async function refreshDailyAggregations(
           and(
             eq(schema.prompts.userId, userId),
             gte(schema.prompts.timestamp, rangeFrom),
+            isNull(schema.prompts.deletedAt),
           ),
         )
         .groupBy(sql`date(${schema.prompts.timestamp})`);

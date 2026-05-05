@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, asc, sql } from "drizzle-orm";
+import { eq, and, asc, sql, isNull } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 
 export interface SharedSessionPrompt {
@@ -75,7 +75,8 @@ const fetchSharedSessionData = cache(async (token: string): Promise<SharedSessio
       .where(
         and(
           eq(schema.prompts.sessionId, shared.sessionId),
-          eq(schema.prompts.userId, shared.userId)
+          eq(schema.prompts.userId, shared.userId),
+          isNull(schema.prompts.deletedAt)
         )
       )
       .orderBy(asc(schema.prompts.timestamp));

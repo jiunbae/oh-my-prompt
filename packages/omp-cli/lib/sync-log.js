@@ -10,8 +10,8 @@ function getUserToken(config) {
   return config.server?.token || config.sync?.userToken || "default";
 }
 
-function createSyncLog(config, checkpoint, storageTypeOverride) {
-  const db = openDb(config.storage.sqlite.path);
+async function createSyncLog(config, checkpoint, storageTypeOverride) {
+  const db = await openDb(config.storage.sqlite.path);
   const id = crypto.randomUUID();
   const deviceId = getDeviceId(config);
   const userToken = getUserToken(config);
@@ -28,8 +28,8 @@ function createSyncLog(config, checkpoint, storageTypeOverride) {
   return id;
 }
 
-function updateSyncLog(config, id, update) {
-  const db = openDb(config.storage.sqlite.path);
+async function updateSyncLog(config, id, update) {
+  const db = await openDb(config.storage.sqlite.path);
   const fields = [];
   const values = [];
   Object.entries(update).forEach(([key, value]) => {
@@ -43,8 +43,8 @@ function updateSyncLog(config, id, update) {
   db.close();
 }
 
-function finishSyncLog(config, id, status, errorMessage, filesUploaded, recordsUploaded) {
-  updateSyncLog(config, id, {
+async function finishSyncLog(config, id, status, errorMessage, filesUploaded, recordsUploaded) {
+  await updateSyncLog(config, id, {
     completed_at: nowIso(),
     status,
     error_message: errorMessage || null,
@@ -53,8 +53,8 @@ function finishSyncLog(config, id, status, errorMessage, filesUploaded, recordsU
   });
 }
 
-function getSyncState(config) {
-  const db = openDb(config.storage.sqlite.path);
+async function getSyncState(config) {
+  const db = await openDb(config.storage.sqlite.path);
   const deviceId = getDeviceId(config);
   const row = db
     .prepare("SELECT last_synced_at, last_synced_id FROM sync_state WHERE device_id = ?")
@@ -64,8 +64,8 @@ function getSyncState(config) {
   return { lastSyncedAt: row.last_synced_at, lastSyncedId: row.last_synced_id };
 }
 
-function updateSyncState(config, lastSyncedAt, lastSyncedId) {
-  const db = openDb(config.storage.sqlite.path);
+async function updateSyncState(config, lastSyncedAt, lastSyncedId) {
+  const db = await openDb(config.storage.sqlite.path);
   const deviceId = getDeviceId(config);
   const now = nowIso();
   db.prepare(
@@ -79,8 +79,8 @@ function updateSyncState(config, lastSyncedAt, lastSyncedId) {
   db.close();
 }
 
-function getSyncStatus(config, limit = 5) {
-  const db = openDb(config.storage.sqlite.path);
+async function getSyncStatus(config, limit = 5) {
+  const db = await openDb(config.storage.sqlite.path);
   const deviceId = getDeviceId(config);
   const logs = db
     .prepare(
@@ -94,7 +94,7 @@ function getSyncStatus(config, limit = 5) {
 
   const lastSuccess = logs.find((log) => log.status === "success") || null;
   const lastFailure = logs.find((log) => log.status === "failed") || null;
-  const checkpoint = getSyncState(config);
+  const checkpoint = await getSyncState(config);
 
   return { checkpoint, lastSuccess, lastFailure, recent: logs };
 }

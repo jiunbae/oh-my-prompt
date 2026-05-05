@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { desc, eq, sql, and, gte, lte } from "drizzle-orm";
+import { desc, eq, sql, and, gte, lte, isNull } from "drizzle-orm";
 
 export const promptsRouter = createTRPCRouter({
   /**
@@ -25,7 +25,7 @@ export const promptsRouter = createTRPCRouter({
 
       const { limit, offset, projectName, promptType, search, qualityScoreMin, qualityScoreMax, topicTags } = input;
 
-      const conditions = [eq(schema.prompts.userId, ctx.user.id)];
+      const conditions = [eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt)];
       if (projectName) {
         conditions.push(eq(schema.prompts.projectName, projectName));
       }
@@ -85,7 +85,7 @@ export const promptsRouter = createTRPCRouter({
     .query(async ({ input, ctx }) => {
 
       const result = await db.query.prompts.findFirst({
-        where: and(eq(schema.prompts.id, input.id), eq(schema.prompts.userId, ctx.user.id)),
+        where: and(eq(schema.prompts.id, input.id), eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt)),
         with: {
           promptTags: {
             with: {
@@ -117,14 +117,14 @@ export const promptsRouter = createTRPCRouter({
           uniqueProjects: sql<number>`count(distinct project_name)`,
         })
         .from(schema.prompts)
-        .where(eq(schema.prompts.userId, ctx.user.id)),
+        .where(and(eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt))),
       db
         .select({
           project: schema.prompts.projectName,
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(and(sql`project_name is not null`, eq(schema.prompts.userId, ctx.user.id)))
+        .where(and(sql`project_name is not null`, eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt)))
         .groupBy(schema.prompts.projectName)
         .orderBy(desc(sql`count(*)`))
         .limit(10),
@@ -134,7 +134,7 @@ export const promptsRouter = createTRPCRouter({
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
-        .where(eq(schema.prompts.userId, ctx.user.id))
+        .where(and(eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt)))
         .groupBy(schema.prompts.promptType),
     ]);
 
@@ -167,7 +167,7 @@ export const promptsRouter = createTRPCRouter({
         lastPrompt: sql<Date>`max(timestamp)`,
       })
       .from(schema.prompts)
-      .where(and(sql`project_name is not null`, eq(schema.prompts.userId, ctx.user.id)))
+      .where(and(sql`project_name is not null`, eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt)))
       .groupBy(schema.prompts.projectName)
       .orderBy(desc(sql`count(*)`));
 
