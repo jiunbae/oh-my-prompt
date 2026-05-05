@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.505.1] - 2026-05-05
+
+### Added
+- **Redis rate limiting**: Atomic Lua script (ZADD+ZREMRANGEBYSCORE+ZCARD+PEXPIRE) replaces in-memory limiter; graceful fallback when Redis unavailable
+- **CLI**: `omp templates list/show/render/create/delete` with `--json` support
+- **Bulk operations**: Multi-select prompts for batch delete/tag in session detail; `POST /api/prompts/bulk` endpoint
+- **Keyboard shortcuts**: `g`-prefix chord navigation (`g+d/s//a/i/t/x`), `/` for search, `?` for help overlay, `Escape` to dismiss
+- **Webhook retry**: Exponential backoff (1m→5m→30m→2h→12h) for failed deliveries; manual retry endpoint `POST /api/webhooks/[id]/retry`
+- **Doctor**: Server connectivity, DB health (table/row counts, integrity check), disk space, migration version, config file validation
+
+### Improved
+- **CLI doctor**: Structured per-check output with latency, version, user info for server; file size and index listing for DB
+
 ## [2026.505.0] - 2026-05-05
 
 ### Added
