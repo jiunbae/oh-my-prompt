@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.505.0] - 2026-05-05
+
+### Added
+- **Soft delete**: Prompts use `deletedAt` instead of hard delete; admin purge endpoint for 30-day cleanup
+- **Search**: Pagination, project/source/date filters, URL persistence, filter badges
+- **CLI**: `omp completions bash/zsh/install` for shell tab-completion
+- **Export**: Streaming batches (prevents OOM), `--fields` selection, `--gzip` compression, CSV injection protection, progress indicator
+
+### Improved
+- **Mobile UX**: Admin users card layout, 44px touch targets, compact search results, full-width filters
+
+### Migration
+- `0010_add_soft_delete` — Add `deleted_at` column to prompts table
+
 ## [2026.331.3] - 2026-03-31
 
 ### Fixed
