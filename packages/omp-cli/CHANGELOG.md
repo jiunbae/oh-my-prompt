@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.505.4] - 2026-05-05
+
+### Added
+- Real-time team activity feed with SSE streaming (`/teams/[id]/activity`)
+- Shareable prompt links with token-based access (`read`/`clone`) and expiry
+- Slack integration: daily summaries, real-time new-prompt alerts, webhook settings
+- Analytics dashboard with 6 chart types (volume, tokens, quality, projects, hourly, weekday)
+- AI-powered prompt suggestions: semantic similarity + LLM rewrite suggestions
+- First-run onboarding wizard with step persistence and confetti celebration
+
 ## [2026.505.3] - 2026-05-05
 
 ### Added

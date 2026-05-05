@@ -46,6 +46,8 @@ export const users = pgTable(
     dataRetentionDays: integer("data_retention_days").default(365),
     emailDigestEnabled: boolean("email_digest_enabled").default(true),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
+    onboardingCompleted: boolean("onboarding_completed").default(false),
+    onboardingStep: varchar("onboarding_step", { length: 50 }).default("welcome"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   },
@@ -293,6 +295,28 @@ export const sharedPrompts = pgTable(
   ]
 );
 
+// Prompt shares table (P6-2: shareable prompt links with read/clone access)
+export const promptShares = pgTable(
+  "prompt_shares",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    token: varchar("token", { length: 32 }).notNull().unique(),
+    access: varchar("access", { length: 20 }).notNull().default("read"), // 'read' or 'clone'
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    viewCount: integer("view_count").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_prompt_shares_token").on(table.token),
+    index("idx_prompt_shares_prompt").on(table.promptId),
+  ]
+);
+
 // Per-user custom labels for captured sessions
 export const sessionDisplayNames = pgTable(
   "session_display_names",
@@ -380,6 +404,7 @@ export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
 export const promptsRelations = relations(prompts, ({ one, many }) => ({
   promptTags: many(promptTags),
   sharedPrompts: many(sharedPrompts),
+  promptShares: many(promptShares),
   favoritePrompts: many(favoritePrompts),
   promptVersions: many(promptVersions),
   user: one(users, {
@@ -504,6 +529,13 @@ export const sharedSessionsRelations = relations(sharedSessions, ({ one }) => ({
   user: one(users, {
     fields: [sharedSessions.userId],
     references: [users.id],
+  }),
+}));
+
+export const promptSharesRelations = relations(promptShares, ({ one }) => ({
+  prompt: one(prompts, {
+    fields: [promptShares.promptId],
+    references: [prompts.id],
   }),
 }));
 
@@ -650,6 +682,41 @@ export const sessionNotesRelations = relations(sessionNotes, ({ one }) => ({
   }),
 }));
 
+// Slack webhooks table
+export const slackWebhooks = pgTable(
+  "slack_webhooks",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    webhookUrl: text("webhook_url").notNull(),
+    channel: varchar("channel", { length: 100 }),
+    events: varchar("events", { length: 100 }).array().notNull().default(sql`ARRAY['daily_summary']`),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_slack_webhooks_user").on(table.userId),
+    index("idx_slack_webhooks_team").on(table.teamId),
+  ]
+);
+
+// Slack webhook relations
+export const slackWebhooksRelations = relations(slackWebhooks, ({ one }) => ({
+  user: one(users, {
+    fields: [slackWebhooks.userId],
+    references: [users.id],
+  }),
+  team: one(teams, {
+    fields: [slackWebhooks.teamId],
+    references: [teams.id],
+  }),
+}));
+
 // Type exports
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -682,3 +749,7 @@ export type FavoritePrompt = typeof favoritePrompts.$inferSelect;
 export type NewFavoritePrompt = typeof favoritePrompts.$inferInsert;
 export type PromptVersion = typeof promptVersions.$inferSelect;
 export type NewPromptVersion = typeof promptVersions.$inferInsert;
+export type SlackWebhook = typeof slackWebhooks.$inferSelect;
+export type NewSlackWebhook = typeof slackWebhooks.$inferInsert;
+export type PromptShare = typeof promptShares.$inferSelect;
+export type NewPromptShare = typeof promptShares.$inferInsert;

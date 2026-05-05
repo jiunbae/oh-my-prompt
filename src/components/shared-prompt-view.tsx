@@ -14,6 +14,8 @@ interface SharedPromptViewProps {
   qualityScore: number | null;
   tokenEstimate: number | null;
   tokenEstimateResponse: number | null;
+  access?: "read" | "clone";
+  token?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -44,12 +46,20 @@ export function SharedPromptView({
   qualityScore,
   tokenEstimate,
   tokenEstimateResponse,
+  access,
+  token,
 }: SharedPromptViewProps) {
   const [copied, setCopied] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [cloneResult, setCloneResult] = useState<"success" | "error" | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const cloneTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    return () => clearTimeout(timerRef.current);
+    return () => {
+      clearTimeout(timerRef.current);
+      clearTimeout(cloneTimerRef.current);
+    };
   }, []);
 
   const handleCopy = async () => {
@@ -61,6 +71,26 @@ export function SharedPromptView({
     setCopied(true);
     clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleClone = async () => {
+    if (!token) return;
+    setCloning(true);
+    setCloneResult(null);
+    try {
+      const res = await fetch(`/api/share/${token}/clone`, { method: "POST" });
+      if (res.ok) {
+        setCloneResult("success");
+        clearTimeout(cloneTimerRef.current);
+        cloneTimerRef.current = setTimeout(() => setCloneResult(null), 3000);
+      } else {
+        setCloneResult("error");
+      }
+    } catch {
+      setCloneResult("error");
+    } finally {
+      setCloning(false);
+    }
   };
 
   return (
@@ -94,6 +124,36 @@ export function SharedPromptView({
               </>
             )}
           </button>
+          {access === "clone" && token && (
+            <button
+              onClick={handleClone}
+              disabled={cloning}
+              className="inline-flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+            >
+              {cloneResult === "success" ? (
+                <>
+                  <svg className="h-4 w-4 text-chart-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Cloned!
+                </>
+              ) : cloneResult === "error" ? (
+                <>
+                  <svg className="h-4 w-4 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Failed
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                  </svg>
+                  {cloning ? "Cloning..." : "Clone to my account"}
+                </>
+              )}
+            </button>
+          )}
         </div>
       </header>
 

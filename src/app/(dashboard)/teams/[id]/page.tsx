@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useTeam } from "@/contexts/team-context";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { TeamActivityFeed } from "@/components/team-activity-feed";
 
 interface Member {
   userId: string;
@@ -173,6 +175,38 @@ export default function TeamDetailPage() {
         </div>
         <Badge variant={isOwner ? "warning" : "default"}>{myRole}</Badge>
       </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border">
+        <button className="px-4 py-2 text-sm font-medium text-foreground border-b-2 border-primary">
+          Overview
+        </button>
+        <Link
+          href={`/teams/${id}/activity`}
+          className="px-4 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Activity
+        </Link>
+      </div>
+
+      {/* Activity Preview */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Recent Activity</CardTitle>
+            <CardDescription>Latest prompts from team members</CardDescription>
+          </div>
+          <Link
+            href={`/teams/${id}/activity`}
+            className="text-sm text-primary hover:underline"
+          >
+            View all
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <TeamActivityFeed teamId={id} preview />
+        </CardContent>
+      </Card>
 
       {/* Members */}
       <Card>

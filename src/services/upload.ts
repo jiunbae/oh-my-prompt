@@ -11,6 +11,7 @@ import { sql, inArray, eq, and, desc, isNull } from "drizzle-orm";
 import { env } from "@/env";
 import { dispatchWebhook } from "@/services/webhook";
 import { generateEmbedding } from "@/lib/embedding";
+import { notifySlack } from "@/lib/slack";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
 
@@ -286,6 +287,20 @@ export async function processUpload(
   if (userInputRecords.length > 0) {
     detectSessionCompleted(userId, userInputRecords).catch((err) => {
       logger.error({ err }, "Non-blocking session.completed detection failed");
+    });
+  }
+
+  // ── Phase 9: Slack realtime notifications (non-blocking) ──────
+  for (const item of userInputRecords) {
+    notifySlack(userId, {
+      id: item.eventKey,
+      promptText: item.processed.promptText,
+      projectName:
+        item.record.project ||
+        (item.record.cwd ? item.record.cwd.split("/").pop() || null : null),
+      timestamp: item.createdAt,
+    }).catch((err) => {
+      logger.error({ err }, "Non-blocking Slack notification failed");
     });
   }
 

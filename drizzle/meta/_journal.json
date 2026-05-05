@@ -113,6 +113,27 @@
       "when": 1746460804000,
       "tag": "0019_add_prompt_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1746432000000,
+      "tag": "0021_add_slack_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1746420000000,
+      "tag": "0022_add_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1746419000000,
+      "tag": "0020_add_prompt_shares",
+      "breakpoints": true
     }
   ]
 }

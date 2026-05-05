@@ -1,11 +1,10 @@
 import { PromptDetail } from "@/components/prompt-detail";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, ne, sql, isNull } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
-import { computeSimilarity } from "@/lib/prompt-diff";
 import { checkIsAdmin, getSessionUser } from "@/lib/with-auth";
-import Link from "next/link";
+import { SimilarPrompts } from "@/components/similar-prompts";
 
 // Force dynamic rendering - don't pre-render at build time
 export const dynamic = "force-dynamic";
@@ -28,72 +27,6 @@ async function getPromptWithTags(id: string, userId: string, isAdmin: boolean) {
       },
     },
   }) ?? null;
-}
-
-interface SimilarPrompt {
-  id: string;
-  timestamp: string;
-  projectName: string | null;
-  similarity: number;
-  firstLine: string;
-}
-
-async function getSimilarPrompts(
-  sourcePrompt: { id: string; promptText: string; userId: string | null },
-  isAdmin: boolean
-): Promise<SimilarPrompt[]> {
-  try {
-    const words = sourcePrompt.promptText
-      .replace(/[^\w\s]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length > 3)
-      .slice(0, 15);
-
-    if (words.length === 0) return [];
-
-    const searchText = words.join(" ");
-
-    const userFilter = isAdmin
-      ? sql`TRUE`
-      : sql`${schema.prompts.userId} = ${sourcePrompt.userId}`;
-
-    const candidates = await db
-      .select({
-        id: schema.prompts.id,
-        timestamp: schema.prompts.timestamp,
-        projectName: schema.prompts.projectName,
-        promptText: schema.prompts.promptText,
-      })
-      .from(schema.prompts)
-      .where(
-        and(
-          ne(schema.prompts.id, sourcePrompt.id),
-          sql`${schema.prompts.searchVector} @@ plainto_tsquery('english', ${searchText})`,
-          sql`${userFilter}`,
-          isNull(schema.prompts.deletedAt)
-        )
-      )
-      .orderBy(
-        sql`ts_rank(${schema.prompts.searchVector}, plainto_tsquery('english', ${searchText})) DESC`
-      )
-      .limit(15);
-
-    const ranked = candidates
-      .map((c) => ({
-        id: c.id,
-        timestamp: c.timestamp.toISOString(),
-        projectName: c.projectName,
-        similarity: computeSimilarity(sourcePrompt.promptText, c.promptText),
-        firstLine: c.promptText.split("\n")[0].slice(0, 120),
-      }))
-      .filter((c) => c.similarity > 0.1)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 5);
-
-    return ranked;
-  } catch {
-    return [];
-  }
 }
 
 interface PromptDetailPageProps {
@@ -141,11 +74,6 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
     });
   }
 
-  const similarPrompts = await getSimilarPrompts(
-    { id: prompt.id, promptText: prompt.promptText, userId: prompt.userId },
-    isAdmin
-  );
-
   return (
     <div className="space-y-8">
       <PromptDetail
@@ -165,40 +93,10 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
         <div className="border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold text-foreground">Similar Prompts</h2>
           <p className="text-sm text-muted-foreground">
-            Find related prompts and compare their wording.
+            Find related prompts using semantic search.
           </p>
         </div>
-
-        {similarPrompts.length === 0 ? (
-          <div className="px-6 py-5 text-sm text-muted-foreground">
-            No similar prompts found for this prompt yet.
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {similarPrompts.map((item) => (
-              <div
-                key={item.id}
-                className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {item.firstLine || "Untitled prompt"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {Math.round(item.similarity * 100)}% similar
-                  </p>
-                </div>
-
-                <Link
-                  href={`/compare?a=${prompt.id}&b=${item.id}`}
-                  className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-                >
-                  Compare
-                </Link>
-              </div>
-            ))}
-          </div>
-        )}
+        <SimilarPrompts promptId={prompt.id} />
       </section>
     </div>
   );

@@ -1,6 +1,7 @@
 const { openDb } = require("./db");
 const { loadConfig } = require("./config");
 const { c } = require("./ui");
+const { postJson } = require("./sync");
 
 /**
  * Highlight occurrences of `query` in `text` using picocolors.
@@ -172,13 +173,42 @@ function formatResult(row, query, index) {
 /**
  * Run the search command.
  */
+async function runSemanticServerSearch(query, options, config) {
+  const serverUrl = config.server?.url;
+  const serverToken = config.server?.token;
+
+  if (!serverUrl || !serverToken) {
+    throw new Error(
+      "Semantic search requires server configuration. Set server.url and server.token:\n" +
+      "  omp config set server.url https://prompt.jiun.dev\n" +
+      "  omp config set server.token YOUR_TOKEN"
+    );
+  }
+
+  const limit = parseInt(options.limit, 10) || 10;
+  const searchUrl = `${serverUrl.replace(/\/$/, "")}/api/search/semantic`;
+  const headers = { "X-User-Token": serverToken };
+
+  const response = await postJson(searchUrl, headers, { query, limit });
+
+  if (response.status === 401) {
+    throw new Error("Authentication failed. Check server.token.");
+  }
+  if (response.status >= 400) {
+    throw new Error(`Server error (${response.status}): ${JSON.stringify(response.body)}`);
+  }
+
+  const body = response.body;
+  return body.results || [];
+}
+
 async function runSearch(query, options) {
   const config = loadConfig();
-  const db = await openDb(config.storage.sqlite.path);
 
-  try {
-    // --stats mode: show FTS index health
-    if (options.stats) {
+  // --stats mode: show FTS index health
+  if (options.stats) {
+    const db = await openDb(config.storage.sqlite.path);
+    try {
       const stats = getSearchStats(db);
       if (options.json) {
         return stats;
@@ -194,59 +224,81 @@ async function runSearch(query, options) {
       console.log(`  ${c.dim("Last updated:")}  ${c.bold(stats.last_updated || "never")}`);
       console.log("");
       return stats;
+    } finally {
+      db.close();
     }
-
-    // Query is required for non-stats mode
-    if (!query) {
-      console.error('Usage: omp search <query> [options]');
-      console.error('       omp search --stats');
-      process.exitCode = 2;
-      return null;
-    }
-
-    let results;
-    if (options.exact) {
-      results = searchExact(db, query, options);
-    } else {
-      try {
-        results = searchFts(db, query, options);
-      } catch {
-        // FTS not available (e.g., fts5 table from better-sqlite3) — fall back to LIKE
-        results = searchExact(db, query, options);
-      }
-    }
-
-    if (options.json) {
-      const output = results.map((row) => {
-        const rest = row;
-        return rest;
-      });
-      return output;
-    }
-
-    // Text output
-    if (results.length === 0) {
-      console.log("");
-      console.log(`  ${c.yellow("No results found")} for ${c.bold(`"${query}"`)}`);
-      console.log("");
-      return [];
-    }
-
-    console.log("");
-    results.forEach((row, i) => {
-      console.log(formatResult(row, query, i));
-      if (i < results.length - 1) console.log("");
-    });
-    console.log("");
-    console.log(
-      `  ${c.dim(`${results.length} result(s) found`)}${options.exact ? c.dim(" (exact match)") : ""}`
-    );
-    console.log("");
-
-    return results;
-  } finally {
-    db.close();
   }
+
+  // Query is required for non-stats mode
+  if (!query) {
+    console.error('Usage: omp search <query> [options]');
+    console.error('       omp search --stats');
+    process.exitCode = 2;
+    return null;
+  }
+
+  let results;
+
+  if (options.semantic) {
+    // Server-side vector semantic search
+    const serverResults = await runSemanticServerSearch(query, options, config);
+    results = serverResults.map((r) => ({
+      id: r.id,
+      created_at: r.timestamp,
+      project: r.projectName,
+      prompt_text: r.promptText,
+      source: r.source,
+      session_id: r.sessionId,
+      similarity: r.similarity,
+    }));
+  } else {
+    // Local FTS/LIKE search
+    const db = await openDb(config.storage.sqlite.path);
+    try {
+      if (options.exact) {
+        results = searchExact(db, query, options);
+      } else {
+        try {
+          results = searchFts(db, query, options);
+        } catch {
+          // FTS not available (e.g., fts5 table from better-sqlite3) — fall back to LIKE
+          results = searchExact(db, query, options);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  }
+
+  if (options.json) {
+    const output = results.map((row) => {
+      const rest = row;
+      return rest;
+    });
+    return output;
+  }
+
+  // Text output
+  if (results.length === 0) {
+    console.log("");
+    console.log(`  ${c.yellow("No results found")} for ${c.bold(`"${query}"`)}`);
+    console.log("");
+    return [];
+  }
+
+  console.log("");
+  results.forEach((row, i) => {
+    console.log(formatResult(row, query, i));
+    if (i < results.length - 1) console.log("");
+  });
+  console.log("");
+  const modeLabel = options.semantic ? " (semantic)" : options.exact ? " (exact match)" : "";
+  console.log(
+    `  ${c.dim(`${results.length} result(s) found`)}${c.dim(modeLabel)}`
+  );
+  console.log("");
+
+  return results;
 }
 
 module.exports = {

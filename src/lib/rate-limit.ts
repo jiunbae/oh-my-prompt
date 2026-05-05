@@ -217,4 +217,6 @@ export const rateLimiters = {
   api: createRateLimiter(100, 60 * 1000),
   /** LLM-backed endpoints: 10 requests per minute (expensive) */
   llm: createRateLimiter(10, 60 * 1000),
+  /** Team activity SSE: 5 concurrent connections per user */
+  teamActivity: createRateLimiter(5, 60 * 1000),
 };

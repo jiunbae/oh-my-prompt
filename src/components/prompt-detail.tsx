@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonDetail } from "@/components/ui/skeleton";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ConfirmDialog } from "@/components/ui/dialog";
+import { SharePromptDialog } from "@/components/share-prompt-dialog";
+import { PromptSuggestDialog } from "@/components/prompt-suggest-dialog";
 import { useRouter } from "next/navigation";
 
 interface Tag {
@@ -67,15 +69,6 @@ const roleLabels: Record<string, string> = {
   system: "System",
 };
 
-interface ShareLink {
-  id: string;
-  shareToken: string;
-  viewCount: number;
-  isActive: boolean;
-  expiresAt: string | null;
-  createdAt: string;
-}
-
 export function PromptDetail({
   id: _id,
   sessionId,
@@ -93,83 +86,18 @@ export function PromptDetail({
   const [copied, setCopied] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [showSharePanel, setShowSharePanel] = useState(false);
-  const [shareLinks, setShareLinks] = useState<ShareLink[]>([]);
-  const [shareLoading, setShareLoading] = useState(false);
-  const [shareCopied, setShareCopied] = useState<string | null>(null);
-  const [shareExpiry, setShareExpiry] = useState<string>("never");
+  const [showShareDialog, setShowShareDialog] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const shareCopyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     return () => {
       clearTimeout(copyTimerRef.current);
-      clearTimeout(shareCopyTimerRef.current);
     };
   }, []);
 
   const totalTokens = inputTokens + outputTokens;
-
-  const fetchShareLinks = useCallback(async () => {
-    try {
-      const res = await fetch("/api/share");
-      if (res.ok) {
-        const data = await res.json();
-        // Filter to only show shares for this prompt
-        const promptShares = data.shares.filter(
-          (s: { promptId: string }) => s.promptId === _id
-        );
-        setShareLinks(promptShares);
-      }
-    } catch (error) {
-      console.error("Failed to fetch share links:", error);
-    }
-  }, [_id]);
-
-  useEffect(() => {
-    if (showSharePanel) {
-      fetchShareLinks();
-    }
-  }, [showSharePanel, fetchShareLinks]);
-
-  const handleCreateShareLink = async () => {
-    setShareLoading(true);
-    try {
-      const expiresIn = shareExpiry === "never" ? null : parseInt(shareExpiry);
-      const res = await fetch("/api/share", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ promptId: _id, expiresIn }),
-      });
-      if (res.ok) {
-        await fetchShareLinks();
-      }
-    } catch (error) {
-      console.error("Failed to create share link:", error);
-    } finally {
-      setShareLoading(false);
-    }
-  };
-
-  const handleRevokeShareLink = async (id: string) => {
-    try {
-      const res = await fetch(`/api/share?id=${id}`, { method: "DELETE" });
-      if (res.ok) {
-        await fetchShareLinks();
-      }
-    } catch (error) {
-      console.error("Failed to revoke share link:", error);
-    }
-  };
-
-  const copyShareLink = async (token: string) => {
-    const url = `${window.location.origin}/share/${token}`;
-    await navigator.clipboard.writeText(url);
-    setShareCopied(token);
-    clearTimeout(shareCopyTimerRef.current);
-    shareCopyTimerRef.current = setTimeout(() => setShareCopied(null), 2000);
-  };
 
   const handleDelete = async () => {
     setConfirmOpen(true);
@@ -236,7 +164,7 @@ export function PromptDetail({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setShowSharePanel(!showSharePanel)}
+            onClick={() => setShowShareDialog(true)}
           >
             <svg
               className="h-4 w-4"
@@ -317,95 +245,32 @@ export function PromptDetail({
               </>
             )}
           </Button>
+
+          <Button variant="outline" size="sm" onClick={() => setSuggestOpen(true)}>
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <title>Suggest Icon</title>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+              />
+            </svg>
+            Suggest
+          </Button>
         </div>
       </div>
 
-      {/* Share panel */}
-      {showSharePanel && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-foreground">Share this prompt</h3>
-              <div className="flex items-center gap-2">
-                <select
-                  value={shareExpiry}
-                  onChange={(e) => setShareExpiry(e.target.value)}
-                  className="h-8 rounded-md border border-border bg-input-bg px-2 text-xs text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="never">No expiry</option>
-                  <option value="1">1 hour</option>
-                  <option value="24">24 hours</option>
-                  <option value="168">7 days</option>
-                  <option value="720">30 days</option>
-                </select>
-                <Button size="sm" onClick={handleCreateShareLink} disabled={shareLoading}>
-                  {shareLoading ? "Creating..." : "Create Link"}
-                </Button>
-              </div>
-            </div>
-
-            {shareLinks.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">Active share links:</p>
-                {shareLinks.map((link) => (
-                  <div
-                    key={link.id}
-                    className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface p-3"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <code className="text-xs text-muted-foreground truncate block">
-                        {typeof window !== "undefined"
-                          ? `${window.location.origin}/share/${link.shareToken}`
-                          : `/share/${link.shareToken}`}
-                      </code>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span>{link.viewCount} views</span>
-                        {link.expiresAt && (
-                          <span>
-                            Expires: {new Date(link.expiresAt).toLocaleDateString()}
-                          </span>
-                        )}
-                        {!link.isActive && (
-                          <Badge variant="error">Revoked</Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyShareLink(link.shareToken)}
-                      >
-                        {shareCopied === link.shareToken ? (
-                          <svg className="h-4 w-4 text-chart-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                        ) : (
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                          </svg>
-                        )}
-                      </Button>
-                      {link.isActive && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRevokeShareLink(link.id)}
-                          className="text-destructive hover:text-destructive/80"
-                        >
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <SharePromptDialog
+        promptId={_id}
+        open={showShareDialog}
+        onClose={() => setShowShareDialog(false)}
+      />
 
       <Card>
         <CardHeader className="border-b border-border">
@@ -524,6 +389,13 @@ export function PromptDetail({
         confirmLabel="Delete"
         variant="destructive"
         loading={isDeleting}
+      />
+
+      <PromptSuggestDialog
+        open={suggestOpen}
+        onClose={() => setSuggestOpen(false)}
+        promptId={_id}
+        promptText={messages.find((m) => m.role === "user")?.content ?? ""}
       />
     </div>
   );

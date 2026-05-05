@@ -1,445 +1,462 @@
+"use client";
+
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { ActivityHeatmap } from "@/components/charts/activity-heatmap";
-import { TokenUsageChart } from "@/components/charts/token-usage-chart";
-import { ProjectActivityChart } from "@/components/charts/project-activity-chart";
-import { SessionChart } from "@/components/charts/session-chart";
-import { AnalyticsFilters } from "@/components/analytics-filters";
-import { getSessionUser } from "@/lib/with-auth";
-import { getAnalytics, formatNumber } from "@/lib/analytics";
+import { useTeam } from "@/contexts/team-context";
+import { PromptVolumeChart } from "@/components/charts/PromptVolumeChart";
+import { TokenUsageChart } from "@/components/charts/TokenUsageChart";
+import { QualityScoreChart } from "@/components/charts/QualityScoreChart";
+import { ProjectDistributionChart } from "@/components/charts/ProjectDistributionChart";
+import { HourlyActivityChart } from "@/components/charts/HourlyActivityChart";
+import { WeekdayActivityChart } from "@/components/charts/WeekdayActivityChart";
+import { formatNumber } from "@/lib/format";
 
-// Force dynamic rendering - don't pre-render at build time
-export const dynamic = "force-dynamic";
+interface TrendsData {
+  daily: Array<{ date: string; count: number; tokens: number; avgQuality: number }>;
+  byProject: Array<{ name: string; count: number }>;
+  byHour: Array<{ hour: number; count: number }>;
+  byWeekday: Array<{ day: string; count: number }>;
+  summary: {
+    totalPrompts: number;
+    avgQuality: number;
+    totalTokens: number;
+    activeProjects: number;
+  };
+  availableProjects: Array<{ name: string; count: number }>;
+  availableSources: Array<{ name: string; count: number }>;
+}
 
-const getCurrentUser = getSessionUser;
+interface InsightsData {
+  insights: string[];
+}
 
-const RANGE_DAYS: Record<string, number> = {
-  "7": 7,
-  "30": 30,
-  "90": 90,
-  "365": 365,
+type DateRange = "7" | "30" | "90" | "custom";
+
+const RANGE_LABELS: Record<string, string> = {
+  "7": "Last 7 days",
+  "30": "Last 30 days",
+  "90": "Last 90 days",
+  custom: "Custom",
 };
 
-function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(date));
+function toDateInputValue(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
-interface SearchParams {
-  range?: string;
-  from?: string;
-  to?: string;
-  project?: string;
-}
+export default function AnalyticsPage() {
+  const { selectedTeamId, isTeamContext } = useTeam();
 
-export default async function AnalyticsPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
-  const params = await searchParams;
+  const [range, setRange] = useState<DateRange>("30");
+  const [customFrom, setCustomFrom] = useState<string>("");
+  const [customTo, setCustomTo] = useState<string>("");
+  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
+  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
 
-  // Get current user from session
-  const user = await getCurrentUser();
-  const userId = user?.userId ?? null;
+  const [trendsData, setTrendsData] = useState<TrendsData | null>(null);
+  const [insightsData, setInsightsData] = useState<InsightsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Parse date range from search params
-  const rangeParam = params.range ?? "30";
-  const isCustom = rangeParam === "custom";
+  const buildQueryString = useCallback(() => {
+    const params = new URLSearchParams();
+    if (range === "custom") {
+      if (customFrom) params.set("from", customFrom);
+      if (customTo) params.set("to", customTo);
+    } else {
+      params.set("range", range);
+    }
+    if (selectedProjects.length > 0) {
+      params.set("project", selectedProjects.join(","));
+    }
+    if (selectedSources.length > 0) {
+      params.set("source", selectedSources.join(","));
+    }
+    if (isTeamContext && selectedTeamId) {
+      params.set("teamId", selectedTeamId);
+    }
+    return params.toString();
+  }, [range, customFrom, customTo, selectedProjects, selectedSources, isTeamContext, selectedTeamId]);
 
-  const dateRange = isCustom
-    ? {
-        from: params.from ? new Date(params.from) : undefined,
-        to: params.to ? new Date(params.to + "T23:59:59.999Z") : undefined,
-        days: 30,
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = buildQueryString();
+      const [trendsRes, insightsRes] = await Promise.all([
+        fetch(`/api/analytics/trends?${qs}`),
+        fetch(`/api/analytics/insights?${qs}`),
+      ]);
+
+      if (!trendsRes.ok) {
+        const data = await trendsRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load trends");
       }
-    : {
-        days: RANGE_DAYS[rangeParam] ?? 30,
-      };
+      if (!insightsRes.ok) {
+        const data = await insightsRes.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to load insights");
+      }
 
-  const data = await getAnalytics(userId, {
-    dateRange,
-    project: params.project,
-  });
+      const trends = await trendsRes.json();
+      const insights = await insightsRes.json();
+      setTrendsData(trends);
+      setInsightsData(insights);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load analytics");
+    } finally {
+      setLoading(false);
+    }
+  }, [buildQueryString]);
 
-  if (!data) {
-    return (
-      <div className="p-6">
-        <p className="text-muted-foreground">Unable to load analytics. Check database connection.</p>
-      </div>
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-project-dropdown]")) setShowProjectDropdown(false);
+      if (!target.closest("[data-source-dropdown]")) setShowSourceDropdown(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const summary = trendsData?.summary;
+
+  const toggleProject = (name: string) => {
+    setSelectedProjects((prev) =>
+      prev.includes(name) ? prev.filter((p) => p !== name) : [...prev, name]
     );
-  }
+  };
 
-  const { stats, responseStats, dailyStats, projectStats, typeStats, recentPrompts, projectActivity, sessions } =
-    data;
+  const toggleSource = (name: string) => {
+    setSelectedSources((prev) =>
+      prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]
+    );
+  };
+
+  const clearFilters = () => {
+    setSelectedProjects([]);
+    setSelectedSources([]);
+  };
+
+  const hasFilters = selectedProjects.length > 0 || selectedSources.length > 0;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-foreground">Insights</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          See how you prompt and where to improve
-        </p>
-      </div>
-
-      {/* Filter Bar */}
-      <AnalyticsFilters
-        currentRange={rangeParam}
-        currentFrom={params.from}
-        currentTo={params.to}
-        currentProject={params.project}
-        projects={projectStats.map((p) => ({
-          project: p.project ?? "No project",
-          count: Number(p.count),
-        }))}
-      />
-
-      {/* User Prompt Stats */}
-      <div>
-        <h2 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-chart-1" />
-          User Prompts
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Prompts
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(Number(stats?.totalPrompts ?? 0))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Input Tokens
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(Number(stats?.totalTokens ?? 0))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Projects
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {Number(stats?.uniqueProjects ?? 0)}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Avg Length
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(Math.round(Number(stats?.avgPromptLength ?? 0)))}
-              </div>
-              <p className="text-xs text-muted-foreground">characters</p>
-            </CardContent>
-          </Card>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Analytics</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {isTeamContext
+              ? "Team-scoped prompt analytics"
+              : "Personal prompt analytics"}
+          </p>
         </div>
       </div>
 
-      {/* Agent Response Stats */}
-      <div>
-        <h2 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-chart-2" />
-          Agent Responses
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Responses
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(responseStats.totalResponses)}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {responseStats.responseRate}% response rate
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Output Tokens
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(responseStats.totalResponseTokens)}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Total Characters
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(responseStats.totalResponseChars)}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Avg Response
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-foreground">
-                {formatNumber(responseStats.avgResponseLength)}
-              </div>
-              <p className="text-xs text-muted-foreground">characters</p>
-            </CardContent>
-          </Card>
+      {/* Filters */}
+      <div className="flex flex-col lg:flex-row gap-3">
+        {/* Date range */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-muted-foreground font-medium mr-1">Period:</span>
+          <div className="inline-flex rounded-lg border border-border overflow-hidden">
+            {(["7", "30", "90"] as DateRange[]).map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setRange(preset)}
+                className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  range === preset
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                {RANGE_LABELS[preset]}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => {
+                setRange("custom");
+                if (!customFrom) {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 30);
+                  setCustomFrom(toDateInputValue(d));
+                }
+                if (!customTo) {
+                  setCustomTo(toDateInputValue(new Date()));
+                }
+              }}
+              className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                range === "custom"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
+            >
+              Custom
+            </button>
+          </div>
         </div>
+
+        {/* Custom date inputs */}
+        {range === "custom" && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="px-2 py-1.5 bg-background border border-border rounded-md text-foreground text-xs"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="px-2 py-1.5 bg-background border border-border rounded-md text-foreground text-xs"
+            />
+          </div>
+        )}
+
+        {/* Project multi-select */}
+        <div className="relative" data-project-dropdown>
+          <button
+            type="button"
+            onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <svg className="h-3.5 w-3.5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            Projects
+            {selectedProjects.length > 0 && (
+              <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                {selectedProjects.length}
+              </Badge>
+            )}
+            <svg className={`h-3 w-3 text-muted-foreground transition-transform ${showProjectDropdown ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showProjectDropdown && trendsData && trendsData.availableProjects.length > 0 && (
+            <div className="absolute z-50 mt-1 w-56 rounded-lg border border-border bg-card shadow-lg p-2 space-y-1">
+              {trendsData.availableProjects.map((p) => (
+                <label
+                  key={p.name}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-foreground hover:bg-accent/50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedProjects.includes(p.name)}
+                    onChange={() => toggleProject(p.name)}
+                    className="rounded border-border text-primary focus:ring-primary"
+                  />
+                  <span className="truncate flex-1">{p.name}</span>
+                  <span className="text-muted-foreground shrink-0">{p.count}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Source multi-select */}
+        <div className="relative" data-source-dropdown>
+          <button
+            type="button"
+            onClick={() => setShowSourceDropdown(!showSourceDropdown)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-foreground hover:bg-accent transition-colors"
+          >
+            <svg className="h-3.5 w-3.5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Sources
+            {selectedSources.length > 0 && (
+              <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                {selectedSources.length}
+              </Badge>
+            )}
+            <svg className={`h-3 w-3 text-muted-foreground transition-transform ${showSourceDropdown ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showSourceDropdown && trendsData && trendsData.availableSources.length > 0 && (
+            <div className="absolute z-50 mt-1 w-56 rounded-lg border border-border bg-card shadow-lg p-2 space-y-1">
+              {trendsData.availableSources.map((s) => (
+                <label
+                  key={s.name}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-foreground hover:bg-accent/50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedSources.includes(s.name)}
+                    onChange={() => toggleSource(s.name)}
+                    className="rounded border-border text-primary focus:ring-primary"
+                  />
+                  <span className="truncate flex-1">{s.name}</span>
+                  <span className="text-muted-foreground shrink-0">{s.count}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Clear filters */}
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
-      {/* Daily Activity Chart */}
-      <div className="grid md:grid-cols-2 gap-6">
+      {/* Error */}
+      {error && (
+        <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+          <p className="font-medium">Failed to load analytics</p>
+          <p className="mt-1 opacity-80">{error}</p>
+        </div>
+      )}
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <Skeleton className="h-4 w-24" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-8 w-16" />
+              </CardContent>
+            </Card>
+          ))
+        ) : (
+          [
+            { label: "Total Prompts", value: summary ? formatNumber(summary.totalPrompts) : "0" },
+            { label: "Avg Quality", value: summary ? `${summary.avgQuality.toFixed(1)} / 5` : "0 / 5" },
+            { label: "Total Tokens", value: summary ? formatNumber(summary.totalTokens) : "0" },
+            { label: "Active Projects", value: summary ? String(summary.activeProjects) : "0" },
+          ].map((item) => (
+            <Card key={item.label}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  {item.label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-foreground">{item.value}</div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Insights */}
+      {insightsData && insightsData.insights.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-chart-5" />
+            Insights
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {insightsData.insights.map((insight, i) => (
+              <Badge key={i} variant="info" className="text-xs py-1 px-2.5">
+                {insight}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Charts Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Prompt Volume */}
         <Card>
           <CardHeader>
-            <CardTitle>
-              Activity Heatmap
-            </CardTitle>
+            <CardTitle>Prompt Volume</CardTitle>
           </CardHeader>
           <CardContent>
-            <ActivityHeatmap
-              data={dailyStats.map(d => ({
-                date: d.date,
-                count: Number(d.count ?? 0)
-              }))}
+            <PromptVolumeChart
+              data={trendsData?.daily ?? []}
+              isLoading={loading}
             />
           </CardContent>
         </Card>
 
+        {/* Token Usage */}
         <Card>
           <CardHeader>
-            <CardTitle>
-              Token Usage
-            </CardTitle>
+            <CardTitle>Token Usage</CardTitle>
           </CardHeader>
           <CardContent>
             <TokenUsageChart
-              data={dailyStats.map(d => ({
-                date: d.date,
-                tokens: Number(d.tokens ?? 0),
-                inputTokens: Number(d.inputTokens ?? 0),
-                outputTokens: Number(d.outputTokens ?? 0),
-              }))}
+              data={trendsData?.daily.map((d) => ({ date: d.date, tokens: d.tokens })) ?? []}
+              isLoading={loading}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Quality Score */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Quality Score Trend</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <QualityScoreChart
+              data={trendsData?.daily ?? []}
+              isLoading={loading}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Project Distribution */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Project Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ProjectDistributionChart
+              data={trendsData?.byProject ?? []}
+              isLoading={loading}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Hourly Activity */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Hourly Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <HourlyActivityChart
+              data={trendsData?.byHour ?? []}
+              isLoading={loading}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Weekday Activity */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Weekday Activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <WeekdayActivityChart
+              data={trendsData?.byWeekday ?? []}
+              isLoading={loading}
             />
           </CardContent>
         </Card>
       </div>
-
-      {/* Projects / Sessions */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Project Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {projectActivity.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground text-sm">
-                No project activity in the selected period.
-              </div>
-            ) : (
-              <ProjectActivityChart
-                data={projectActivity.map((p) => ({
-                  project: p.project,
-                  count: p.count,
-                }))}
-              />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Sessions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {sessions.summary.sessions === 0 ? (
-              <div className="py-8 text-center text-muted-foreground text-sm">
-                Not enough activity to analyze sessions.
-              </div>
-            ) : (
-              <div>
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                    <div className="text-xs text-muted-foreground">Sessions</div>
-                    <div className="text-foreground font-medium">
-                      {sessions.summary.sessions}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                    <div className="text-xs text-muted-foreground">Avg prompts</div>
-                    <div className="text-foreground font-medium">
-                      {sessions.summary.avgPromptsPerSession}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
-                    <div className="text-xs text-muted-foreground">Avg minutes</div>
-                    <div className="text-foreground font-medium">
-                      {sessions.summary.avgSessionMinutes}
-                    </div>
-                  </div>
-                </div>
-                <SessionChart data={sessions.perDay} />
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Top Projects */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Top Projects</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {projectStats.map((project, i) => (
-                <div key={project.project || i} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground text-sm w-4">{i + 1}.</span>
-                    <span className="text-foreground font-medium">
-                      {project.project}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-muted-foreground text-sm">
-                      {formatNumber(Number(project.tokens))} tokens
-                    </span>
-                    <Badge variant="secondary">{project.count}</Badge>
-                  </div>
-                </div>
-              ))}
-              {projectStats.length === 0 && (
-                <p className="text-muted-foreground text-center py-4">No project data</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Prompt Types */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Prompt Types</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {typeStats.map((type, i) => {
-                const total = typeStats.reduce((acc, t) => acc + Number(t.count), 0);
-                const percentage = total > 0 ? (Number(type.count) / total) * 100 : 0;
-                const label =
-                  type.type === "user_input"
-                    ? "User Input"
-                    : type.type === "task_notification"
-                    ? "Task Notification"
-                    : type.type === "system"
-                    ? "System"
-                    : type.type ?? "Unknown";
-
-                return (
-                  <div key={type.type || i} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-secondary-foreground">{label}</span>
-                      <span className="text-muted-foreground">
-                        {type.count} ({percentage.toFixed(1)}%)
-                      </span>
-                    </div>
-                    <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-chart-1 rounded-full"
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Activity */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {recentPrompts.map((prompt) => (
-              <div
-                key={prompt.id}
-                className="flex items-center justify-between py-2 border-b border-border last:border-0"
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`h-2 w-2 rounded-full ${prompt.hasResponse ? "bg-chart-2" : "bg-muted-foreground/40"}`} />
-                  <div>
-                    <p className="text-foreground text-sm">
-                      {prompt.projectName ?? "No project"}
-                    </p>
-                    <p className="text-muted-foreground text-xs">
-                      {formatDate(prompt.timestamp)}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {prompt.hasResponse && (
-                    <Badge variant="outline" className="text-chart-2 border-chart-2/30 text-[10px]">
-                      responded
-                    </Badge>
-                  )}
-                  <Badge
-                    variant={
-                      prompt.promptType === "user_input"
-                        ? "default"
-                        : prompt.promptType === "task_notification"
-                        ? "secondary"
-                        : "outline"
-                    }
-                  >
-                    {prompt.promptLength} chars
-                  </Badge>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

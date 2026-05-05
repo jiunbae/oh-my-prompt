@@ -186,7 +186,28 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent>
           {data.recentSessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">No sessions yet. Start prompting!</p>
+            <div className="py-8 text-center">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              </div>
+              <p className="text-sm font-medium text-foreground">No prompts captured yet</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Install the hook to start capturing your sessions automatically.
+              </p>
+              <div className="mt-4 inline-flex items-center gap-2 rounded bg-surface px-3 py-1.5 text-xs font-mono text-foreground border border-border">
+                <span>npm install -g oh-my-prompt</span>
+              </div>
+              <div className="mt-3">
+                <Link
+                  href="/docs"
+                  className="text-sm text-primary hover:underline transition-colors"
+                >
+                  Read the docs for more info
+                </Link>
+              </div>
+            </div>
           ) : (
             <div className="divide-y divide-border">
               {data.recentSessions.map((s) => (

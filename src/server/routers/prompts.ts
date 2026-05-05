@@ -1,4 +1,5 @@
 import { z } from "zod";
+import crypto from "crypto";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -244,6 +245,183 @@ export const promptsRouter = createTRPCRouter({
         promptCount: Number(r.promptCount),
         lastPrompt: r.lastPrompt,
       }));
+    }),
+
+  /**
+   * Create a shareable link for a prompt
+   */
+  createShare: protectedProcedure
+    .input(
+      z.object({
+        promptId: z.string().uuid(),
+        access: z.enum(["read", "clone"]).default("read"),
+        expiresInHours: z.number().int().positive().max(8760).optional().default(168),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { promptId, access, expiresInHours } = input;
+
+      const [prompt] = await db
+        .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+        .from(schema.prompts)
+        .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
+        .limit(1);
+
+      if (!prompt) {
+        throw new Error("Prompt not found");
+      }
+
+      // Check ownership or team admin
+      let canShare = prompt.userId === ctx.user.id;
+      if (!canShare && prompt.teamId) {
+        const [membership] = await db
+          .select({ role: schema.teamMembers.role })
+          .from(schema.teamMembers)
+          .where(
+            and(
+              eq(schema.teamMembers.teamId, prompt.teamId),
+              eq(schema.teamMembers.userId, ctx.user.id)
+            )
+          )
+          .limit(1);
+        if (membership && (membership.role === "owner" || membership.role === "admin")) {
+          canShare = true;
+        }
+      }
+
+      if (!canShare) {
+        throw new Error("Access denied");
+      }
+
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      const bytes = crypto.randomBytes(16);
+      let token = "";
+      for (let i = 0; i < 16; i++) {
+        token += chars[bytes[i] % chars.length];
+      }
+
+      const expiresAt = expiresInHours
+        ? new Date(Date.now() + expiresInHours * 60 * 60 * 1000)
+        : null;
+
+      const [share] = await db
+        .insert(schema.promptShares)
+        .values({
+          promptId,
+          token,
+          access,
+          expiresAt,
+        })
+        .returning();
+
+      return {
+        shareUrl: `/share/${token}`,
+        token: share.token,
+        expiresAt: share.expiresAt,
+        access: share.access,
+      };
+    }),
+
+  /**
+   * List active shares for a prompt
+   */
+  listShares: protectedProcedure
+    .input(z.object({ promptId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      const { promptId } = input;
+
+      const [prompt] = await db
+        .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+        .from(schema.prompts)
+        .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
+        .limit(1);
+
+      if (!prompt) return { shares: [] };
+
+      let canView = prompt.userId === ctx.user.id;
+      if (!canView && prompt.teamId) {
+        const [membership] = await db
+          .select({ role: schema.teamMembers.role })
+          .from(schema.teamMembers)
+          .where(
+            and(
+              eq(schema.teamMembers.teamId, prompt.teamId),
+              eq(schema.teamMembers.userId, ctx.user.id)
+            )
+          )
+          .limit(1);
+        if (membership && (membership.role === "owner" || membership.role === "admin")) {
+          canView = true;
+        }
+      }
+
+      if (!canView) return { shares: [] };
+
+      const shares = await db
+        .select({
+          id: schema.promptShares.id,
+          token: schema.promptShares.token,
+          access: schema.promptShares.access,
+          expiresAt: schema.promptShares.expiresAt,
+          viewCount: schema.promptShares.viewCount,
+          createdAt: schema.promptShares.createdAt,
+        })
+        .from(schema.promptShares)
+        .where(eq(schema.promptShares.promptId, promptId))
+        .orderBy(schema.promptShares.createdAt);
+
+      const now = new Date();
+      const activeShares = shares.filter((s) => !s.expiresAt || new Date(s.expiresAt) >= now);
+
+      return { shares: activeShares };
+    }),
+
+  /**
+   * Revoke a share
+   */
+  revokeShare: protectedProcedure
+    .input(z.object({ promptId: z.string().uuid(), shareId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const { promptId, shareId } = input;
+
+      const [prompt] = await db
+        .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+        .from(schema.prompts)
+        .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
+        .limit(1);
+
+      if (!prompt) throw new Error("Prompt not found");
+
+      let canRevoke = prompt.userId === ctx.user.id;
+      if (!canRevoke && prompt.teamId) {
+        const [membership] = await db
+          .select({ role: schema.teamMembers.role })
+          .from(schema.teamMembers)
+          .where(
+            and(
+              eq(schema.teamMembers.teamId, prompt.teamId),
+              eq(schema.teamMembers.userId, ctx.user.id)
+            )
+          )
+          .limit(1);
+        if (membership && (membership.role === "owner" || membership.role === "admin")) {
+          canRevoke = true;
+        }
+      }
+
+      if (!canRevoke) throw new Error("Access denied");
+
+      const [share] = await db
+        .select({ id: schema.promptShares.id })
+        .from(schema.promptShares)
+        .where(and(eq(schema.promptShares.id, shareId), eq(schema.promptShares.promptId, promptId)))
+        .limit(1);
+
+      if (!share) throw new Error("Share not found");
+
+      await db.delete(schema.promptShares).where(eq(schema.promptShares.id, shareId));
+
+      return { success: true };
     }),
 });
 

@@ -18,16 +18,14 @@ interface SharedPromptData {
   qualityScore: number | null;
   tokenEstimate: number | null;
   tokenEstimateResponse: number | null;
+  access?: "read" | "clone";
   sharedAt: Date | null;
 }
 
-/**
- * Read-only fetch: returns shared prompt data WITHOUT incrementing view count.
- * Used by generateMetadata so crawlers / metadata prefetches don't inflate counts.
- */
 async function getSharedPromptReadOnly(token: string): Promise<SharedPromptData | null> {
   try {
-    const [shared] = await db
+    // Try legacy sharedPrompts first
+    const [legacyShared] = await db
       .select()
       .from(schema.sharedPrompts)
       .where(
@@ -38,8 +36,39 @@ async function getSharedPromptReadOnly(token: string): Promise<SharedPromptData 
       )
       .limit(1);
 
-    if (!shared) return null;
-    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) return null;
+    if (legacyShared) {
+      if (legacyShared.expiresAt && new Date(legacyShared.expiresAt) < new Date()) return null;
+
+      const [prompt] = await db
+        .select({
+          id: schema.prompts.id,
+          promptText: schema.prompts.promptText,
+          responseText: schema.prompts.responseText,
+          timestamp: schema.prompts.timestamp,
+          projectName: schema.prompts.projectName,
+          source: schema.prompts.source,
+          promptType: schema.prompts.promptType,
+          qualityScore: schema.prompts.qualityScore,
+          tokenEstimate: schema.prompts.tokenEstimate,
+          tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
+        })
+        .from(schema.prompts)
+        .where(and(eq(schema.prompts.id, legacyShared.promptId), isNull(schema.prompts.deletedAt)))
+        .limit(1);
+
+      if (!prompt) return null;
+      return { ...prompt, sharedAt: legacyShared.createdAt };
+    }
+
+    // Fall back to promptShares
+    const [share] = await db
+      .select()
+      .from(schema.promptShares)
+      .where(eq(schema.promptShares.token, token))
+      .limit(1);
+
+    if (!share) return null;
+    if (share.expiresAt && new Date(share.expiresAt) < new Date()) return null;
 
     const [prompt] = await db
       .select({
@@ -55,28 +84,21 @@ async function getSharedPromptReadOnly(token: string): Promise<SharedPromptData 
         tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
       })
       .from(schema.prompts)
-      .where(and(eq(schema.prompts.id, shared.promptId), isNull(schema.prompts.deletedAt)))
+      .where(and(eq(schema.prompts.id, share.promptId), isNull(schema.prompts.deletedAt)))
       .limit(1);
 
     if (!prompt) return null;
-
-    return {
-      ...prompt,
-      sharedAt: shared.createdAt,
-    };
+    return { ...prompt, sharedAt: share.createdAt, access: share.access as "read" | "clone" };
   } catch (error) {
     logger.error({ err: error }, "Error fetching shared prompt (read-only)");
     return null;
   }
 }
 
-/**
- * Fetch shared prompt AND increment view count.
- * Used only on actual page render.
- */
 async function getSharedPromptAndIncrement(token: string): Promise<SharedPromptData | null> {
   try {
-    const [shared] = await db
+    // Try legacy sharedPrompts first
+    const [legacyShared] = await db
       .select()
       .from(schema.sharedPrompts)
       .where(
@@ -87,8 +109,45 @@ async function getSharedPromptAndIncrement(token: string): Promise<SharedPromptD
       )
       .limit(1);
 
-    if (!shared) return null;
-    if (shared.expiresAt && new Date(shared.expiresAt) < new Date()) return null;
+    if (legacyShared) {
+      if (legacyShared.expiresAt && new Date(legacyShared.expiresAt) < new Date()) return null;
+
+      const [prompt] = await db
+        .select({
+          id: schema.prompts.id,
+          promptText: schema.prompts.promptText,
+          responseText: schema.prompts.responseText,
+          timestamp: schema.prompts.timestamp,
+          projectName: schema.prompts.projectName,
+          source: schema.prompts.source,
+          promptType: schema.prompts.promptType,
+          qualityScore: schema.prompts.qualityScore,
+          tokenEstimate: schema.prompts.tokenEstimate,
+          tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
+        })
+        .from(schema.prompts)
+        .where(and(eq(schema.prompts.id, legacyShared.promptId), isNull(schema.prompts.deletedAt)))
+        .limit(1);
+
+      if (!prompt) return null;
+
+      await db
+        .update(schema.sharedPrompts)
+        .set({ viewCount: sql`${schema.sharedPrompts.viewCount} + 1` })
+        .where(eq(schema.sharedPrompts.id, legacyShared.id));
+
+      return { ...prompt, sharedAt: legacyShared.createdAt };
+    }
+
+    // Fall back to promptShares
+    const [share] = await db
+      .select()
+      .from(schema.promptShares)
+      .where(eq(schema.promptShares.token, token))
+      .limit(1);
+
+    if (!share) return null;
+    if (share.expiresAt && new Date(share.expiresAt) < new Date()) return null;
 
     const [prompt] = await db
       .select({
@@ -104,21 +163,17 @@ async function getSharedPromptAndIncrement(token: string): Promise<SharedPromptD
         tokenEstimateResponse: schema.prompts.tokenEstimateResponse,
       })
       .from(schema.prompts)
-      .where(and(eq(schema.prompts.id, shared.promptId), isNull(schema.prompts.deletedAt)))
+      .where(and(eq(schema.prompts.id, share.promptId), isNull(schema.prompts.deletedAt)))
       .limit(1);
 
     if (!prompt) return null;
 
-    // Increment view count only here (page render)
     await db
-      .update(schema.sharedPrompts)
-      .set({ viewCount: sql`${schema.sharedPrompts.viewCount} + 1` })
-      .where(eq(schema.sharedPrompts.id, shared.id));
+      .update(schema.promptShares)
+      .set({ viewCount: sql`${schema.promptShares.viewCount} + 1` })
+      .where(eq(schema.promptShares.id, share.id));
 
-    return {
-      ...prompt,
-      sharedAt: shared.createdAt,
-    };
+    return { ...prompt, sharedAt: share.createdAt, access: share.access as "read" | "clone" };
   } catch (error) {
     logger.error({ err: error }, "Error fetching shared prompt");
     return null;
@@ -167,6 +222,8 @@ export default async function SharedPromptPage({
       qualityScore={prompt.qualityScore}
       tokenEstimate={prompt.tokenEstimate}
       tokenEstimateResponse={prompt.tokenEstimateResponse}
+      access={prompt.access}
+      token={token}
     />
   );
 }

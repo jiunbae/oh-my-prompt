@@ -25,6 +25,8 @@ export const env = createEnv({
     OMP_MAX_RECORDS_PER_REQUEST: z.coerce.number().default(1000),
     // Webhook limits
     OMP_WEBHOOK_TIMEOUT_MS: z.coerce.number().default(10_000),
+    // Slack integration
+    SLACK_WEBHOOK_TIMEOUT_MS: z.coerce.number().default(5_000),
     OMP_WEBHOOK_MAX_FAIL_COUNT: z.coerce.number().default(10),
     // Email provider
     EMAIL_PROVIDER: z.enum(["smtp", "resend", "sendgrid", ""]).default(""),
@@ -40,6 +42,10 @@ export const env = createEnv({
     EMBEDDING_API_URL: z.string().url().optional(),
     EMBEDDING_API_KEY: z.string().default(""),
     EMBEDDING_MODEL: z.string().default("all-minilm"),
+    // Suggestion provider (optional; falls back to embedding provider)
+    SUGGESTION_PROVIDER: z.string().url().optional(),
+    SUGGESTION_MODEL: z.string().default(""),
+    SUGGESTION_MAX_TOKENS: z.coerce.number().default(500),
   },
   client: {
   },
@@ -54,6 +60,7 @@ export const env = createEnv({
     OMP_MAX_RECORDS_PER_REQUEST: process.env.OMP_MAX_RECORDS_PER_REQUEST,
     OMP_WEBHOOK_TIMEOUT_MS: process.env.OMP_WEBHOOK_TIMEOUT_MS,
     OMP_WEBHOOK_MAX_FAIL_COUNT: process.env.OMP_WEBHOOK_MAX_FAIL_COUNT,
+    SLACK_WEBHOOK_TIMEOUT_MS: process.env.SLACK_WEBHOOK_TIMEOUT_MS,
     EMAIL_PROVIDER: process.env.EMAIL_PROVIDER,
     EMAIL_FROM: process.env.EMAIL_FROM,
     SMTP_HOST: process.env.SMTP_HOST,
@@ -66,6 +73,9 @@ export const env = createEnv({
     EMBEDDING_API_URL: process.env.EMBEDDING_API_URL,
     EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
     EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
+    SUGGESTION_PROVIDER: process.env.SUGGESTION_PROVIDER,
+    SUGGESTION_MODEL: process.env.SUGGESTION_MODEL,
+    SUGGESTION_MAX_TOKENS: process.env.SUGGESTION_MAX_TOKENS,
   },
   skipValidation: isTest || !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

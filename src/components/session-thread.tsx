@@ -8,6 +8,8 @@ import { MarkdownContent } from "@/components/markdown-content";
 import { CheckboxRow } from "@/components/checkbox-row";
 import { BulkOperationsBar } from "@/components/bulk-operations-bar";
 import { PromptVersionTimeline } from "@/components/prompt-version-timeline";
+import { SimilarPrompts } from "@/components/similar-prompts";
+import { PromptSuggestDialog } from "@/components/prompt-suggest-dialog";
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -85,6 +87,8 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
   const [showResponses, setShowResponses] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [activeSimilarId, setActiveSimilarId] = useState<string | null>(null);
+  const [suggestPrompt, setSuggestPrompt] = useState<{ id: string; text: string } | null>(null);
 
   const sortedPrompts = sortAsc ? [...prompts].reverse() : prompts;
 
@@ -241,6 +245,20 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                       <span className="text-xs text-muted-foreground font-mono">#{promptNumber}</span>
                       <div className="ml-auto flex items-center gap-1">
                         <CopyButton text={prompt.promptText} />
+                        <button
+                          onClick={() => setActiveSimilarId(activeSimilarId === prompt.id ? null : prompt.id)}
+                          className="text-xs text-muted-foreground hover:text-secondary-foreground transition-colors"
+                          title="Find similar prompts"
+                        >
+                          Similar
+                        </button>
+                        <button
+                          onClick={() => setSuggestPrompt({ id: prompt.id, text: prompt.promptText })}
+                          className="text-xs text-muted-foreground hover:text-secondary-foreground transition-colors"
+                          title="Suggest improvements"
+                        >
+                          Suggest
+                        </button>
                         <Link
                           href={`/prompts/${prompt.id}`}
                           className="text-xs text-muted-foreground hover:text-secondary-foreground transition-colors"
@@ -267,6 +285,22 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                     )}
                     {/* Version history for this prompt */}
                     <PromptVersionTimeline promptId={prompt.id} />
+
+                    {/* Similar prompts panel */}
+                    {activeSimilarId === prompt.id && (
+                      <div className="mt-3 rounded-lg border border-border bg-surface overflow-hidden">
+                        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface-sunken">
+                          <span className="text-xs font-medium text-secondary-foreground">Similar Prompts</span>
+                          <button
+                            onClick={() => setActiveSimilarId(null)}
+                            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <SimilarPrompts promptId={prompt.id} />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -314,6 +348,16 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
           onDelete={handleBulkDelete}
           onTag={handleBulkTag}
           onClear={clearSelection}
+        />
+      )}
+
+      {/* Suggest improvements dialog */}
+      {suggestPrompt && (
+        <PromptSuggestDialog
+          open={!!suggestPrompt}
+          onClose={() => setSuggestPrompt(null)}
+          promptId={suggestPrompt.id}
+          promptText={suggestPrompt.text}
         />
       )}
     </div>

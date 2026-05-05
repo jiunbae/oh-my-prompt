@@ -11,6 +11,8 @@ import { weeklyTrends } from "./weekly-trends/manifest";
 import { promptQuality } from "./prompt-quality/manifest";
 import { sessionStory } from "./session-story/manifest";
 import { emailDigest } from "./email-digest/manifest";
+import { slackDaily } from "./slack-daily/manifest";
+import { slackRealtime } from "./slack-realtime/manifest";
 
 export const extensions: Extension[] = [
   dailySummary,
@@ -18,6 +20,8 @@ export const extensions: Extension[] = [
   promptQuality,
   sessionStory,
   emailDigest,
+  slackDaily,
+  slackRealtime,
 ];
 
 /** Look up an extension by name */

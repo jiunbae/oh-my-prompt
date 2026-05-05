@@ -20,7 +20,6 @@ const { getStats } = require("./stats");
 const { exportData } = require("./export");
 const { runSearch } = require("./search");
 const { syncToServer, postJson, getJson } = require("./sync");
-const { startTui } = require("./tui");
 const {
   listTemplates,
   showTemplate,
@@ -83,7 +82,6 @@ ${cmd("watch stop", "Stop file watcher")}
 ${cmd("watch status", "Show watcher status")}
 
 ${cmd("search <query>", "Full-text search prompts locally")}
-${cmd("tui", "Interactive terminal UI for browsing prompts")}
 ${cmd("stats", "Show prompt statistics")}
 ${cmd("report", "Generate summary report for a time range")}
 ${cmd("analyze [id]", "Analyze a prompt (default: most recent)")}
@@ -2566,40 +2564,6 @@ async function main() {
       if (options.json && result !== null) {
         printJson(result);
       }
-      break;
-    }
-    case "tui": {
-      if (options.help || options.h) {
-        console.log(`
-  omp tui — Interactive terminal UI for browsing prompts
-
-  USAGE
-    omp tui
-
-  KEYBOARD SHORTCUTS (List view)
-    j/k or arrows    Navigate prompts
-    enter            View prompt detail
-    /                Enter search/filter mode
-    f                Toggle favorite
-    d                Soft-delete prompt
-    s                Sync to server
-    q                Quit
-
-  KEYBOARD SHORTCUTS (Detail view)
-    j/k or arrows    Scroll text
-    r                Copy response to clipboard
-    p                Copy prompt to clipboard
-    esc              Back to list
-
-  KEYBOARD SHORTCUTS (Search mode)
-    type             Filter results live
-    enter            Confirm and return to list
-    esc              Clear filter and return to list
-`);
-        break;
-      }
-      const tuiConfig = loadConfig();
-      await startTui(tuiConfig, options);
       break;
     }
     case "delete": {
