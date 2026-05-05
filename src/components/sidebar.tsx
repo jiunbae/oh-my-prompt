@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, createContext, useContext, useMemo } 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "@/contexts/user-context";
+import { useTeam } from "@/contexts/team-context";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -167,6 +168,15 @@ const exploreItems: NavItem[] = [
     icon: (
       <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+    ),
+  },
+  {
+    href: "/teams",
+    label: "Teams",
+    icon: (
+      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
       </svg>
     ),
   },
@@ -353,9 +363,89 @@ function SidebarGroup({
   );
 }
 
+function TeamSwitcher() {
+  const { teams, selectedTeamId, selectTeam, loading } = useTeam();
+  const [open, setOpen] = useState(false);
+  const { user } = useUser();
+
+  const selectedTeam = teams.find((t) => t.id === selectedTeamId);
+
+  if (loading || !user) return null;
+
+  return (
+    <div className="px-3 pb-3">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+      >
+        <svg className="h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+        <span className="flex-1 truncate text-left">
+          {selectedTeam ? selectedTeam.name : "Personal"}
+        </span>
+        <svg
+          className={`h-3 w-3 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="mt-1 rounded-lg border border-border bg-card shadow-sm">
+          <button
+            onClick={() => {
+              selectTeam(null);
+              setOpen(false);
+            }}
+            className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent/50 ${!selectedTeamId ? "text-primary font-medium" : "text-muted-foreground"}`}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            Personal
+          </button>
+          {teams.map((team) => (
+            <button
+              key={team.id}
+              onClick={() => {
+                selectTeam(team.id);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent/50 ${selectedTeamId === team.id ? "text-primary font-medium" : "text-muted-foreground"}`}
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span className="flex-1 truncate text-left">{team.name}</span>
+              <span className="text-[10px] uppercase text-muted-foreground/60">{team.role}</span>
+            </button>
+          ))}
+          <div className="border-t border-border px-3 py-2">
+            <Link
+              href="/teams"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Manage Teams
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
   const pathname = usePathname();
   const { user, loading, logout } = useUser();
+  const { teams } = useTeam();
 
   return (
     <>
@@ -374,11 +464,56 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
         <SidebarGroup label="Overview" items={overviewItems} pathname={pathname} onLinkClick={onLinkClick} />
         <SidebarGroup label="Explore" items={exploreItems} pathname={pathname} onLinkClick={onLinkClick} />
 
+        {/* Teams Section */}
+        {teams.length > 0 && (
+          <div>
+            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Teams
+            </p>
+            <div className="space-y-1">
+              {teams.map((team) => {
+                const href = `/teams/${team.id}`;
+                const isActive = pathname === href;
+                return (
+                  <Link
+                    key={team.id}
+                    href={href}
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={onLinkClick}
+                    className={`
+                      relative flex items-center gap-3 rounded-lg px-3 py-2
+                      text-sm font-medium transition-colors
+                      ${
+                        isActive
+                          ? "bg-sidebar-active text-sidebar-active-foreground"
+                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                      }
+                    `}
+                  >
+                    {isActive && (
+                      <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-sidebar-active-indicator" />
+                    )}
+                    <span className={isActive ? "text-sidebar-active-indicator" : ""}>
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                      </svg>
+                    </span>
+                    <span className="truncate">{team.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Admin Section */}
         {user?.isAdmin && (
           <SidebarGroup label="Admin" items={adminNavItems} pathname={pathname} onLinkClick={onLinkClick} />
         )}
       </nav>
+
+      {/* Team Switcher */}
+      <TeamSwitcher />
 
       {/* User Info Section */}
       <div className="border-t border-border p-4">

@@ -10,12 +10,14 @@ import { dailySummary } from "./daily-summary/manifest";
 import { weeklyTrends } from "./weekly-trends/manifest";
 import { promptQuality } from "./prompt-quality/manifest";
 import { sessionStory } from "./session-story/manifest";
+import { emailDigest } from "./email-digest/manifest";
 
 export const extensions: Extension[] = [
   dailySummary,
   weeklyTrends,
   promptQuality,
   sessionStory,
+  emailDigest,
 ];
 
 /** Look up an extension by name */

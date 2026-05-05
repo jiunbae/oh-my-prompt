@@ -153,14 +153,14 @@ export default function AdminMonitoringPage() {
               <p className="text-lg font-semibold">{data.webhooks?.pendingRetries ?? 0}</p>
             </div>
           </div>
-          {data.webhooks?.recentFailures?.length > 0 && (
+          {(data.webhooks?.recentFailures?.length ?? 0) > 0 && (
             <div className="border-t pt-3">
               <p className="text-xs font-medium text-muted-foreground mb-2">Recent Failures</p>
               <div className="space-y-1">
-                {data.webhooks.recentFailures.map((w) => (
+                {(data.webhooks?.recentFailures ?? []).map((w) => (
                   <div key={w.id} className="flex items-center gap-2 text-sm">
                     <span className="truncate">{w.name}</span>
-                    <Badge variant="destructive" className="text-xs">{w.failCount} fails</Badge>
+                    <Badge variant="error" className="text-xs">{w.failCount} fails</Badge>
                     {w.lastStatus && <span className="text-xs text-muted-foreground">HTTP {w.lastStatus}</span>}
                   </div>
                 ))}

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { ingestPayload } = require("./ingest");
+const { importChatGPT } = require("./chatgpt-import");
 
 function resolveCodexHistoryPath(customPath) {
   if (customPath) return customPath;
@@ -92,4 +93,5 @@ async function importCodexHistory(config, options = {}) {
 
 module.exports = {
   importCodexHistory,
+  importChatGPT,
 };

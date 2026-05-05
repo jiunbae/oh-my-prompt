@@ -17,12 +17,30 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get("source") || null;
     const from = searchParams.get("from") || null;
     const to = searchParams.get("to") || null;
+    const teamId = searchParams.get("teamId")?.trim() || null;
     const page = parseInt(searchParams.get("page") ?? "1", 10);
     const pageSize = 20;
     const offset = (page - 1) * pageSize;
 
+    // Verify team membership if teamId provided
+    if (teamId) {
+      const [membership] = await db
+        .select({ role: schema.teamMembers.role })
+        .from(schema.teamMembers)
+        .where(
+          and(
+            eq(schema.teamMembers.teamId, teamId),
+            eq(schema.teamMembers.userId, session.userId)
+          )
+        )
+        .limit(1);
+      if (!membership) {
+        return NextResponse.json({ error: "Team not found or access denied" }, { status: 403 });
+      }
+    }
+
     const conditions = [
-      eq(schema.prompts.userId, session.userId),
+      teamId ? eq(schema.prompts.teamId, teamId) : eq(schema.prompts.userId, session.userId),
       sql`${schema.prompts.sessionId} IS NOT NULL`,
       isNull(schema.prompts.deletedAt),
     ];

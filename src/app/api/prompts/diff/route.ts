@@ -13,7 +13,86 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const idA = searchParams.get("a");
     const idB = searchParams.get("b");
+    const fromVersion = searchParams.get("from");
+    const toVersion = searchParams.get("to");
+    const promptId = searchParams.get("promptId");
 
+    const isAdmin = session.isAdmin ? await checkIsAdmin(session.userId) : false;
+
+    // Version-based diff: /api/prompts/:id/diff?from=v1&to=v2
+    if (fromVersion && toVersion && promptId) {
+      const fromNum = parseInt(fromVersion.replace(/^v/, ""), 10);
+      const toNum = parseInt(toVersion.replace(/^v/, ""), 10);
+
+      if (isNaN(fromNum) || isNaN(toNum)) {
+        return NextResponse.json(
+          { error: "Invalid version numbers" },
+          { status: 400 }
+        );
+      }
+
+      // Verify prompt ownership
+      const ownershipCondition = isAdmin
+        ? eq(schema.prompts.id, promptId)
+        : and(eq(schema.prompts.id, promptId), eq(schema.prompts.userId, session.userId));
+
+      const [prompt] = await db
+        .select({ id: schema.prompts.id })
+        .from(schema.prompts)
+        .where(ownershipCondition)
+        .limit(1);
+
+      if (!prompt) {
+        return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
+      }
+
+      // Fetch both versions
+      const versions = await db
+        .select({
+          version: schema.promptVersions.version,
+          promptText: schema.promptVersions.promptText,
+          createdAt: schema.promptVersions.createdAt,
+        })
+        .from(schema.promptVersions)
+        .where(
+          and(
+            eq(schema.promptVersions.promptId, promptId),
+            inArray(schema.promptVersions.version, [fromNum, toNum])
+          )
+        );
+
+      const versionA = versions.find((v) => v.version === fromNum);
+      const versionB = versions.find((v) => v.version === toNum);
+
+      if (!versionA || !versionB) {
+        return NextResponse.json(
+          { error: "One or both versions not found" },
+          { status: 404 }
+        );
+      }
+
+      const diff = computeDiff(versionA.promptText, versionB.promptText);
+      const similarity = computeSimilarity(versionA.promptText, versionB.promptText);
+
+      return NextResponse.json({
+        promptA: {
+          id: `${promptId}-v${fromNum}`,
+          version: fromNum,
+          timestamp: versionA.createdAt,
+          promptText: versionA.promptText,
+        },
+        promptB: {
+          id: `${promptId}-v${toNum}`,
+          version: toNum,
+          timestamp: versionB.createdAt,
+          promptText: versionB.promptText,
+        },
+        diff,
+        similarity,
+      });
+    }
+
+    // Original prompt-based diff
     if (!idA || !idB) {
       return NextResponse.json(
         { error: "Both 'a' and 'b' prompt IDs are required" },
@@ -21,8 +100,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch both prompts with ownership check (admins can see all)
-    const isAdmin = session.isAdmin ? await checkIsAdmin(session.userId) : false;
     const ownershipCondition = isAdmin
       ? and(inArray(schema.prompts.id, [idA, idB]), isNull(schema.prompts.deletedAt))
       : and(

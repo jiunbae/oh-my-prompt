@@ -39,7 +39,7 @@ function EndpointCard({ endpoint }: { endpoint: ApiEndpoint }) {
           <Badge variant="secondary" className="text-xs">Auth</Badge>
         )}
         {endpoint.adminOnly && (
-          <Badge variant="destructive" className="text-xs">Admin</Badge>
+          <Badge variant="error" className="text-xs">Admin</Badge>
         )}
         <span className="text-sm text-muted-foreground ml-auto hidden sm:inline">{endpoint.description}</span>
       </button>

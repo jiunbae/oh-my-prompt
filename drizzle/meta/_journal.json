@@ -92,6 +92,27 @@
       "when": 1746460801000,
       "tag": "0013_add_favorite_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1746460802000,
+      "tag": "0017_add_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1746460803000,
+      "tag": "0016_add_prompt_embedding",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1746460804000,
+      "tag": "0019_add_prompt_versions",
+      "breakpoints": true
     }
   ]
 }

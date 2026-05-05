@@ -7,9 +7,10 @@ import { postprocessUploadRecordForDb } from "./upload-postprocess";
 import { computeHeuristicScore } from "@/extensions/prompt-quality/processor";
 import { scorePrompt } from "@/services/quality-scorer";
 import { lintPrompt } from "@/lib/prompt-lint";
-import { sql, inArray, eq, and, desc } from "drizzle-orm";
+import { sql, inArray, eq, and, desc, isNull } from "drizzle-orm";
 import { env } from "@/env";
 import { dispatchWebhook } from "@/services/webhook";
+import { generateEmbedding } from "@/lib/embedding";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
 
@@ -260,7 +261,14 @@ export async function processUpload(
     }
   }
 
-  // ── Phase 6: Refresh daily analytics ───────────────────────────
+  // ── Phase 6: Generate embeddings for new prompts (non-blocking) ─
+  if (accepted > 0) {
+    generateMissingEmbeddings(userId).catch((err) => {
+      logger.error({ err }, "Non-blocking embedding generation failed");
+    });
+  }
+
+  // ── Phase 7: Refresh daily analytics ───────────────────────────
 
   if (affectedDates.size > 0) {
     try {
@@ -271,7 +279,7 @@ export async function processUpload(
     }
   }
 
-  // ── Phase 7: Detect session.completed via gap threshold ───────
+  // ── Phase 8: Detect session.completed via gap threshold ───────
   // If the earliest new prompt's session differs from the previous prompt's
   // session by >30 min gap, the old session is considered completed.
   const userInputRecords = toInsert.filter((r) => r.promptType === "user_input");
@@ -328,5 +336,40 @@ async function detectSessionCompleted(
     }).catch((err) => {
       logger.error({ err }, "Non-blocking session.completed webhook dispatch failed");
     });
+  }
+}
+
+/**
+ * Find prompts without embeddings for a user and generate them.
+ * Runs in small batches to avoid overwhelming the embedding API.
+ */
+async function generateMissingEmbeddings(userId: string): Promise<void> {
+  const BATCH_SIZE = 10;
+
+  const rows = await db
+    .select({
+      id: schema.prompts.id,
+      promptText: schema.prompts.promptText,
+    })
+    .from(schema.prompts)
+    .where(
+      and(
+        eq(schema.prompts.userId, userId),
+        isNull(schema.prompts.embedding),
+        isNull(schema.prompts.deletedAt)
+      )
+    )
+    .limit(BATCH_SIZE);
+
+  if (rows.length === 0) return;
+
+  for (const row of rows) {
+    const embedding = await generateEmbedding(row.promptText);
+    if (embedding) {
+      const vectorLiteral = `[${embedding.join(",")}]`;
+      await db.execute(
+        sql`UPDATE prompts SET embedding = ${vectorLiteral}::vector WHERE id = ${row.id}`
+      );
+    }
   }
 }

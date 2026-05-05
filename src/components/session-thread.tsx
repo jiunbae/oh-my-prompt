@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { MarkdownContent } from "@/components/markdown-content";
 import { CheckboxRow } from "@/components/checkbox-row";
 import { BulkOperationsBar } from "@/components/bulk-operations-bar";
+import { PromptVersionTimeline } from "@/components/prompt-version-timeline";
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -264,6 +265,8 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                         ))}
                       </div>
                     )}
+                    {/* Version history for this prompt */}
+                    <PromptVersionTimeline promptId={prompt.id} />
                   </div>
                 </div>
               </div>

@@ -789,21 +789,55 @@ function handleConfig(options, positional) {
 async function handleImport(options, positional) {
   const config = loadConfig();
   const source = positional[0];
-  if (source !== "codex-history") {
-    console.error("Usage: omp import codex-history [--path <file>] [--dry-run]");
-    process.exitCode = 2;
+
+  if (source === "codex-history") {
+    const { importCodexHistory } = require("./importer");
+    const result = await importCodexHistory(config, {
+      path: options.path,
+      dryRun: !!options["dry-run"],
+    });
+    if (options.json) {
+      printJson(result);
+    } else {
+      console.log(`Imported ${result.imported} records (skipped ${result.skipped}).`);
+    }
     return;
   }
-  const { importCodexHistory } = require("./importer");
-  const result = await importCodexHistory(config, {
-    path: options.path,
-    dryRun: !!options["dry-run"],
-  });
-  if (options.json) {
-    printJson(result);
-  } else {
-    console.log(`Imported ${result.imported} records (skipped ${result.skipped}).`);
+
+  if (source === "chatgpt") {
+    const { importChatGPT } = require("./importer");
+    const filePath = positional[1] || options.path;
+    if (!filePath) {
+      console.error("Usage: omp import chatgpt <path-to-export.zip|conversations.json> [--dry-run] [--since <date>]");
+      process.exitCode = 2;
+      return;
+    }
+    const result = await importChatGPT(config, {
+      path: filePath,
+      dryRun: !!options["dry-run"],
+      since: options.since,
+      json: !!options.json,
+    });
+    if (options.json) {
+      printJson(result);
+    } else {
+      const parts = [`Imported ${result.imported} records`];
+      if (result.skipped) parts.push(`skipped ${result.skipped}`);
+      if (result.errors) parts.push(`${result.errors} errors`);
+      parts.push(`from ${result.conversations} conversation(s)`);
+      console.log(parts.join(", ") + ".");
+      if (result.error) {
+        console.error(fail(result.error));
+      }
+    }
+    if (result.error && !result.imported) {
+      process.exitCode = 1;
+    }
+    return;
   }
+
+  console.error("Usage: omp import <codex-history|chatgpt> [options]");
+  process.exitCode = 2;
 }
 
 async function handleStats(options) {
@@ -2026,11 +2060,13 @@ async function main() {
 
   USAGE
     omp import codex-history [options]
+    omp import chatgpt <path-to-export.zip|conversations.json> [options]
 
   OPTIONS
-    --path <file>   Custom history file path
-    --dry-run       Show what would be imported
-    --json          Output as JSON
+    --path <file>       Input file path
+    --dry-run           Show what would be imported
+    --since <date>      Only import conversations after date
+    --json              Output as JSON
 `);
         break;
       }

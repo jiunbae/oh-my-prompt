@@ -22,6 +22,12 @@ const tsvector = customType<{ data: string }>({
   },
 });
 
+const vector = customType<{ data: number[]; config: { dimensions: number } }>({
+  dataType(config) {
+    return `vector(${config?.dimensions || 384})`;
+  },
+});
+
 // Users table
 export const users = pgTable(
   "users",
@@ -38,6 +44,7 @@ export const users = pgTable(
     name: varchar("name", { length: 100 }),
     isAdmin: boolean("is_admin").default(false),
     dataRetentionDays: integer("data_retention_days").default(365),
+    emailDigestEnabled: boolean("email_digest_enabled").default(true),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
@@ -83,6 +90,7 @@ export const prompts = pgTable(
     deviceName: varchar("device_name", { length: 255 }),
 
     userId: uuid("user_id").references(() => users.id),
+    teamId: uuid("team_id").references(() => teams.id),
     tokenEstimate: integer("token_estimate"),
     wordCount: integer("word_count"),
     tokenEstimateResponse: integer("token_estimate_response"),
@@ -102,6 +110,7 @@ export const prompts = pgTable(
     enrichedAt: timestamp("enriched_at", { withTimezone: true }),
 
     searchVector: tsvector("search_vector"),
+    embedding: vector("embedding", { dimensions: 384 }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
@@ -113,10 +122,13 @@ export const prompts = pgTable(
     index("idx_prompts_session_id").on(table.sessionId),
     index("idx_prompts_search_vector").using("gin", table.searchVector),
     index("idx_prompts_text_trgm").using("gin", sql`LEFT(prompt_text, 500) gin_trgm_ops`),
+    index("idx_prompts_embedding").using("ivfflat", table.embedding),
     index("idx_prompts_user_timestamp").on(table.userId, table.timestamp),
     index("idx_prompts_user_project").on(table.userId, table.projectName),
     index("idx_prompts_user_quality").on(table.userId, table.qualityScore),
     index("idx_prompts_user_session_ts").on(table.userId, table.sessionId, table.timestamp),
+    index("idx_prompts_team").on(table.teamId),
+    index("idx_prompts_team_timestamp").on(table.teamId, table.timestamp),
   ]
 );
 
@@ -142,6 +154,65 @@ export const promptTags = pgTable(
       .references(() => tags.id, { onDelete: "cascade" }),
   },
   (table) => [primaryKey({ columns: [table.promptId, table.tagId] })]
+);
+
+// Teams table
+export const teams = pgTable(
+  "teams",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 255 }).notNull(),
+    slug: varchar("slug", { length: 255 }).notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_teams_slug").on(table.slug),
+  ]
+);
+
+// Team members table
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: varchar("role", { length: 20 }).notNull().default("member"), // owner, admin, member
+    joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.teamId, table.userId] }),
+    index("idx_team_members_team").on(table.teamId),
+    index("idx_team_members_user").on(table.userId),
+  ]
+);
+
+// Team invites table
+export const teamInvites = pgTable(
+  "team_invites",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    email: varchar("email", { length: 255 }).notNull(),
+    token: varchar("token", { length: 64 }).notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("idx_team_invites_team").on(table.teamId),
+    index("idx_team_invites_token").on(table.token),
+    index("idx_team_invites_email").on(table.email),
+  ]
 );
 
 // AI-generated insights cache
@@ -296,6 +367,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   favoriteSessions: many(favoriteSessions),
   favoritePrompts: many(favoritePrompts),
   sessionNotes: many(sessionNotes),
+  teamMembers: many(teamMembers),
 }));
 
 export const allowedEmailsRelations = relations(allowedEmails, ({ one }) => ({
@@ -309,9 +381,14 @@ export const promptsRelations = relations(prompts, ({ one, many }) => ({
   promptTags: many(promptTags),
   sharedPrompts: many(sharedPrompts),
   favoritePrompts: many(favoritePrompts),
+  promptVersions: many(promptVersions),
   user: one(users, {
     fields: [prompts.userId],
     references: [users.id],
+  }),
+  team: one(teams, {
+    fields: [prompts.teamId],
+    references: [teams.id],
   }),
 }));
 
@@ -327,6 +404,30 @@ export const promptTagsRelations = relations(promptTags, ({ one }) => ({
   tag: one(tags, {
     fields: [promptTags.tagId],
     references: [tags.id],
+  }),
+}));
+
+export const teamsRelations = relations(teams, ({ many }) => ({
+  members: many(teamMembers),
+  invites: many(teamInvites),
+  prompts: many(prompts),
+}));
+
+export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamMembers.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [teamMembers.userId],
+    references: [users.id],
+  }),
+}));
+
+export const teamInvitesRelations = relations(teamInvites, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamInvites.teamId],
+    references: [teams.id],
   }),
 }));
 
@@ -481,6 +582,35 @@ export const favoriteSessionsRelations = relations(favoriteSessions, ({ one }) =
   }),
 }));
 
+// Prompt versions table (tracks evolution of a prompt)
+export const promptVersions = pgTable(
+  "prompt_versions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    promptText: text("prompt_text").notNull(),
+    responseText: text("response_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    reason: varchar("reason", { length: 100 }).default("user_edit"),
+  },
+  (table) => [
+    index("idx_prompt_versions_prompt").on(table.promptId),
+    index("idx_prompt_versions_prompt_version").on(table.promptId, table.version),
+  ]
+);
+
+export const promptVersionsRelations = relations(promptVersions, ({ one }) => ({
+  prompt: one(prompts, {
+    fields: [promptVersions.promptId],
+    references: [prompts.id],
+  }),
+}));
+
 // Favorite prompts table
 export const favoritePrompts = pgTable(
   "favorite_prompts",
@@ -550,3 +680,5 @@ export type SessionNote = typeof sessionNotes.$inferSelect;
 export type NewSessionNote = typeof sessionNotes.$inferInsert;
 export type FavoritePrompt = typeof favoritePrompts.$inferSelect;
 export type NewFavoritePrompt = typeof favoritePrompts.$inferInsert;
+export type PromptVersion = typeof promptVersions.$inferSelect;
+export type NewPromptVersion = typeof promptVersions.$inferInsert;

@@ -1,6 +1,6 @@
 import { db } from "@/db/client";
 import { users, prompts } from "@/db/schema";
-import { and, eq, lt, isNull, sql, count, gte } from "drizzle-orm";
+import { and, eq, lt, isNull, isNotNull, sql, count, gte } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 
 interface RetentionCleanupResult {
@@ -34,6 +34,7 @@ export async function runRetentionCleanup(): Promise<RetentionCleanupResult> {
   let totalSoftDeleted = 0;
 
   for (const user of usersWithRetention) {
+    if (!user.dataRetentionDays) continue;
     const cutoffDate = new Date(now);
     cutoffDate.setDate(cutoffDate.getDate() - user.dataRetentionDays);
 
