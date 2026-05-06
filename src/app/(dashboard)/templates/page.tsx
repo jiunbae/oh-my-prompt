@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useUser } from "@/contexts/user-context";
+import { PublishTemplateDialog } from "@/components/publish-template-dialog";
 
 interface TemplateVariable {
   name: string;
@@ -61,6 +62,8 @@ export default function TemplatesPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishTarget, setPublishTarget] = useState<Template | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -198,6 +201,11 @@ export default function TemplatesPage() {
     }
   };
 
+  const handlePublish = (t: Template) => {
+    setPublishTarget(t);
+    setPublishOpen(true);
+  };
+
   const handlePreview = (t: Template) => {
     if (previewId === t.id) {
       setPreviewId(null);
@@ -262,17 +270,28 @@ export default function TemplatesPage() {
             Reusable prompt patterns with variables
           </p>
         </div>
-        <Button
-          onClick={() => {
-            resetForm();
-            setShowForm(true);
-          }}
-        >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          New Template
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => window.location.href = "/marketplace"}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Marketplace
+          </Button>
+          <Button
+            onClick={() => {
+              resetForm();
+              setShowForm(true);
+            }}
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            New Template
+          </Button>
+        </div>
       </div>
 
       {/* Category filter */}
@@ -508,7 +527,18 @@ export default function TemplatesPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => handlePublish(t)}
+                          title="Publish to marketplace"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => handleEditClick(t)}
+                          title="Edit"
                         >
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -519,6 +549,7 @@ export default function TemplatesPage() {
                           size="sm"
                           onClick={() => handleDelete(t.id)}
                           className="text-destructive hover:text-destructive/80"
+                          title="Delete"
                         >
                           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -583,6 +614,16 @@ export default function TemplatesPage() {
         confirmLabel="Delete"
         variant="destructive"
       />
+
+      {publishTarget && (
+        <PublishTemplateDialog
+          open={publishOpen}
+          onClose={() => { setPublishOpen(false); setPublishTarget(null); }}
+          templateId={publishTarget.id}
+          templateTitle={publishTarget.title}
+          onPublished={fetchTemplates}
+        />
+      )}
     </div>
   );
 }

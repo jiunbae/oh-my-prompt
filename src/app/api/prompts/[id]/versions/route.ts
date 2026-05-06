@@ -4,6 +4,7 @@ import * as schema from "@/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, checkIsAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
+import { handleVersionForExperiments } from "@/lib/experiment-utils";
 
 export async function GET(
   _request: NextRequest,
@@ -81,6 +82,12 @@ export async function POST(
         id: schema.prompts.id,
         promptText: schema.prompts.promptText,
         responseText: schema.prompts.responseText,
+        qualityScore: schema.prompts.qualityScore,
+        qualityClarity: schema.prompts.qualityClarity,
+        qualitySpecificity: schema.prompts.qualitySpecificity,
+        qualityContext: schema.prompts.qualityContext,
+        qualityConstraints: schema.prompts.qualityConstraints,
+        qualityStructure: schema.prompts.qualityStructure,
       })
       .from(schema.prompts)
       .where(ownershipCondition)
@@ -108,6 +115,13 @@ export async function POST(
         reason,
       })
       .returning();
+
+    // Trigger experiment auto-calculation for running experiments
+    try {
+      await handleVersionForExperiments(id, nextVersion, prompt as schema.Prompt);
+    } catch (expErr) {
+      logger.error({ err: expErr }, "Experiment auto-calculation error");
+    }
 
     return NextResponse.json({ version: newVersion }, { status: 201 });
   } catch (error) {

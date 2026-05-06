@@ -37,6 +37,7 @@ const uploadRecordSchema = z.object({
 const uploadBodySchema = z.object({
   records: z.array(uploadRecordSchema).max(MAX_RECORDS_PER_REQUEST),
   deviceId: z.string().optional(),
+  teamId: z.string().uuid().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { records, deviceId } = parseResult.data;
+    const { records, deviceId, teamId } = parseResult.data;
     const typedRecords = records as UploadRecord[];
 
     if (records.length === 0) {
@@ -126,12 +127,33 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // If teamId provided, verify membership
+    if (teamId) {
+      const { db } = await import("@/db/client");
+      const { teamMembers } = await import("@/db/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const [membership] = await db
+        .select({ role: teamMembers.role })
+        .from(teamMembers)
+        .where(
+          and(
+            eq(teamMembers.teamId, teamId),
+            eq(teamMembers.userId, user.id)
+          )
+        )
+        .limit(1);
+      if (!membership) {
+        return NextResponse.json({ error: "Team not found or access denied" }, { status: 403 });
+      }
+    }
+
     // Process the upload
     const result = await processUpload(
       typedRecords,
       user.id,
       user.token,
       deviceId,
+      teamId,
     );
 
     if (result.accepted > 0) {

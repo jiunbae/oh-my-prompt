@@ -12,6 +12,8 @@ import { env } from "@/env";
 import { dispatchWebhook } from "@/services/webhook";
 import { generateEmbedding } from "@/lib/embedding";
 import { notifySlack } from "@/lib/slack";
+import { triggerEvent } from "@/lib/integration-triggers";
+import crypto from "crypto";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
 
@@ -43,6 +45,7 @@ export async function processUpload(
   userId: string,
   userToken: string,
   deviceId?: string,
+  teamId?: string,
 ): Promise<UploadResult> {
   let accepted = 0;
   let duplicates = 0;
@@ -168,6 +171,22 @@ export async function processUpload(
 
   // ── Phase 5: Batch-insert new records ──────────────────────────
 
+  // Determine default visibility if teamId is provided
+  let defaultVisibility: "private" | "team" | "public" = "private";
+  if (teamId) {
+    const [teamSettings] = await db
+      .select({ defaultPromptVisibility: schema.teamSettings.defaultPromptVisibility })
+      .from(schema.teamSettings)
+      .where(eq(schema.teamSettings.teamId, teamId))
+      .limit(1);
+    const vis = teamSettings?.defaultPromptVisibility;
+    if (vis === "private" || vis === "team" || vis === "public") {
+      defaultVisibility = vis;
+    } else {
+      defaultVisibility = "team";
+    }
+  }
+
   if (toInsert.length > 0) {
     // Compute heuristic scores in memory first
     const insertValues = toInsert.map((item) => {
@@ -185,6 +204,7 @@ export async function processUpload(
         : null;
 
       return {
+        id: crypto.randomUUID(),
         eventKey: item.eventKey,
         timestamp: item.createdAt,
         workingDirectory: item.record.cwd || "unknown",
@@ -197,9 +217,11 @@ export async function processUpload(
           (item.record.cwd ? item.record.cwd.split("/").pop() || null : null),
         promptType: item.promptType,
         userId,
+        teamId: teamId || undefined,
         source: item.record.source || undefined,
         sessionId: item.record.session_id || undefined,
         deviceName: deviceId || undefined,
+        visibility: teamId ? defaultVisibility : undefined,
         tokenEstimate: item.processed.tokenEstimate,
         wordCount: item.processed.wordCount,
         tokenEstimateResponse: item.processed.tokenEstimateResponse,
@@ -259,6 +281,18 @@ export async function processUpload(
 
     for (const item of toInsert) {
       affectedDates.add(item.dateStr);
+    }
+
+    // ── Phase 5b: Trigger outgoing integrations for new prompts ────
+    for (const iv of insertValues) {
+      triggerEvent("prompt.created", {
+        promptId: iv.id,
+        promptText: iv.promptText,
+        projectName: iv.projectName,
+        sessionId: iv.sessionId,
+      }, userId).catch((err) => {
+        logger.error({ err }, "Non-blocking integration trigger failed for prompt.created");
+      });
     }
   }
 

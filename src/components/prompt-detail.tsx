@@ -9,6 +9,7 @@ import { SkeletonDetail } from "@/components/ui/skeleton";
 import { MarkdownContent } from "@/components/markdown-content";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { SharePromptDialog } from "@/components/share-prompt-dialog";
+import { PromptAccessDialog } from "@/components/prompt-access-dialog";
 import { PromptSuggestDialog } from "@/components/prompt-suggest-dialog";
 import { useRouter } from "next/navigation";
 
@@ -87,6 +88,7 @@ export function PromptDetail({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showShareDialog, setShowShareDialog] = useState(false);
+  const [showAccessDialog, setShowAccessDialog] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -184,6 +186,28 @@ export function PromptDetail({
           </Button>
 
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowAccessDialog(true)}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <title>Access Icon</title>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+              />
+            </svg>
+            Manage Access
+          </Button>
+
+          <Button
             variant="destructive"
             size="sm"
             onClick={handleDelete}
@@ -270,6 +294,12 @@ export function PromptDetail({
         promptId={_id}
         open={showShareDialog}
         onClose={() => setShowShareDialog(false)}
+      />
+
+      <PromptAccessDialog
+        promptId={_id}
+        open={showAccessDialog}
+        onClose={() => setShowAccessDialog(false)}
       />
 
       <Card>

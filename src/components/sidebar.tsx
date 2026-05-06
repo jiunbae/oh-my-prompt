@@ -5,8 +5,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "@/contexts/user-context";
 import { useTeam } from "@/contexts/team-context";
+import { usePwaContext } from "@/components/pwa-provider";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AlertNotificationBell } from "@/components/alert-notification-bell";
 
 // Context for mobile sidebar control
 const MobileSidebarContext = createContext<{
@@ -33,6 +35,7 @@ interface NavItem {
   label: string;
   icon: React.ReactNode;
   adminOnly?: boolean;
+  badgeCount?: number;
 }
 
 const overviewItems: NavItem[] = [
@@ -116,6 +119,50 @@ const exploreItems: NavItem[] = [
     ),
   },
   {
+    href: "/experiments",
+    label: "Experiments",
+    icon: (
+      <svg
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 00-1.905.924l-.317.158a6 6 0 01-2.084.66l-2.318.463a2 2 0 01-1.658-1.658l.463-2.318a6 6 0 01.66-2.084l.158-.317a6 6 0 00.924-1.905l.158-.318a6 6 0 00.517-3.86l-.477-2.387a2 2 0 00-1.294-1.294l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 00-1.905.924l-.317.158a6 6 0 01-2.084.66l-2.318.463a2 2 0 01-1.658-1.658l.463-2.318a6 6 0 01.66-2.084l.158-.317a6 6 0 00.924-1.905l.158-.318a6 6 0 00.517-3.86l-.477-2.387a2 2 0 00-1.294-1.294l-2.387-.477a6 6 0 00-3.86.517"
+        />
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M9 12l2 2 4-4"
+        />
+      </svg>
+    ),
+  },
+  {
+    href: "/alerts",
+    label: "Alerts",
+    icon: (
+      <svg
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+        />
+      </svg>
+    ),
+  },
+  {
     href: "/insights",
     label: "AI Insights",
     icon: (
@@ -158,6 +205,25 @@ const exploreItems: NavItem[] = [
           strokeLinejoin="round"
           strokeWidth={2}
           d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
+        />
+      </svg>
+    ),
+  },
+  {
+    href: "/marketplace",
+    label: "Marketplace",
+    icon: (
+      <svg
+        className="h-5 w-5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={2}
+          d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
         />
       </svg>
     ),
@@ -331,6 +397,11 @@ function SidebarNavLink({
         {item.icon}
       </span>
       {item.label}
+      {item.badgeCount !== undefined && item.badgeCount > 0 && (
+        <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">
+          {item.badgeCount > 99 ? "99+" : item.badgeCount}
+        </span>
+      )}
     </Link>
   );
 }
@@ -446,6 +517,31 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
   const pathname = usePathname();
   const { user, loading, logout } = useUser();
   const { teams } = useTeam();
+  const { isOffline, isInstallable, installPrompt } = usePwaContext();
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
+
+  useEffect(() => {
+    async function fetchUnread() {
+      try {
+        const res = await fetch("/api/alerts/notifications?unreadOnly=true");
+        if (res.ok) {
+          const data = await res.json();
+          setUnreadAlerts(data.notifications.length);
+        }
+      } catch {
+        // Silently fail
+      }
+    }
+    fetchUnread();
+    const interval = setInterval(fetchUnread, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const exploreItemsWithBadges = exploreItems.map((item) =>
+    item.href === "/alerts" && unreadAlerts > 0
+      ? { ...item, badgeCount: unreadAlerts }
+      : item
+  );
 
   return (
     <>
@@ -457,12 +553,33 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
             className="h-10 w-auto dark:invert-0 invert"
           />
         </Link>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <AlertNotificationBell />
+          {isOffline && (
+            <span
+              className="inline-flex h-2 w-2 rounded-full bg-destructive"
+              title="Offline"
+            />
+          )}
+          <ThemeToggle />
+        </div>
       </div>
+
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/20">
+          <p className="text-xs text-destructive flex items-center gap-1.5">
+            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.636 18.364A9 9 0 1118.364 5.636 9 9 0 015.636 18.364z" />
+            </svg>
+            Offline mode — syncing disabled
+          </p>
+        </div>
+      )}
 
       <nav className="flex-1 space-y-5 px-3 py-4" aria-label="Main navigation">
         <SidebarGroup label="Overview" items={overviewItems} pathname={pathname} onLinkClick={onLinkClick} />
-        <SidebarGroup label="Explore" items={exploreItems} pathname={pathname} onLinkClick={onLinkClick} />
+        <SidebarGroup label="Explore" items={exploreItemsWithBadges} pathname={pathname} onLinkClick={onLinkClick} />
 
         {/* Teams Section */}
         {teams.length > 0 && (
@@ -542,6 +659,19 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
                 </Badge>
               )}
             </div>
+            {/* Install App button */}
+            {isInstallable && (
+              <button
+                onClick={installPrompt}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-primary transition-colors hover:bg-primary/5 hover:border-primary/30"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Install App
+              </button>
+            )}
+
             <button
               onClick={logout}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -570,6 +700,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
 
 export function MobileHeader() {
   const { setOpen } = useMobileSidebar();
+  const { isOffline } = usePwaContext();
 
   return (
     <div className="md:hidden flex items-center h-14 border-b border-border px-4 bg-card">
@@ -589,6 +720,12 @@ export function MobileHeader() {
           className="h-8 w-auto dark:invert-0 invert"
         />
       </Link>
+      {isOffline && (
+        <div className="ml-auto flex items-center gap-1.5 text-xs text-destructive">
+          <span className="inline-flex h-2 w-2 rounded-full bg-destructive" />
+          Offline
+        </div>
+      )}
     </div>
   );
 }

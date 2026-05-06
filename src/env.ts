@@ -25,6 +25,8 @@ export const env = createEnv({
     OMP_MAX_RECORDS_PER_REQUEST: z.coerce.number().default(1000),
     // Webhook limits
     OMP_WEBHOOK_TIMEOUT_MS: z.coerce.number().default(10_000),
+    // Integration webhook triggers (Zapier / Make.com)
+    INTEGRATION_WEBHOOK_TIMEOUT_MS: z.coerce.number().default(10_000),
     // Slack integration
     SLACK_WEBHOOK_TIMEOUT_MS: z.coerce.number().default(5_000),
     OMP_WEBHOOK_MAX_FAIL_COUNT: z.coerce.number().default(10),
@@ -60,6 +62,7 @@ export const env = createEnv({
     OMP_MAX_RECORDS_PER_REQUEST: process.env.OMP_MAX_RECORDS_PER_REQUEST,
     OMP_WEBHOOK_TIMEOUT_MS: process.env.OMP_WEBHOOK_TIMEOUT_MS,
     OMP_WEBHOOK_MAX_FAIL_COUNT: process.env.OMP_WEBHOOK_MAX_FAIL_COUNT,
+    INTEGRATION_WEBHOOK_TIMEOUT_MS: process.env.INTEGRATION_WEBHOOK_TIMEOUT_MS,
     SLACK_WEBHOOK_TIMEOUT_MS: process.env.SLACK_WEBHOOK_TIMEOUT_MS,
     EMAIL_PROVIDER: process.env.EMAIL_PROVIDER,
     EMAIL_FROM: process.env.EMAIL_FROM,

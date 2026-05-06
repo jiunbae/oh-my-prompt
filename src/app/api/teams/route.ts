@@ -85,9 +85,11 @@ export async function GET() {
         teamName: schema.teams.name,
         teamSlug: schema.teams.slug,
         teamCreatedAt: schema.teams.createdAt,
+        inviteOnly: schema.teamSettings.inviteOnly,
       })
       .from(schema.teamMembers)
       .innerJoin(schema.teams, eq(schema.teamMembers.teamId, schema.teams.id))
+      .leftJoin(schema.teamSettings, eq(schema.teamMembers.teamId, schema.teamSettings.teamId))
       .where(eq(schema.teamMembers.userId, session.userId));
 
     return NextResponse.json({
@@ -98,6 +100,7 @@ export async function GET() {
         role: m.role,
         joinedAt: m.joinedAt,
         createdAt: m.teamCreatedAt,
+        inviteOnly: m.inviteOnly ?? false,
       })),
     });
   } catch (error) {

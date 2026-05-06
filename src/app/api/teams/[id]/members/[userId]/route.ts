@@ -4,6 +4,7 @@ import * as schema from "@/db/schema";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { eq, and } from "drizzle-orm";
+import { canManageTeam } from "@/lib/team-access";
 
 const VALID_ROLES = ["owner", "admin", "member"] as const;
 type Role = (typeof VALID_ROLES)[number];
@@ -28,7 +29,13 @@ export async function POST(
       );
     }
 
-    // Check actor's membership and role
+    // Check actor can manage the team
+    const canManage = await canManageTeam(session.userId, id);
+    if (!canManage) {
+      return NextResponse.json({ error: "Team not found or access denied" }, { status: 403 });
+    }
+
+    // Get actor's specific role for fine-grained checks
     const [actorMembership] = await db
       .select({ role: schema.teamMembers.role })
       .from(schema.teamMembers)
@@ -40,13 +47,9 @@ export async function POST(
       )
       .limit(1);
 
-    if (!actorMembership) {
-      return NextResponse.json({ error: "Team not found or access denied" }, { status: 403 });
-    }
-
     // Only owner can assign owner role or change owner role
     // Admin can change member roles to admin/member
-    if (actorMembership.role !== "owner") {
+    if (actorMembership?.role !== "owner") {
       if (role === "owner" || targetUserId === session.userId) {
         return NextResponse.json(
           { error: "Only team owner can perform this action" },
@@ -133,7 +136,17 @@ export async function DELETE(
     const session = await requireAuth();
     const { id, userId: targetUserId } = await params;
 
-    // Check actor's membership and role
+    const isSelfRemoval = targetUserId === session.userId;
+
+    // Users can remove themselves; managers can remove others
+    if (!isSelfRemoval) {
+      const canManage = await canManageTeam(session.userId, id);
+      if (!canManage) {
+        return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+      }
+    }
+
+    // Get actor's membership for fine-grained owner checks
     const [actorMembership] = await db
       .select({ role: schema.teamMembers.role })
       .from(schema.teamMembers)
@@ -145,14 +158,8 @@ export async function DELETE(
       )
       .limit(1);
 
-    if (!actorMembership) {
+    if (!actorMembership && !isSelfRemoval) {
       return NextResponse.json({ error: "Team not found or access denied" }, { status: 403 });
-    }
-
-    // Users can remove themselves; owners and admins can remove others
-    const isSelfRemoval = targetUserId === session.userId;
-    if (!isSelfRemoval && actorMembership.role !== "owner" && actorMembership.role !== "admin") {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
     // Check target membership

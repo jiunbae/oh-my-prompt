@@ -16,6 +16,7 @@ export interface Team {
   role: string;
   joinedAt: string;
   createdAt: string;
+  inviteOnly?: boolean;
 }
 
 interface TeamContextType {

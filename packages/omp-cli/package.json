@@ -1,6 +1,6 @@
 {
   "name": "oh-my-prompt",
-  "version": "2026.505.4",
+  "version": "2026.505.5",
   "description": "CLI prompt journal for AI coding assistants — capture, analyze, and sync your prompts",
   "keywords": [
     "cli",
@@ -26,7 +26,7 @@
     "url": "https://github.com/jiunbae/oh-my-prompt/issues"
   },
   "bin": {
-    "omp": "./bin/omp"
+    "omp": "bin/omp"
   },
   "main": "lib/cli.js",
   "files": [

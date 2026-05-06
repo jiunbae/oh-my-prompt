@@ -4,6 +4,7 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
+import { triggerEvent } from "@/lib/integration-triggers";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,11 @@ export async function POST(
         userId: session.userId,
         promptId: id,
       });
+
+    // Trigger outgoing integration (fire-and-forget)
+    triggerEvent("prompt.favorited", { promptId: id }, session.userId).catch((err) => {
+      logger.error({ err }, "Non-blocking integration trigger failed for prompt.favorited");
+    });
 
     return NextResponse.json({ favorited: true });
   } catch (error) {

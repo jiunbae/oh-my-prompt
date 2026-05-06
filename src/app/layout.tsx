@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { UserProvider } from "@/contexts/user-context";
 import { TeamProvider } from "@/contexts/team-context";
 import { ThemeProvider } from "@/components/theme-provider";
 import { OnboardingGuard } from "@/components/onboarding-guard";
+import { PwaProvider } from "@/components/pwa-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -51,6 +52,21 @@ export const metadata: Metadata = {
     description:
       "Track, analyze, and share your Claude Code, Codex, and Gemini CLI sessions. Free and open source.",
   },
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "Oh My Prompt",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#3b82f6" },
+    { media: "(prefers-color-scheme: dark)", color: "#3b82f6" },
+  ],
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -60,16 +76,21 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="apple-touch-icon" href="/icon.svg" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        <ThemeProvider>
-          <UserProvider>
-            <TeamProvider>
-              <OnboardingGuard>{children}</OnboardingGuard>
-            </TeamProvider>
-          </UserProvider>
-        </ThemeProvider>
+        <PwaProvider>
+          <ThemeProvider>
+            <UserProvider>
+              <TeamProvider>
+                <OnboardingGuard>{children}</OnboardingGuard>
+              </TeamProvider>
+            </UserProvider>
+          </ThemeProvider>
+        </PwaProvider>
       </body>
     </html>
   );

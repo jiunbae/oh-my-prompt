@@ -128,6 +128,9 @@ export default function TeamsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
+                      {team.inviteOnly && (
+                        <Badge variant="outline">Invite only</Badge>
+                      )}
                       <Badge variant={team.role === "owner" ? "warning" : "default"}>
                         {team.role}
                       </Badge>

@@ -134,6 +134,41 @@
       "when": 1746419000000,
       "tag": "0020_add_prompt_shares",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1746499200000,
+      "tag": "0023_add_outgoing_integrations",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1747171200000,
+      "tag": "0024_add_template_marketplace",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1746499201000,
+      "tag": "0025_add_team_rbac",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1746499202000,
+      "tag": "0027_add_alert_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1778112000000,
+      "tag": "0026_add_ab_testing",
+      "breakpoints": true
     }
   ]
 }

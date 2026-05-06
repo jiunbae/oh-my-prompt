@@ -5,6 +5,7 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { eq, and, gt } from "drizzle-orm";
 import crypto from "crypto";
+import { canInviteToTeam } from "@/lib/team-access";
 
 /**
  * POST /api/teams/:id/invite - Invite by email (admin or owner)
@@ -25,24 +26,10 @@ export async function POST(
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Check membership and role (owner or admin can invite)
-    const [membership] = await db
-      .select({ role: schema.teamMembers.role })
-      .from(schema.teamMembers)
-      .where(
-        and(
-          eq(schema.teamMembers.teamId, id),
-          eq(schema.teamMembers.userId, session.userId)
-        )
-      )
-      .limit(1);
-
-    if (!membership) {
-      return NextResponse.json({ error: "Team not found or access denied" }, { status: 403 });
-    }
-
-    if (membership.role !== "owner" && membership.role !== "admin") {
-      return NextResponse.json({ error: "Only team owners and admins can invite" }, { status: 403 });
+    // Check if user can invite to this team
+    const canInvite = await canInviteToTeam(session.userId, id);
+    if (!canInvite) {
+      return NextResponse.json({ error: "You do not have permission to invite to this team" }, { status: 403 });
     }
 
     // Check if user is already a member

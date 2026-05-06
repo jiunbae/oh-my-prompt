@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.505.5] - 2026-05-06
+
+### Added
+- Outgoing integrations: Zapier/Make.com webhook triggers with HMAC signing
+- Template marketplace with ratings, forks, categories, and public discovery
+- Granular team RBAC: per-prompt permissions, invite-only teams, visibility levels
+- Prompt A/B testing: compare versions with quality metric tracking and auto-conclusion
+- Custom alerts & thresholds: rule engine for prompt count, quality, token usage with email/Slack/in-app
+- PWA offline support: service worker, cache-first API fallback, install prompt, offline indicators
+
 ## [2026.505.4] - 2026-05-05
 
 ### Added

@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { NewExperimentDialog } from "@/components/new-experiment-dialog";
 
 interface PromptVersion {
   id: string;
@@ -85,6 +86,8 @@ export function PromptVersionTimeline({ promptId }: PromptVersionTimelineProps) 
     similarity: 0,
     loading: false,
   });
+  const [experimentDialogOpen, setExperimentDialogOpen] = useState(false);
+  const [experimentDefaultBaseline, setExperimentDefaultBaseline] = useState<number | undefined>();
 
   const fetchVersions = useCallback(async () => {
     setLoading(true);
@@ -241,17 +244,31 @@ export function PromptVersionTimeline({ promptId }: PromptVersionTimelineProps) 
                             <div className="text-[11px] text-muted-foreground line-clamp-3 whitespace-pre-wrap">
                               {version.promptText}
                             </div>
-                            {prevVersion && (
+                            <div className="flex items-center gap-2">
+                              {prevVersion && (
+                                <button
+                                  onClick={() => handleCompare(prevVersion, version)}
+                                  className="inline-flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
+                                >
+                                  <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                  Compare with v{prevVersion.version}
+                                </button>
+                              )}
                               <button
-                                onClick={() => handleCompare(prevVersion, version)}
-                                className="inline-flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors"
+                                onClick={() => {
+                                  setExperimentDefaultBaseline(prevVersion?.version);
+                                  setExperimentDialogOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1 text-[10px] text-chart-2 hover:text-chart-2/80 transition-colors"
                               >
                                 <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                                 </svg>
-                                Compare with v{prevVersion.version}
+                                Start A/B test
                               </button>
-                            )}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -263,6 +280,15 @@ export function PromptVersionTimeline({ promptId }: PromptVersionTimelineProps) 
           )}
         </div>
       )}
+
+      <NewExperimentDialog
+        open={experimentDialogOpen}
+        onClose={() => setExperimentDialogOpen(false)}
+        onCreated={() => {}}
+        defaultPromptId={promptId}
+        defaultBaselineVersion={experimentDefaultBaseline}
+        defaultChallengerVersion={expandedVersion ?? undefined}
+      />
 
       {/* Diff Modal */}
       {diffModal.open && (

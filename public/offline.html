@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offline — Oh My Prompt</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #09090b;
+      --muted: #71717a;
+      --primary: #2563eb;
+      --card: #ffffff;
+      --border: #e4e4e7;
+      --surface: #f4f4f5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #09090b;
+        --fg: #fafafa;
+        --muted: #a1a1aa;
+        --primary: #3b82f6;
+        --card: #18181b;
+        --border: #27272a;
+        --surface: #18181b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .container {
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 24px;
+      color: var(--primary);
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 0 0 8px;
+    }
+    p {
+      color: var(--muted);
+      margin: 0 0 24px;
+      line-height: 1.5;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin: 0 0 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+    .cached-item {
+      padding: 10px 12px;
+      background: var(--surface);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-size: 0.875rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .cached-item:last-child { margin-bottom: 0; }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--primary);
+      flex-shrink: 0;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: var(--surface); }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover { opacity: 0.9; }
+    #cached-data { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.636 18.364A9 9 0 1118.364 5.636 9 9 0 015.636 18.364z"/>
+      <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h1M12 3v1M20 12h1M12 20v1"/>
+    </svg>
+    <h1>You are offline</h1>
+    <p>Oh My Prompt can't reach the network right now. Some features may be limited, but you can still browse cached data.</p>
+
+    <div id="cached-data">
+      <div class="card">
+        <h2>Cached Data</h2>
+        <div id="cached-list"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;justify-content:center;">
+      <a href="/dashboard" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+        </svg>
+        Go to Dashboard
+      </a>
+      <button class="btn" onclick="location.reload()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Retry
+      </button>
+    </div>
+  </div>
+
+  <script>
+    (async function() {
+      try {
+        const cache = await caches.open('omp-api-cache');
+        const keys = await cache.keys();
+        const apiRequests = keys.filter(req => req.url.includes('/api/'));
+        if (apiRequests.length > 0) {
+          const list = document.getElementById('cached-list');
+          const seen = new Set();
+          apiRequests.slice(0, 5).forEach(req => {
+            const url = new URL(req.url);
+            const path = url.pathname.replace('/api/', '');
+            if (seen.has(path)) return;
+            seen.add(path);
+            const item = document.createElement('div');
+            item.className = 'cached-item';
+            item.innerHTML = '<span class="dot"></span><span>' + path + '</span>';
+            list.appendChild(item);
+          });
+          document.getElementById('cached-data').style.display = 'block';
+        }
+      } catch (e) {
+        // Cache API not available
+      }
+    })();
+  </script>
+</body>
+</html>

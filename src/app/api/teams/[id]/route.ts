@@ -4,6 +4,7 @@ import * as schema from "@/db/schema";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { eq, and } from "drizzle-orm";
+import { canManageTeam } from "@/lib/team-access";
 
 /**
  * GET /api/teams/:id - Get team details with members
@@ -43,6 +44,13 @@ export async function GET(
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
+    // Get team settings
+    const [settings] = await db
+      .select()
+      .from(schema.teamSettings)
+      .where(eq(schema.teamSettings.teamId, id))
+      .limit(1);
+
     // Get members with user details
     const members = await db
       .select({
@@ -66,6 +74,13 @@ export async function GET(
         email: m.userEmail,
       })),
       myRole: membership.role,
+      settings: settings ?? {
+        teamId: id,
+        inviteOnly: false,
+        defaultPromptVisibility: "team",
+        allowMemberInvites: false,
+        requireApprovalForJoin: false,
+      },
     });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -87,19 +102,9 @@ export async function DELETE(
     const session = await requireAuth();
     const { id } = await params;
 
-    // Verify owner
-    const [membership] = await db
-      .select({ role: schema.teamMembers.role })
-      .from(schema.teamMembers)
-      .where(
-        and(
-          eq(schema.teamMembers.teamId, id),
-          eq(schema.teamMembers.userId, session.userId)
-        )
-      )
-      .limit(1);
-
-    if (!membership || membership.role !== "owner") {
+    // Only team owner can delete
+    const isOwner = await canManageTeam(session.userId, id);
+    if (!isOwner) {
       return NextResponse.json({ error: "Only team owner can delete the team" }, { status: 403 });
     }
 

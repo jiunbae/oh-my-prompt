@@ -13,6 +13,7 @@ import { sessionStory } from "./session-story/manifest";
 import { emailDigest } from "./email-digest/manifest";
 import { slackDaily } from "./slack-daily/manifest";
 import { slackRealtime } from "./slack-realtime/manifest";
+import { alertEvaluator } from "./alert-evaluator/manifest";
 
 export const extensions: Extension[] = [
   dailySummary,
@@ -22,6 +23,7 @@ export const extensions: Extension[] = [
   emailDigest,
   slackDaily,
   slackRealtime,
+  alertEvaluator,
 ];
 
 /** Look up an extension by name */
