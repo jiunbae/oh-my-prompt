@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.511.1] - 2026-05-11
+
+### Improved
+- **CLI hooks**: `stop-capture.sh` and `prompt-logger.sh` now run their `omp ingest` work in detached background subshells (`( exec </dev/null >/dev/null 2>&1; ... ) & disown`), so Claude Code's hook return is no longer blocked by ingest latency
+- **CLI hooks**: transcript parsing in `claudeStopHookScript` switched from `fs.readFileSync(transcript_path).split('\n')` to a reverse chunked tail-read (64KB blocks from `fileSize` backwards, stops as soon as the most-recent real user line is found). Per-turn cost is now bounded by last-turn size rather than full session size
+- **CLI hooks**: per-session byte-offset checkpoint at `$XDG_CACHE_HOME/omp/checkpoints/<session_id>.json` (defaults to `~/.cache/omp/checkpoints/`) — repeat invocations on an unchanged transcript exit before any file read
+
+### Performance
+- Hook return time on real Claude Code transcripts (`/usr/bin/time -p`, mocked `omp ingest` with 50ms sleep):
+  | Transcript size | Before | After (cold checkpoint) | After (warm checkpoint) |
+  | --- | --- | --- | --- |
+  | 3 KB / 8 lines | 110-170 ms | 10 ms | 10 ms |
+  | 504 KB / 211 lines | 110-120 ms | 10 ms | 10 ms |
+  | 13 MB / 583 lines | 150-160 ms | 10 ms | 10 ms |
+- Output JSON byte-identical between old and new across all sizes (verified by diff)
+
 ## [2026.505.2] - 2026-05-05
 
 ### Added
