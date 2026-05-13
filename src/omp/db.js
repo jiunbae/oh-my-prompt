@@ -165,6 +165,48 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 6,
+    run: (db) => {
+      // Composite index covers ingest dedup hot path:
+      //   WHERE session_id = ? AND role = ? AND content_hash = ?
+      // and the assistant→user matching path. Cuts per-record ingest cost
+      // during backfill from O(rows-in-session) to O(log N).
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_prompts_dedup ON prompts(session_id, role, content_hash)"
+      );
+    },
+  },
+  {
+    version: 7,
+    run: (db) => {
+      // Standalone FTS4 (no content-table, no triggers — both broken in sql.js).
+      // Maintained explicitly via insertPrompt / updatePromptWithResponse hooks.
+      // unicode61 splits on Unicode word boundaries (better than `simple` for
+      // mixed-language content); fall back to default tokenizer if unavailable.
+      let created = false;
+      for (const tok of ["unicode61", "simple"]) {
+        try {
+          db.exec(
+            `CREATE VIRTUAL TABLE IF NOT EXISTS prompts_fts USING fts4(prompt_text, response_text, tokenize=${tok})`
+          );
+          created = true;
+          break;
+        } catch {}
+      }
+      if (!created) return;
+
+      const rows = db
+        .prepare("SELECT rowid, prompt_text, response_text FROM prompts")
+        .all();
+      const insert = db.prepare(
+        "INSERT INTO prompts_fts (rowid, prompt_text, response_text) VALUES (?, ?, ?)"
+      );
+      for (const row of rows) {
+        insert.run(row.rowid, row.prompt_text || "", row.response_text || "");
+      }
+    },
+  },
 ];
 
 /**

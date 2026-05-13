@@ -174,6 +174,25 @@ function insertToolInvocations(db, tools, promptId, record) {
   }
 }
 
+function ftsInsert(db, rowid, promptText, responseText) {
+  try {
+    db.prepare(
+      "INSERT INTO prompts_fts (rowid, prompt_text, response_text) VALUES (?, ?, ?)"
+    ).run(rowid, promptText || "", responseText || "");
+  } catch {
+    // FTS table missing or unsupported — search falls back to LIKE.
+  }
+}
+
+function ftsUpdateResponse(db, promptId, responseText) {
+  try {
+    db.prepare(
+      "UPDATE prompts_fts SET response_text = ? WHERE rowid = (SELECT rowid FROM prompts WHERE id = ?)"
+    ).run(responseText || "", promptId);
+  } catch {}
+}
+
+
 function insertPrompt(db, record) {
   const stmt = db.prepare(`
     INSERT INTO prompts (
@@ -193,7 +212,12 @@ function insertPrompt(db, record) {
     )
     ON CONFLICT(event_id) DO NOTHING
   `);
-  return stmt.run(record);
+  const result = stmt.run(record);
+  if (result.changes > 0) {
+    const row = db.prepare("SELECT rowid FROM prompts WHERE id = ?").get(record.id);
+    if (row) ftsInsert(db, row.rowid, record.prompt_text, record.response_text);
+  }
+  return result;
 }
 
 function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wordCount) {
@@ -210,6 +234,7 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
     nowIso(),
     promptId
   );
+  ftsUpdateResponse(db, promptId, responseText);
 }
 
 async function ingestPayload(rawPayload, config, options = {}) {
