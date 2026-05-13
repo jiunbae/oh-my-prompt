@@ -1,96 +1,16 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { Worker } = require("worker_threads");
 const { openDb, hashContent } = require("./db");
 const { ingestPayload } = require("./ingest");
-
-const SYSTEM_PREFIXES = [
-  "<local-command-caveat>",
-  "<local-command-",
-  "<command-name>",
-  "<task-notification>",
-  "<system-reminder>",
-  "This session is being continued",
-  "Stop hook feedback:",
-];
-
-function stripSystemTags(text) {
-  // Remove <system-reminder>...</system-reminder> blocks that hooks inject
-  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "").trim();
-}
-
-function isRealUserMessage(entry) {
-  if ((entry.type || entry.role) !== "user") return false;
-  const content = entry.message?.content || entry.content;
-  if (typeof content !== "string") return false;
-  const stripped = stripSystemTags(content.trim());
-  if (!stripped) return false;
-
-  for (const prefix of SYSTEM_PREFIXES) {
-    if (stripped.startsWith(prefix)) return false;
-  }
-  if (stripped === "[Request interrupted by user]") return false;
-  // CLI header (starts with whitespace + "Claude Code" or unicode box chars)
-  if (/^\s*(Claude Code|[\u2590\u259B])/.test(stripped)) return false;
-
-  return true;
-}
-
-function extractText(content) {
-  let text;
-  if (typeof content === "string") {
-    text = content;
-  } else if (Array.isArray(content)) {
-    text = content
-      .filter((b) => b.type === "text")
-      .map((b) => b.text)
-      .join("\n");
-  } else {
-    return "";
-  }
-  return stripSystemTags(text);
-}
-
-function parseTranscript(lines) {
-  const entries = [];
-  for (const raw of lines) {
-    try {
-      entries.push(JSON.parse(raw));
-    } catch {}
-  }
-
-  const turns = [];
-  let current = null;
-
-  for (const entry of entries) {
-    if (isRealUserMessage(entry)) {
-      const content = entry.message?.content || entry.content;
-      const text = extractText(content);
-      current = {
-        userText: text,
-        responseParts: [],
-        cwd: entry.cwd || "",
-        timestamp: entry.timestamp || null,
-      };
-      turns.push(current);
-    } else if ((entry.type || entry.role) === "assistant" && current) {
-      const content = entry.message?.content || entry.content;
-      if (!content) continue;
-      const text = extractText(content);
-      if (text.trim()) {
-        current.responseParts.push(text);
-        if (entry.cwd) current.cwd = entry.cwd;
-      }
-    }
-  }
-
-  return turns.map((turn) => ({
-    userText: turn.userText,
-    responseText: turn.responseParts.length > 0 ? turn.responseParts.join("\n\n") : null,
-    cwd: turn.cwd,
-    timestamp: turn.timestamp,
-  }));
-}
+const {
+  SYSTEM_PREFIXES,
+  stripSystemTags,
+  isRealUserMessage,
+  extractText,
+  parseTranscript,
+} = require("./transcript-parser");
 
 function buildEventId(sessionId, userText, timestamp, turnIndex) {
   return hashContent(
@@ -134,6 +54,43 @@ function scanTranscriptPaths(customPath) {
   return results;
 }
 
+// sql.js serializes the entire DB on each flush, so per-file flush is
+// O(N × total_size). Flush periodically instead; close() flushes the rest.
+const FLUSH_EVERY_FILES = 50;
+
+function defaultWorkerCount(totalFiles) {
+  if (totalFiles <= 1) return 0;
+  const cpus = os.cpus().length;
+  return Math.min(Math.max(cpus - 1, 1), 4, totalFiles);
+}
+
+function parseInWorker(worker, filePath) {
+  return new Promise((resolve) => {
+    const onMessage = (msg) => {
+      worker.removeListener("error", onError);
+      worker.removeListener("message", onMessage);
+      resolve(msg.ok ? msg.turns : null);
+    };
+    const onError = () => {
+      worker.removeListener("message", onMessage);
+      worker.removeListener("error", onError);
+      resolve(null);
+    };
+    worker.on("message", onMessage);
+    worker.on("error", onError);
+    worker.postMessage({ filePath });
+  });
+}
+
+function parseFileSync(filePath) {
+  try {
+    const lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
+    return parseTranscript(lines);
+  } catch {
+    return null;
+  }
+}
+
 async function backfillTranscripts(config, options = {}) {
   const paths = scanTranscriptPaths(options.path);
   let totalImported = 0;
@@ -144,18 +101,28 @@ async function backfillTranscripts(config, options = {}) {
   const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
   if (db) db.setBatchMode(true);
 
-  try {
-  for (let fileIdx = 0; fileIdx < paths.length; fileIdx++) {
-    const filePath = paths[fileIdx];
-    let lines;
-    try {
-      lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
-    } catch {
-      fileResults.push({ path: filePath, turns: 0, imported: 0, skipped: 0, duplicates: 0, error: "read failed" });
-      continue;
+  const workerCount =
+    options.workers !== undefined
+      ? Math.max(0, Math.min(options.workers, paths.length))
+      : defaultWorkerCount(paths.length);
+  const useWorkers = workerCount > 0;
+
+  let processedCount = 0;
+
+  async function ingestFile(filePath, turns) {
+    if (turns === null) {
+      fileResults.push({
+        path: filePath,
+        turns: 0,
+        imported: 0,
+        skipped: 0,
+        duplicates: 0,
+        error: "read failed",
+      });
+      processedCount++;
+      return;
     }
 
-    const turns = parseTranscript(lines);
     const filename = path.basename(filePath, ".jsonl");
     let imported = 0;
     let skipped = 0;
@@ -170,7 +137,6 @@ async function backfillTranscripts(config, options = {}) {
 
       const sessionId = filename;
       const eventId = buildEventId(sessionId, turn.userText, turn.timestamp, turnIdx);
-
       const payload = {
         timestamp: turn.timestamp || new Date().toISOString(),
         source: "claude-code",
@@ -192,11 +158,8 @@ async function backfillTranscripts(config, options = {}) {
 
       const result = await ingestPayload(payload, config, { db });
       if (result.ok) {
-        if (result.deduped) {
-          duplicates++;
-        } else {
-          imported++;
-        }
+        if (result.deduped) duplicates++;
+        else imported++;
       } else {
         skipped++;
       }
@@ -212,21 +175,68 @@ async function backfillTranscripts(config, options = {}) {
     totalImported += imported;
     totalSkipped += skipped;
     totalDuplicates += duplicates;
+    processedCount++;
 
-    if (db) db.flush();
+    if (db && processedCount % FLUSH_EVERY_FILES === 0) db.flush();
 
     if (onProgress) {
-      onProgress({ fileIdx: fileIdx + 1, totalFiles: paths.length, filePath, turns: turns.length, imported, skipped, duplicates });
+      onProgress({
+        fileIdx: processedCount,
+        totalFiles: paths.length,
+        filePath,
+        turns: turns.length,
+        imported,
+        skipped,
+        duplicates,
+        totalImported,
+        totalSkipped,
+        totalDuplicates,
+      });
     }
   }
 
-  return {
-    files: paths.length,
-    totalImported,
-    totalSkipped,
-    totalDuplicates,
-    fileResults,
-  };
+  try {
+    if (useWorkers) {
+      const workers = Array.from(
+        { length: workerCount },
+        () => new Worker(path.join(__dirname, "backfill-worker.js"))
+      );
+      let nextIdx = 0;
+      // Workers parse in parallel; this chain serializes ingest on the main
+      // thread (sql.js has no concurrent writers).
+      let ingestChain = Promise.resolve();
+
+      const loops = workers.map((worker) => (async () => {
+        while (true) {
+          if (nextIdx >= paths.length) return;
+          const myIdx = nextIdx++;
+          const filePath = paths[myIdx];
+          const turns = await parseInWorker(worker, filePath);
+          const myIngest = ingestChain.then(() => ingestFile(filePath, turns));
+          ingestChain = myIngest.catch(() => {});
+          await myIngest;
+        }
+      })());
+
+      try {
+        await Promise.all(loops);
+      } finally {
+        await Promise.all(workers.map((w) => w.terminate().catch(() => {})));
+      }
+    } else {
+      for (const filePath of paths) {
+        const turns = parseFileSync(filePath);
+        await ingestFile(filePath, turns);
+      }
+    }
+
+    return {
+      files: paths.length,
+      totalImported,
+      totalSkipped,
+      totalDuplicates,
+      fileResults,
+    };
   } finally {
     if (db) db.close();
   }

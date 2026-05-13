@@ -2117,8 +2117,8 @@ async function main() {
         claudeResult = await backfillTranscripts(config, {
           path: options.path,
           dryRun,
-          onProgress: showProgress ? ({ fileIdx, totalFiles, turns, imported, duplicates }) => {
-            process.stderr.write(`\r[Claude] ${fileIdx}/${totalFiles} files processed (${imported} new, ${duplicates} dedup)    `);
+          onProgress: showProgress ? ({ fileIdx, totalFiles, totalImported, totalDuplicates }) => {
+            process.stderr.write(`\r[Claude] ${fileIdx}/${totalFiles} files processed (${totalImported} new, ${totalDuplicates} dedup)    `);
           } : undefined,
         });
         if (showProgress) process.stderr.write("\n");
