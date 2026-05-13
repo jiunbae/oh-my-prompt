@@ -264,6 +264,160 @@ function aggregateRows(rows, groupBy) {
   return sortGroupedRows(grouped, groupBy);
 }
 
+// Common aggregate columns reused across GROUP BY queries.
+const AGG_COLUMNS = `
+  COUNT(*) as total_prompts,
+  COALESCE(SUM(token_estimate), 0) as total_tokens,
+  COALESCE(SUM(token_estimate_response), 0) as total_response_tokens,
+  COALESCE(SUM(token_estimate), 0) + COALESCE(SUM(token_estimate_response), 0) as total_combined_tokens,
+  ROUND(COALESCE(SUM(prompt_length), 0) * 1.0 / NULLIF(COUNT(*), 0), 1) as avg_length,
+  SUM(CASE WHEN response_length IS NOT NULL THEN 1 ELSE 0 END) as response_count
+`;
+
+function withResponseRate(row) {
+  return {
+    ...row,
+    avg_length: row.avg_length ?? 0,
+    response_rate: row.total_prompts
+      ? Math.round((row.response_count / row.total_prompts) * 100)
+      : 0,
+  };
+}
+
+function fetchOverall(db, whereClause, params) {
+  const sql = `
+    SELECT
+      COUNT(*) as total_prompts,
+      COALESCE(SUM(token_estimate), 0) as total_tokens,
+      COALESCE(SUM(token_estimate_response), 0) as total_response_tokens,
+      COALESCE(SUM(prompt_length), 0) as total_length,
+      COALESCE(SUM(CASE WHEN response_length IS NOT NULL THEN response_length ELSE 0 END), 0) as total_response_length,
+      SUM(CASE WHEN response_length IS NOT NULL THEN 1 ELSE 0 END) as response_count,
+      COUNT(DISTINCT NULLIF(project, '')) as project_count,
+      COUNT(DISTINCT source) as source_count,
+      COUNT(DISTINCT date(created_at, 'localtime')) as active_days,
+      MIN(created_at) as first_prompt,
+      MAX(created_at) as last_prompt
+    FROM prompts
+    ${whereClause}
+  `;
+  return db.prepare(sql).get(...params) || {};
+}
+
+function fetchTopByColumn(db, whereClause, params, column, limit, excludeNoneBucket) {
+  // COALESCE empty/null to a bucket label so they're aggregated together.
+  const noneLabel = column === "project" ? "(none)" : "(unknown)";
+  const bucketExpr = `COALESCE(NULLIF(${column}, ''), '${noneLabel}')`;
+  const extraFilter = excludeNoneBucket ? `AND ${column} IS NOT NULL AND ${column} != ''` : "";
+  const sql = `
+    SELECT ${bucketExpr} as bucket, ${AGG_COLUMNS}
+    FROM prompts
+    ${whereClause} ${extraFilter}
+    GROUP BY bucket
+    ORDER BY total_prompts DESC, total_combined_tokens DESC, bucket ASC
+    LIMIT ?
+  `;
+  return db.prepare(sql).all(...params, limit).map(withResponseRate);
+}
+
+function fetchHourly(db, whereClause, params) {
+  const sql = `
+    SELECT CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour, ${AGG_COLUMNS}
+    FROM prompts
+    ${whereClause}
+    GROUP BY hour
+  `;
+  const byHour = new Map(
+    db.prepare(sql).all(...params).map((r) => [r.hour, withResponseRate(r)])
+  );
+  return Array.from({ length: 24 }, (_, h) => {
+    const row = byHour.get(h);
+    if (row) {
+      const { hour: _h, ...rest } = row;
+      return { bucket: `${pad2(h)}:00`, ...rest };
+    }
+    return {
+      bucket: `${pad2(h)}:00`,
+      total_prompts: 0,
+      total_tokens: 0,
+      total_response_tokens: 0,
+      total_combined_tokens: 0,
+      avg_length: 0,
+      response_count: 0,
+      response_rate: 0,
+    };
+  });
+}
+
+function fetchWeekday(db, whereClause, params) {
+  const sql = `
+    SELECT CAST(strftime('%w', created_at, 'localtime') AS INTEGER) as wday, ${AGG_COLUMNS}
+    FROM prompts
+    ${whereClause}
+    GROUP BY wday
+  `;
+  const byWday = new Map(
+    db.prepare(sql).all(...params).map((r) => [r.wday, withResponseRate(r)])
+  );
+  return WEEKDAY_ORDER.map((day) => {
+    const row = byWday.get(day);
+    const label = WEEKDAY_LABELS[day];
+    if (row) {
+      const { wday: _w, ...rest } = row;
+      return { bucket: label, ...rest };
+    }
+    return {
+      bucket: label,
+      total_prompts: 0,
+      total_tokens: 0,
+      total_response_tokens: 0,
+      total_combined_tokens: 0,
+      avg_length: 0,
+      response_count: 0,
+      response_rate: 0,
+    };
+  });
+}
+
+function fetchGroupedSql(db, whereClause, params, groupBy) {
+  // ISO week numbering doesn't match SQLite's %W; fall back to JS for that one.
+  if (groupBy === "week") return null;
+  const exprs = {
+    day: "date(created_at, 'localtime')",
+    month: "strftime('%Y-%m', created_at, 'localtime')",
+    project: "COALESCE(NULLIF(project, ''), '(none)')",
+    source: "COALESCE(NULLIF(source, ''), '(unknown)')",
+    hour: "strftime('%H', created_at, 'localtime') || ':00'",
+    weekday: "CAST(strftime('%w', created_at, 'localtime') AS INTEGER)",
+  };
+  const expr = exprs[groupBy];
+  if (!expr) return null;
+
+  const sql = `
+    SELECT ${expr} as bucket, ${AGG_COLUMNS}
+    FROM prompts
+    ${whereClause}
+    GROUP BY bucket
+  `;
+  let rows = db.prepare(sql).all(...params).map(withResponseRate);
+
+  if (groupBy === "weekday") {
+    rows = rows.map((r) => ({
+      ...r,
+      bucket: WEEKDAY_LABELS[r.bucket],
+      sortKey: WEEKDAY_ORDER.indexOf(r.bucket),
+    }));
+  } else if (["day", "month"].includes(groupBy)) {
+    rows = rows.map((r) => ({ ...r, sortKey: r.bucket }));
+  } else if (groupBy === "hour") {
+    rows = rows.map((r) => ({ ...r, sortKey: parseInt(r.bucket, 10) }));
+  } else {
+    rows = rows.map((r) => ({ ...r, sortKey: r.bucket }));
+  }
+
+  return sortGroupedRows(rows, groupBy).map(({ sortKey, ...entry }) => entry);
+}
+
 async function getStats(config, options = {}) {
   const groupBy = options.groupBy || null;
   if (groupBy && !VALID_GROUPS.has(groupBy)) {
@@ -273,171 +427,119 @@ async function getStats(config, options = {}) {
   const limit = normalizeLimit(options.limit);
   const range = normalizeDateRange(options.since, options.until);
   const db = await openDb(config.storage.sqlite.path);
-  const { whereClause, params } = buildWhereClause(range);
 
-  const rows = db
-    .prepare(
-      `SELECT
-        created_at,
-        project,
-        source,
-        prompt_length,
-        response_length,
-        token_estimate,
-        token_estimate_response
-      FROM prompts
-      ${whereClause}
-      ORDER BY created_at ASC`
-    )
-    .all(...params);
+  try {
+    const { whereClause, params } = buildWhereClause(range);
 
-  db.close();
+    const o = fetchOverall(db, whereClause, params);
+    const topProjects = fetchTopByColumn(db, whereClause, params, "project", limit, true);
+    const topSources = fetchTopByColumn(db, whereClause, params, "source", limit, false);
+    const hourly = fetchHourly(db, whereClause, params);
+    const weekday = fetchWeekday(db, whereClause, params);
 
-  const projectSet = new Set();
-  const sourceSet = new Set();
-  const activeDateKeys = [];
-  const hourCounts = Array.from({ length: 24 }, (_, hour) => ({
-    bucket: `${pad2(hour)}:00`,
-    sortKey: hour,
-    total_prompts: 0,
-  }));
-  const weekdayCounts = WEEKDAY_ORDER.map((day, index) => ({
-    bucket: WEEKDAY_LABELS[day],
-    sortKey: index,
-    total_prompts: 0,
-  }));
+    // Sessions and streak need an ordered timestamp sequence; nothing else from the row.
+    const tsRows = db
+      .prepare(`SELECT created_at FROM prompts ${whereClause} ORDER BY created_at ASC`)
+      .all(...params);
+    const sessionsRaw = computeSessions(tsRows);
+    const activeDateKeys = tsRows.map((r) => toLocalDateKey(new Date(r.created_at)));
 
-  let totalTokens = 0;
-  let totalResponseTokens = 0;
-  let totalLength = 0;
-  let totalResponseLength = 0;
-  let responseCount = 0;
-  let firstPrompt = null;
-  let lastPrompt = null;
-
-  for (const row of rows) {
-    const createdAt = new Date(row.created_at);
-    const dateKey = toLocalDateKey(createdAt);
-    activeDateKeys.push(dateKey);
-
-    if (row.project) projectSet.add(row.project);
-    if (row.source) sourceSet.add(row.source);
-
-    const promptTokens = Number(row.token_estimate || 0);
-    const responseTokens = Number(row.token_estimate_response || 0);
-    totalTokens += promptTokens;
-    totalResponseTokens += responseTokens;
-    totalLength += Number(row.prompt_length || 0);
-
-    const hourEntry = hourCounts[createdAt.getHours()];
-    hourEntry.total_prompts += 1;
-
-    const weekdayIndex = WEEKDAY_ORDER.indexOf(createdAt.getDay());
-    if (weekdayIndex >= 0) {
-      weekdayCounts[weekdayIndex].total_prompts += 1;
-    }
-
-    if (row.response_length !== null && row.response_length !== undefined) {
-      responseCount += 1;
-      totalResponseLength += Number(row.response_length || 0);
-    }
-
-    if (!firstPrompt) firstPrompt = row.created_at;
-    lastPrompt = row.created_at;
-  }
-
-  const totalPrompts = rows.length;
-  const activeDays = new Set(activeDateKeys).size;
-  const sessionsRaw = computeSessions(rows);
-  const totalSessionMinutes = sessionsRaw.reduce(
-    (sum, session) => sum + ((session.end.getTime() - session.start.getTime()) / 60000),
-    0
-  );
-  const longestSession = sessionsRaw.reduce(
-    (best, session) => {
-      const minutes = roundTo((session.end.getTime() - session.start.getTime()) / 60000, 1);
-      if (!best || minutes > best.minutes) {
-        return {
-          minutes,
-          promptCount: session.promptCount,
-          started_at: session.start.toISOString(),
-        };
+    let grouped = null;
+    if (groupBy) {
+      grouped = fetchGroupedSql(db, whereClause, params, groupBy);
+      if (grouped === null) {
+        // ISO week or other JS-only grouping: fetch lightweight rows and aggregate in JS.
+        const groupRows = db
+          .prepare(
+            `SELECT created_at, project, source, prompt_length, response_length,
+                    token_estimate, token_estimate_response
+             FROM prompts
+             ${whereClause}
+             ORDER BY created_at ASC`
+          )
+          .all(...params);
+        grouped = aggregateRows(groupRows, groupBy).map(({ sortKey, ...entry }) => entry);
       }
-      return best;
-    },
-    null
-  );
+    }
 
-  const peakHour = [...hourCounts]
-    .sort((a, b) => b.total_prompts - a.total_prompts || a.sortKey - b.sortKey)[0] || null;
-  const busiestWeekday = [...weekdayCounts]
-    .sort((a, b) => b.total_prompts - a.total_prompts || a.sortKey - b.sortKey)[0] || null;
+    const totalPrompts = o.total_prompts || 0;
+    const totalSessionMinutes = sessionsRaw.reduce(
+      (sum, session) => sum + ((session.end.getTime() - session.start.getTime()) / 60000),
+      0
+    );
+    const longestSession = sessionsRaw.reduce(
+      (best, session) => {
+        const minutes = roundTo((session.end.getTime() - session.start.getTime()) / 60000, 1);
+        if (!best || minutes > best.minutes) {
+          return {
+            minutes,
+            promptCount: session.promptCount,
+            started_at: session.start.toISOString(),
+          };
+        }
+        return best;
+      },
+      null
+    );
 
-  const overall = {
-    total_prompts: totalPrompts,
-    total_tokens: totalTokens,
-    total_response_tokens: totalResponseTokens,
-    total_combined_tokens: totalTokens + totalResponseTokens,
-    avg_length: totalPrompts ? roundTo(totalLength / totalPrompts, 1) : 0,
-    avg_response_length: responseCount ? roundTo(totalResponseLength / responseCount, 1) : 0,
-    project_count: projectSet.size,
-    source_count: sourceSet.size,
-    response_count: responseCount,
-    response_rate: totalPrompts ? Math.round((responseCount / totalPrompts) * 100) : 0,
-    active_days: activeDays,
-    avg_prompts_per_active_day: activeDays ? roundTo(totalPrompts / activeDays, 1) : 0,
-    first_prompt: firstPrompt,
-    last_prompt: lastPrompt,
-  };
+    const peakHour = [...hourly]
+      .map((h, i) => ({ ...h, sortKey: i }))
+      .sort((a, b) => b.total_prompts - a.total_prompts || a.sortKey - b.sortKey)[0] || null;
+    const busiestWeekday = [...weekday]
+      .map((w, i) => ({ ...w, sortKey: i }))
+      .sort((a, b) => b.total_prompts - a.total_prompts || a.sortKey - b.sortKey)[0] || null;
 
-  const sessions = {
-    total_sessions: sessionsRaw.length,
-    avg_prompts_per_session: sessionsRaw.length ? roundTo(totalPrompts / sessionsRaw.length, 1) : 0,
-    avg_session_minutes: sessionsRaw.length ? roundTo(totalSessionMinutes / sessionsRaw.length, 1) : 0,
-    longest_session_minutes: longestSession ? longestSession.minutes : 0,
-    longest_session_prompts: longestSession ? longestSession.promptCount : 0,
-    longest_session_started_at: longestSession ? longestSession.started_at : null,
-  };
+    const overall = {
+      total_prompts: totalPrompts,
+      total_tokens: o.total_tokens || 0,
+      total_response_tokens: o.total_response_tokens || 0,
+      total_combined_tokens: (o.total_tokens || 0) + (o.total_response_tokens || 0),
+      avg_length: totalPrompts ? roundTo((o.total_length || 0) / totalPrompts, 1) : 0,
+      avg_response_length: o.response_count
+        ? roundTo((o.total_response_length || 0) / o.response_count, 1)
+        : 0,
+      project_count: o.project_count || 0,
+      source_count: o.source_count || 0,
+      response_count: o.response_count || 0,
+      response_rate: totalPrompts ? Math.round((o.response_count / totalPrompts) * 100) : 0,
+      active_days: o.active_days || 0,
+      avg_prompts_per_active_day: o.active_days ? roundTo(totalPrompts / o.active_days, 1) : 0,
+      first_prompt: o.first_prompt || null,
+      last_prompt: o.last_prompt || null,
+    };
 
-  const patterns = {
-    peak_hour: peakHour && peakHour.total_prompts > 0
-      ? { bucket: peakHour.bucket, count: peakHour.total_prompts }
-      : null,
-    busiest_weekday: busiestWeekday && busiestWeekday.total_prompts > 0
-      ? { bucket: busiestWeekday.bucket, count: busiestWeekday.total_prompts }
-      : null,
-    longest_active_streak: computeLongestStreak(activeDateKeys),
-  };
+    const sessions = {
+      total_sessions: sessionsRaw.length,
+      avg_prompts_per_session: sessionsRaw.length ? roundTo(totalPrompts / sessionsRaw.length, 1) : 0,
+      avg_session_minutes: sessionsRaw.length ? roundTo(totalSessionMinutes / sessionsRaw.length, 1) : 0,
+      longest_session_minutes: longestSession ? longestSession.minutes : 0,
+      longest_session_prompts: longestSession ? longestSession.promptCount : 0,
+      longest_session_started_at: longestSession ? longestSession.started_at : null,
+    };
 
-  const topProjects = aggregateRows(rows, "project")
-    .filter((entry) => entry.bucket !== "(none)")
-    .slice(0, limit)
-    .map(({ sortKey, ...entry }) => entry);
+    const patterns = {
+      peak_hour: peakHour && peakHour.total_prompts > 0
+        ? { bucket: peakHour.bucket, count: peakHour.total_prompts }
+        : null,
+      busiest_weekday: busiestWeekday && busiestWeekday.total_prompts > 0
+        ? { bucket: busiestWeekday.bucket, count: busiestWeekday.total_prompts }
+        : null,
+      longest_active_streak: computeLongestStreak(activeDateKeys),
+    };
 
-  const topSources = aggregateRows(rows, "source")
-    .slice(0, limit)
-    .map(({ sortKey, ...entry }) => entry);
-
-  const hourly = aggregateRows(rows, "hour").map(({ sortKey, ...entry }) => entry);
-  const weekday = aggregateRows(rows, "weekday").map(({ sortKey, ...entry }) => entry);
-
-  const grouped = groupBy
-    ? aggregateRows(rows, groupBy).map(({ sortKey, ...entry }) => entry)
-    : null;
-
-  return {
-    range,
-    overall,
-    sessions,
-    patterns,
-    topProjects,
-    topSources,
-    breakdowns: {
-      hourly,
-      weekday,
-    },
-    grouped,
-  };
+    return {
+      range,
+      overall,
+      sessions,
+      patterns,
+      topProjects,
+      topSources,
+      breakdowns: { hourly, weekday },
+      grouped,
+    };
+  } finally {
+    db.close();
+  }
 }
 
 module.exports = {
