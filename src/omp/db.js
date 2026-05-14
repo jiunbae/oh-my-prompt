@@ -133,6 +133,38 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 5,
+    run: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tool_invocations (
+          id TEXT PRIMARY KEY,
+          prompt_id TEXT,
+          session_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL DEFAULT 0,
+          source TEXT,
+          tool_name TEXT NOT NULL,
+          tool_use_id TEXT NOT NULL,
+          input_json TEXT,
+          program TEXT,
+          cwd TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_invocations_dedup
+          ON tool_invocations(session_id, tool_use_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_invocations_prompt
+          ON tool_invocations(prompt_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_invocations_session
+          ON tool_invocations(session_id, sequence);
+        CREATE INDEX IF NOT EXISTS idx_tool_invocations_tool
+          ON tool_invocations(tool_name);
+        CREATE INDEX IF NOT EXISTS idx_tool_invocations_program
+          ON tool_invocations(program);
+      `);
+    },
+  },
 ];
 
 /**

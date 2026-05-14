@@ -169,6 +169,14 @@ export async function processUpload(
 
   duplicates += toUpdate.length;
 
+  // Tools attached to already-existing prompts (e.g. a later Stop-hook sync
+  // brings tool_use blocks the original UserPromptSubmit upload didn't have).
+  await persistToolInvocations(
+    toUpdate.map((item) => ({ record: item.record, promptId: item.existingId, createdAt: item.createdAt })),
+    userId,
+    teamId,
+  );
+
   // ── Phase 5: Batch-insert new records ──────────────────────────
 
   // Determine default visibility if teamId is provided
@@ -283,6 +291,15 @@ export async function processUpload(
       affectedDates.add(item.dateStr);
     }
 
+    // ── Phase 5a: Insert tool_invocations parented to newly-inserted prompts.
+    // Pairing relies on toInsert[i] aligning with insertValues[i] since
+    // insertValues is built by mapping toInsert in order.
+    await persistToolInvocations(
+      toInsert.map((item, i) => ({ record: item.record, promptId: insertValues[i].id, createdAt: item.createdAt })),
+      userId,
+      teamId,
+    );
+
     // ── Phase 5b: Trigger outgoing integrations for new prompts ────
     for (const iv of insertValues) {
       triggerEvent("prompt.created", {
@@ -385,6 +402,61 @@ async function detectSessionCompleted(
     }).catch((err) => {
       logger.error({ err }, "Non-blocking session.completed webhook dispatch failed");
     });
+  }
+}
+
+async function persistToolInvocations(
+  items: Array<{ record: UploadRecord; promptId: string; createdAt: Date }>,
+  userId: string,
+  teamId?: string,
+): Promise<void> {
+  const rows: (typeof schema.toolInvocations.$inferInsert)[] = [];
+
+  for (const item of items) {
+    const tools = item.record.tools;
+    if (!Array.isArray(tools) || tools.length === 0) continue;
+    const sessionId = item.record.session_id;
+    if (!sessionId) continue; // session_id is NOT NULL in tool_invocations
+
+    for (const t of tools) {
+      if (!t || !t.tool_use_id || !t.tool_name) continue;
+      const ts = t.created_at ? new Date(t.created_at) : item.createdAt;
+      const timestamp = Number.isNaN(ts.getTime()) ? item.createdAt : ts;
+
+      rows.push({
+        id: crypto.randomUUID(),
+        promptId: item.promptId,
+        userId,
+        teamId: teamId ?? undefined,
+        sessionId,
+        sequence: t.sequence ?? 0,
+        source: item.record.source ?? undefined,
+        toolName: t.tool_name.slice(0, 100),
+        toolUseId: t.tool_use_id.slice(0, 255),
+        inputJson: t.input ?? undefined,
+        program: t.program ? t.program.slice(0, 100) : undefined,
+        cwd: t.cwd ?? undefined,
+        timestamp,
+      });
+    }
+  }
+
+  if (rows.length === 0) return;
+
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    try {
+      await db
+        .insert(schema.toolInvocations)
+        .values(chunk)
+        .onConflictDoNothing({
+          target: [schema.toolInvocations.sessionId, schema.toolInvocations.toolUseId],
+        });
+    } catch (err) {
+      // tool tracking is best-effort; never fail the parent upload
+      logger.error({ err, count: chunk.length }, "Failed to insert tool_invocations batch");
+    }
   }
 }
 

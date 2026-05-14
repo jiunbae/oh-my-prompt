@@ -1,3 +1,13 @@
+export interface ToolInvocationRecord {
+  tool_use_id: string;
+  tool_name: string;
+  sequence?: number;
+  input?: unknown;
+  program?: string | null;
+  cwd?: string | null;
+  created_at?: string | null;
+}
+
 export interface UploadRecord {
   event_id: string;
   created_at: string;
@@ -18,6 +28,7 @@ export interface UploadRecord {
   word_count?: number;
   word_count_response?: number | null;
   content_hash?: string;
+  tools?: ToolInvocationRecord[];
 }
 
 export interface UploadResult {

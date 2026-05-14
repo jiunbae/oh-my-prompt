@@ -12,6 +12,16 @@ import { env } from "@/env";
 const MAX_BODY_SIZE = env.OMP_MAX_BODY_SIZE_MB * 1024 * 1024;
 const MAX_RECORDS_PER_REQUEST = env.OMP_MAX_RECORDS_PER_REQUEST;
 
+const toolInvocationSchema = z.object({
+  tool_use_id: z.string().min(1).max(255),
+  tool_name: z.string().min(1).max(100),
+  sequence: z.number().int().nonnegative().default(0),
+  input: z.unknown().nullish(),
+  program: z.string().max(100).nullish(),
+  cwd: z.string().max(500).nullish(),
+  created_at: z.string().nullish(),
+});
+
 const uploadRecordSchema = z.object({
   event_id: z.string().min(1),
   created_at: z.string().min(1),
@@ -32,6 +42,7 @@ const uploadRecordSchema = z.object({
   word_count: z.number().nullish(),
   word_count_response: z.number().nullish(),
   content_hash: z.string().nullish(),
+  tools: z.array(toolInvocationSchema).max(1000).optional(),
 });
 
 const uploadBodySchema = z.object({

@@ -142,6 +142,27 @@ function extractText(content) {
   return "";
 }
 
+// Bound the size of tool_use.input we ship to omp ingest. A single Edit or
+// WebFetch call can carry hundreds of KB; without this, JSON.stringify of the
+// emitted payload can overflow the stdin pipe to the ingest process.
+function clipToolInput(value) {
+  const LIMIT = 32 * 1024;
+  function walk(v) {
+    if (typeof v === "string") {
+      if (v.length <= LIMIT) return v;
+      return v.slice(0, LIMIT) + "...[truncated " + (v.length - LIMIT) + " chars]";
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  }
+  return walk(value);
+}
+
 // Read backwards in CHUNK-sized blocks. After each chunk, split on newlines
 // and try to parse complete lines (everything except the first/leftmost
 // fragment, which may be partial until we read more). Stop as soon as the
@@ -208,6 +229,8 @@ for (let i = entries.length - 1; i >= 0; i--) {
 if (lastUserIdx === -1) { writeCheckpoint(); process.exit(0); }
 
 const parts = [];
+const toolList = [];
+let toolSeq = 0;
 let cwd = "";
 for (let i = lastUserIdx + 1; i < entries.length; i++) {
   const e = entries[i];
@@ -217,8 +240,21 @@ for (let i = lastUserIdx + 1; i < entries.length; i++) {
   const t = extractText(c);
   if (t.trim()) parts.push(t);
   if (e.cwd) cwd = e.cwd;
+  if (Array.isArray(c)) {
+    for (const b of c) {
+      if (b && b.type === "tool_use" && b.id && b.name) {
+        toolList.push({
+          tool_use_id: String(b.id),
+          tool_name: String(b.name),
+          input: clipToolInput(b.input || {}),
+          sequence: toolSeq++,
+          cwd: e.cwd || "",
+        });
+      }
+    }
+  }
 }
-if (parts.length === 0) {
+if (parts.length === 0 && toolList.length === 0) {
   writeCheckpoint();
   process.exit(0);
 }
@@ -240,6 +276,7 @@ process.stdout.write(JSON.stringify({
   cwd: cwd || p.cwd || "",
   project: p.project || "",
   capture_response: true,
+  tools: toolList,
 }));
 NODESCRIPT
 )
@@ -255,6 +292,9 @@ exit 0
 function codexNotifyScript() {
   return `#!/usr/bin/env node
 const { spawnSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
 const raw = process.argv[2];
 if (!raw) process.exit(0);
@@ -284,6 +324,103 @@ if (!inputMessages && !responseText) {
 const threadId = event["thread-id"] || event.thread_id || "";
 const turnId = event["turn-id"] || event.turn_id || "";
 
+// Mine tool calls from the Codex rollout JSONL — the notify event itself does
+// not carry function_call info. Files live under ~/.codex/sessions/YYYY/MM/DD/
+// and are named rollout-<ts>-<threadId>.jsonl.
+function findRollout(tid) {
+  if (!tid) return null;
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const root = path.join(codexHome, "sessions");
+  try { if (!fs.statSync(root).isDirectory()) return null; } catch (_) { return null; }
+  const suffix = "-" + tid + ".jsonl";
+  let newest = null;
+  let newestMtime = 0;
+  function walk(dir, depth) {
+    if (depth > 3) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+    for (const ent of entries) {
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) { walk(p, depth + 1); continue; }
+      if (ent.isFile() && ent.name.endsWith(suffix)) {
+        try {
+          const st = fs.statSync(p);
+          if (st.mtimeMs > newestMtime) { newest = p; newestMtime = st.mtimeMs; }
+        } catch (_) { /* ignore */ }
+      }
+    }
+  }
+  walk(root, 0);
+  return newest;
+}
+
+function clipToolInput(value) {
+  const LIMIT = 32 * 1024;
+  function walk(v) {
+    if (typeof v === "string") {
+      if (v.length <= LIMIT) return v;
+      return v.slice(0, LIMIT) + "...[truncated " + (v.length - LIMIT) + " chars]";
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  }
+  return walk(value);
+}
+
+function parseArgs(arg) {
+  if (arg == null) return null;
+  if (typeof arg !== "string") return arg;
+  try { return JSON.parse(arg); } catch (_) { return arg; }
+}
+
+function extractCodexTools(rolloutPath) {
+  if (!rolloutPath) return [];
+  const MAX_SIZE = 5 * 1024 * 1024; // 5MB safety cap on a single rollout read
+  let text;
+  try {
+    const st = fs.statSync(rolloutPath);
+    if (st.size > MAX_SIZE) {
+      const fd = fs.openSync(rolloutPath, "r");
+      const buf = Buffer.alloc(MAX_SIZE);
+      fs.readSync(fd, buf, 0, MAX_SIZE, st.size - MAX_SIZE);
+      fs.closeSync(fd);
+      text = buf.toString("utf-8");
+      const nl = text.indexOf("\\n");
+      if (nl >= 0) text = text.slice(nl + 1); // drop probably-partial first line
+    } else {
+      text = fs.readFileSync(rolloutPath, "utf-8");
+    }
+  } catch (_) { return []; }
+  const out = [];
+  let seq = 0;
+  for (const ln of text.split("\\n")) {
+    if (!ln) continue;
+    let entry;
+    try { entry = JSON.parse(ln); } catch (_) { continue; }
+    if (!entry || entry.type !== "response_item") continue;
+    const p = entry.payload;
+    if (!p || p.type !== "function_call") continue;
+    const id = p.call_id || p.callID || p.id || "";
+    const name = p.name || "";
+    if (!id || !name) continue;
+    out.push({
+      tool_use_id: String(id),
+      tool_name: String(name),
+      input: clipToolInput(parseArgs(p.arguments)),
+      sequence: seq++,
+      cwd: "",
+    });
+  }
+  return out;
+}
+
+const tools = extractCodexTools(findRollout(threadId));
+
 const payload = {
   timestamp: new Date().toISOString(),
   event_id: turnId ? "codex:" + threadId + ":" + turnId : undefined,
@@ -299,6 +436,7 @@ const payload = {
   cli_version: event["cli-version"] || event.cli_version || "",
   hook_version: "1.0.0",
   capture_response: true,
+  tools,
   meta: {
     turn_id: event["turn-id"] || event.turn_id || "",
     event_type: event.type || "",
@@ -480,27 +618,122 @@ if [ -z "$payload" ]; then
   exit 0
 fi
 
-# Extract fields from the Gemini CLI hook payload and send to omp ingest
-enriched=$(node -e "
-  const p = JSON.parse(process.argv[1]);
-  const out = {
-    timestamp: new Date().toISOString(),
-    source: 'gemini',
-    session_id: p.session_id || '',
-    cwd: p.cwd || '',
-    role: 'user',
-    text: p.prompt || p.user_message || p.text || '',
-    response_text: p.response || p.model_response || '',
-    cli_name: 'gemini',
-    hook_version: '1.0.0',
-    capture_response: true,
-    meta: {
-      hook_event: p.hook_event_name || '',
-    },
-  };
-  if (!out.text && !out.response_text) process.exit(0);
-  console.log(JSON.stringify(out));
-" "$payload" 2>/dev/null) || true
+# Build payload via a Node heredoc so we can mine the per-session chat JSON for
+# tool calls (the AfterAgent hook payload alone has no tool info).
+enriched=$(OMP_PAYLOAD="$payload" GEMINI_HOME="\${GEMINI_HOME:-$HOME/.gemini}" node << 'GEMSCRIPT'
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
+let p;
+try { p = JSON.parse(process.env.OMP_PAYLOAD); } catch { process.exit(0); }
+
+const sessionId = p.session_id || "";
+const cwd = p.cwd || "";
+const text = p.prompt || p.user_message || p.text || "";
+const responseText = p.response || p.model_response || "";
+
+// Walk \${GEMINI_HOME}/tmp/<projectHash>/chats/ for a session file whose
+// internal sessionId matches. Pre-filter by filename suffix using the first
+// segment of sessionId to keep the directory scan cheap.
+function clipToolInput(value) {
+  const LIMIT = 32 * 1024;
+  function walk(v) {
+    if (typeof v === "string") {
+      if (v.length <= LIMIT) return v;
+      return v.slice(0, LIMIT) + "...[truncated " + (v.length - LIMIT) + " chars]";
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  }
+  return walk(value);
+}
+
+function findSessionFile(sid) {
+  if (!sid) return null;
+  const root = path.join(process.env.GEMINI_HOME, "tmp");
+  try { if (!fs.statSync(root).isDirectory()) return null; } catch { return null; }
+  const shortPrefix = sid.split("-")[0] || sid.slice(0, 8);
+  const candidates = [];
+  let projHashes;
+  try { projHashes = fs.readdirSync(root); } catch { return null; }
+  for (const ph of projHashes) {
+    const chatsDir = path.join(root, ph, "chats");
+    let entries;
+    try { entries = fs.readdirSync(chatsDir); } catch { continue; }
+    for (const f of entries) {
+      // Filenames look like session-2026-05-14T00-00-<shortPrefix>.json
+      if (!f.startsWith("session-") || !f.endsWith(".json")) continue;
+      if (shortPrefix && !f.includes(shortPrefix)) continue;
+      candidates.push(path.join(chatsDir, f));
+    }
+  }
+  // Prefer the file whose JSON sessionId matches exactly; fall back to newest mtime.
+  let exact = null;
+  let newest = null;
+  let newestMtime = 0;
+  for (const p of candidates) {
+    try {
+      const st = fs.statSync(p);
+      if (st.mtimeMs > newestMtime) { newest = p; newestMtime = st.mtimeMs; }
+      if (!exact) {
+        const data = JSON.parse(fs.readFileSync(p, "utf-8"));
+        if (data && data.sessionId === sid) exact = p;
+      }
+    } catch { /* ignore */ }
+  }
+  return exact || newest;
+}
+
+function extractTools(filePath) {
+  if (!filePath) return [];
+  let data;
+  try { data = JSON.parse(fs.readFileSync(filePath, "utf-8")); } catch { return []; }
+  const messages = (data && Array.isArray(data.messages)) ? data.messages : [];
+  const out = [];
+  let seq = 0;
+  for (const m of messages) {
+    if (!m || !Array.isArray(m.toolCalls)) continue;
+    for (const tc of m.toolCalls) {
+      if (!tc || !tc.id || !tc.name) continue;
+      out.push({
+        tool_use_id: String(tc.id),
+        tool_name: String(tc.name),
+        input: clipToolInput(tc.args || {}),
+        sequence: seq++,
+        cwd: "",
+      });
+    }
+  }
+  return out;
+}
+
+const tools = extractTools(findSessionFile(sessionId));
+
+const out = {
+  timestamp: new Date().toISOString(),
+  source: "gemini",
+  session_id: sessionId,
+  cwd,
+  role: "user",
+  text,
+  response_text: responseText,
+  cli_name: "gemini",
+  hook_version: "1.0.0",
+  capture_response: true,
+  tools,
+  meta: { hook_event: p.hook_event_name || "" },
+};
+
+if (!out.text && !out.response_text && tools.length === 0) process.exit(0);
+process.stdout.write(JSON.stringify(out));
+GEMSCRIPT
+) || true
 
 if [ -n "$enriched" ]; then
   printf '%s\\n' "$enriched" | "$OMP_BIN" ingest --stdin || true
@@ -683,6 +916,53 @@ function extractText(parts, role) {
   return chunks.join("\\n\\n").trim();
 }
 
+// Bound the size of tool inputs (Edit/WebFetch can be huge). Mirrors the
+// Claude Stop hook so server-side sizing stays consistent.
+function clipToolInput(value) {
+  const LIMIT = 32 * 1024;
+  function walk(v) {
+    if (typeof v === "string") {
+      if (v.length <= LIMIT) return v;
+      return v.slice(0, LIMIT) + "...[truncated " + (v.length - LIMIT) + " chars]";
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === "object") {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  }
+  return walk(value);
+}
+
+// OpenCode part shape (canonical): { type: "tool", callID, tool, state: { input } }.
+// We tolerate alternative shapes (tool_use / tool-call / id / name / args) defensively;
+// they're not currently emitted by OpenCode but cost nothing to support.
+function collectToolUses(parts) {
+  if (!Array.isArray(parts)) return [];
+  const out = [];
+  let seq = 0;
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue;
+    const t = part.type;
+    if (t !== "tool" && t !== "tool_use" && t !== "tool-call") continue;
+    const id = part.callID || part.call_id || part.id || part.tool_use_id || "";
+    const name = part.tool || part.name || part.toolName || "";
+    if (!id || !name) continue;
+    const state = part.state && typeof part.state === "object" ? part.state : null;
+    const input = (state && state.input) || part.input || part.args || {};
+    out.push({
+      tool_use_id: String(id),
+      tool_name: String(name),
+      input: clipToolInput(input || {}),
+      sequence: seq++,
+      cwd: "",
+    });
+  }
+  return out;
+}
+
 function findLatestTurn(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return null;
 
@@ -692,7 +972,8 @@ function findLatestTurn(messages) {
     if (!assistantInfo || assistantInfo.role !== "assistant") continue;
 
     const assistantText = extractText(assistantEntry.parts, "assistant");
-    if (!assistantText) continue;
+    const hasTools = collectToolUses(assistantEntry.parts).length > 0;
+    if (!assistantText && !hasTools) continue;
 
     for (let j = i - 1; j >= 0; j -= 1) {
       const userEntry = messages[j];
@@ -742,6 +1023,11 @@ export default async function OhMyPromptOpenCodePlugin(ctx) {
         (userInfo.path && userInfo.path.root) ||
         cwd;
 
+      const tools = collectToolUses(assistantEntry.parts).map((t) => ({
+        ...t,
+        cwd: t.cwd || cwd || "",
+      }));
+
       const payload = {
         timestamp: new Date().toISOString(),
         event_id: \`opencode:\${sessionID}:\${userInfo.id || ""}:\${assistantInfo.id || ""}\`,
@@ -759,6 +1045,7 @@ export default async function OhMyPromptOpenCodePlugin(ctx) {
         cli_name: "opencode",
         hook_version: "1.0.0",
         capture_response: true,
+        tools,
         meta: {
           event_type: event.type,
           user_message_id: userInfo.id || "",

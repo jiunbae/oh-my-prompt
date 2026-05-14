@@ -113,6 +113,67 @@ function normalizePayload(payload, config) {
   return { ...baseRecord, event_id: eventBase };
 }
 
+function deriveProgram(toolName, input) {
+  if (toolName !== "Bash") return null;
+  if (!input || typeof input !== "object") return null;
+  let cmd = typeof input.command === "string" ? input.command.trim() : "";
+  if (!cmd) return null;
+  cmd = cmd.replace(/^`+/, "").replace(/`+$/, "");
+  let safety = 8;
+  while (safety-- > 0) {
+    if (cmd.startsWith("sudo ")) { cmd = cmd.slice(5).trimStart(); continue; }
+    if (cmd.startsWith("env ")) { cmd = cmd.slice(4).trimStart(); continue; }
+    const assign = cmd.match(/^[A-Za-z_][A-Za-z0-9_]*=\S*\s+/);
+    if (assign) { cmd = cmd.slice(assign[0].length); continue; }
+    const flag = cmd.match(/^-{1,2}[A-Za-z0-9][\w-]*(?:=\S*)?\s+/);
+    if (flag) { cmd = cmd.slice(flag[0].length); continue; }
+    break;
+  }
+  const wrapper = cmd.match(/^(?:bash|sh|zsh)\s+-[lic]+\s+["']([^"']+)["']/);
+  if (wrapper) cmd = wrapper[1].trim();
+  const first = (cmd.split(/\s+/)[0] || "").replace(/^[;&|<>()`'"]+|[;&|<>()`'"]+$/g, "");
+  if (!first || first.startsWith("-")) return null;
+  const base = first.split("/").pop() || first;
+  return base.toLowerCase().slice(0, 100);
+}
+
+function insertToolInvocations(db, tools, promptId, record) {
+  if (!Array.isArray(tools) || tools.length === 0) return;
+  if (!record.session_id) return;
+  const stmt = db.prepare(`
+    INSERT INTO tool_invocations (
+      id, prompt_id, session_id, sequence, source, tool_name, tool_use_id,
+      input_json, program, cwd, created_at
+    ) VALUES (
+      @id, @prompt_id, @session_id, @sequence, @source, @tool_name, @tool_use_id,
+      @input_json, @program, @cwd, @created_at
+    )
+    ON CONFLICT(session_id, tool_use_id) DO UPDATE SET
+      prompt_id = COALESCE(tool_invocations.prompt_id, excluded.prompt_id),
+      sequence = excluded.sequence,
+      input_json = excluded.input_json,
+      program = excluded.program,
+      cwd = excluded.cwd
+  `);
+  for (const t of tools) {
+    if (!t || !t.tool_use_id || !t.tool_name) continue;
+    const input = t.input != null ? t.input : null;
+    stmt.run({
+      id: crypto.randomUUID(),
+      prompt_id: promptId || null,
+      session_id: record.session_id,
+      sequence: typeof t.sequence === "number" ? t.sequence : 0,
+      source: record.source || null,
+      tool_name: String(t.tool_name).slice(0, 100),
+      tool_use_id: String(t.tool_use_id).slice(0, 255),
+      input_json: input != null ? JSON.stringify(input) : null,
+      program: deriveProgram(t.tool_name, input),
+      cwd: t.cwd || record.cwd || null,
+      created_at: record.created_at || nowIso(),
+    });
+  }
+}
+
 function insertPrompt(db, record) {
   const stmt = db.prepare(`
     INSERT INTO prompts (
@@ -189,17 +250,25 @@ async function ingestPayload(rawPayload, config, options = {}) {
           .get(record.session_id);
       }
 
-      if (row && record.capture_response === 1 && record.prompt_text) {
-        updatePromptWithResponse(
-          db,
-          row.id,
-          record.prompt_text,
-          record.token_estimate,
-          record.word_count
-        );
-        updateState({ lastCapture: record.created_at });
-        touchTrigger();
-        return { ok: true, id: row.id, updated: true };
+      if (row) {
+        const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
+        if (record.capture_response === 1 && record.prompt_text) {
+          updatePromptWithResponse(
+            db,
+            row.id,
+            record.prompt_text,
+            record.token_estimate,
+            record.word_count
+          );
+        }
+        if (hasTools) {
+          insertToolInvocations(db, payload.tools, row.id, record);
+        }
+        if (record.prompt_text || hasTools) {
+          if (record.prompt_text) updateState({ lastCapture: record.created_at });
+          touchTrigger();
+          return { ok: true, id: row.id, updated: true };
+        }
       }
     }
 
@@ -214,6 +283,7 @@ async function ingestPayload(rawPayload, config, options = {}) {
         )
         .get(record.session_id, record.role, record.content_hash);
       if (contentDup) {
+        insertToolInvocations(db, payload.tools, contentDup.id, record);
         if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
           updatePromptWithResponse(
             db,
@@ -234,6 +304,10 @@ async function ingestPayload(rawPayload, config, options = {}) {
       const existing = db
         .prepare("SELECT id, response_text FROM prompts WHERE event_id = ? LIMIT 1")
         .get(record.event_id);
+      // FK is ON DELETE CASCADE; pass null prompt_id if we have no real row to point at,
+      // otherwise we'd hit a foreign-key violation under PRAGMA foreign_keys=ON.
+      const existingId = existing?.id || record.id;
+      insertToolInvocations(db, payload.tools, existing?.id || null, record);
       // Update response_text on existing record if it's missing and the new payload has it
       if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
         updatePromptWithResponse(
@@ -246,8 +320,9 @@ async function ingestPayload(rawPayload, config, options = {}) {
         touchTrigger();
         return { ok: true, id: existing.id, updated: true, deduped: true };
       }
-      return { ok: true, id: existing?.id || record.id, updated: false, deduped: true };
+      return { ok: true, id: existingId, updated: false, deduped: true };
     }
+    insertToolInvocations(db, payload.tools, record.id, record);
     updateState({ lastCapture: record.created_at });
     touchTrigger();
     return { ok: true, id: record.id, updated: false };

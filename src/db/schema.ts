@@ -491,6 +491,7 @@ export const promptsRelations = relations(prompts, ({ one, many }) => ({
   promptVersions: many(promptVersions),
   promptPermissions: many(promptPermissions),
   promptExperiments: many(promptExperiments),
+  toolInvocations: many(toolInvocations),
   user: one(users, {
     fields: [prompts.userId],
     references: [users.id],
@@ -757,6 +758,55 @@ export const promptVersionsRelations = relations(promptVersions, ({ one }) => ({
   prompt: one(prompts, {
     fields: [promptVersions.promptId],
     references: [prompts.id],
+  }),
+}));
+
+export const toolInvocations = pgTable(
+  "tool_invocations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    promptId: uuid("prompt_id").references(() => prompts.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "cascade" }),
+    sessionId: varchar("session_id", { length: 255 }).notNull(),
+    sequence: integer("sequence").notNull().default(0),
+    source: varchar("source", { length: 50 }),
+    toolName: varchar("tool_name", { length: 100 }).notNull(),
+    toolUseId: varchar("tool_use_id", { length: 255 }).notNull(),
+    inputJson: jsonb("input_json"),
+    program: varchar("program", { length: 100 }),
+    cwd: text("cwd"),
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("tool_invocations_session_tool_use_unique").on(
+      table.sessionId,
+      table.toolUseId
+    ),
+    index("idx_tool_invocations_prompt").on(table.promptId),
+    index("idx_tool_invocations_session").on(table.sessionId, table.sequence),
+    index("idx_tool_invocations_user_ts").on(table.userId, table.timestamp),
+    index("idx_tool_invocations_team_ts").on(table.teamId, table.timestamp),
+    index("idx_tool_invocations_tool").on(table.toolName),
+    index("idx_tool_invocations_program").on(table.program),
+  ]
+);
+
+export const toolInvocationsRelations = relations(toolInvocations, ({ one }) => ({
+  prompt: one(prompts, {
+    fields: [toolInvocations.promptId],
+    references: [prompts.id],
+  }),
+  user: one(users, {
+    fields: [toolInvocations.userId],
+    references: [users.id],
+  }),
+  team: one(teams, {
+    fields: [toolInvocations.teamId],
+    references: [teams.id],
   }),
 }));
 

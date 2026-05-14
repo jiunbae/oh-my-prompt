@@ -11,7 +11,7 @@ function makeTempRoot() {
 }
 
 describe("ingestPayload", () => {
-  it("writes a prompt record to sqlite", () => {
+  it("writes a prompt record to sqlite", async () => {
     const root = makeTempRoot();
     const dbPath = path.join(root, "omp.db");
 
@@ -44,5 +44,114 @@ describe("ingestPayload", () => {
     expect(row.prompt_text).toBe("Hello world");
     expect(row.source).toBe("test-cli");
     expect(count.count).toBe(1);
+  });
+
+  it("persists tool_invocations from a tools[] payload and derives Bash program", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    // First: user prompt
+    await ingestPayload(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        source: "claude-code",
+        session_id: "sess-tools",
+        role: "user",
+        text: "run tests",
+        cli_name: "claude",
+      }),
+      config
+    );
+
+    // Then: assistant turn with tool_use blocks
+    await ingestPayload(
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        source: "claude-code",
+        session_id: "sess-tools",
+        role: "assistant",
+        text: "ok",
+        user_prompt_text: "run tests",
+        cli_name: "claude",
+        capture_response: true,
+        tools: [
+          {
+            tool_use_id: "tu_1",
+            tool_name: "Bash",
+            input: { command: "FOO=bar sudo /usr/bin/npm test --silent", description: "tests" },
+            sequence: 0,
+            cwd: "/tmp",
+          },
+          {
+            tool_use_id: "tu_2",
+            tool_name: "Edit",
+            input: { file_path: "/tmp/x.js", old_string: "a", new_string: "b" },
+            sequence: 1,
+          },
+        ],
+      }),
+      config
+    );
+
+    const db = await openDb(dbPath);
+    const rows = db
+      .prepare(
+        "SELECT tool_name, program, tool_use_id, sequence, input_json FROM tool_invocations ORDER BY sequence"
+      )
+      .all();
+    const promptCount = db.prepare("SELECT COUNT(*) as c FROM prompts").get();
+    db.close();
+
+    expect(promptCount.c).toBe(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].tool_name).toBe("Bash");
+    expect(rows[0].program).toBe("npm");
+    expect(rows[0].tool_use_id).toBe("tu_1");
+    expect(rows[1].tool_name).toBe("Edit");
+    expect(rows[1].program).toBeNull();
+    const editInput = JSON.parse(rows[1].input_json);
+    expect(editInput.file_path).toBe("/tmp/x.js");
+  });
+
+  it("upserts on duplicate (session_id, tool_use_id) without erroring", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    const base = {
+      timestamp: new Date().toISOString(),
+      source: "claude-code",
+      session_id: "sess-dup",
+      role: "user",
+      text: "do thing",
+      cli_name: "claude",
+      tools: [
+        {
+          tool_use_id: "tu_dup",
+          tool_name: "Bash",
+          input: { command: "git status" },
+          sequence: 0,
+        },
+      ],
+    };
+
+    await ingestPayload(JSON.stringify(base), config);
+    await ingestPayload(JSON.stringify(base), config);
+
+    const db = await openDb(dbPath);
+    const count = db.prepare("SELECT COUNT(*) as c FROM tool_invocations").get();
+    db.close();
+    expect(count.c).toBe(1);
   });
 });

@@ -169,6 +169,13 @@
       "when": 1778112000000,
       "tag": "0026_add_ab_testing",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1778198400000,
+      "tag": "0028_add_tool_invocations",
+      "breakpoints": true
     }
   ]
 }

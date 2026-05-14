@@ -33,8 +33,8 @@ function fetchRows(db, since, lastId) {
     .all(iso, iso, iso);
 }
 
-function rowToUploadRecord(row) {
-  return {
+function rowToUploadRecord(row, tools) {
+  const rec = {
     event_id: row.event_id || row.id.toString(),
     created_at: row.created_at,
     prompt_text: row.prompt_text,
@@ -55,6 +55,41 @@ function rowToUploadRecord(row) {
     word_count_response: row.word_count_response ?? null,
     content_hash: row.content_hash ?? null,
   };
+  if (Array.isArray(tools) && tools.length > 0) {
+    rec.tools = tools;
+  }
+  return rec;
+}
+
+function fetchToolsForPrompts(db, promptIds) {
+  if (!Array.isArray(promptIds) || promptIds.length === 0) return new Map();
+  const placeholders = promptIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT prompt_id, tool_use_id, tool_name, sequence, input_json, program, cwd, created_at
+       FROM tool_invocations
+       WHERE prompt_id IN (${placeholders})
+       ORDER BY prompt_id, sequence`
+    )
+    .all(...promptIds);
+  const grouped = new Map();
+  for (const r of rows) {
+    if (!grouped.has(r.prompt_id)) grouped.set(r.prompt_id, []);
+    let input = null;
+    if (r.input_json) {
+      try { input = JSON.parse(r.input_json); } catch (_) { input = null; }
+    }
+    grouped.get(r.prompt_id).push({
+      tool_use_id: r.tool_use_id,
+      tool_name: r.tool_name,
+      sequence: r.sequence ?? 0,
+      input,
+      program: r.program ?? null,
+      cwd: r.cwd ?? null,
+      created_at: r.created_at,
+    });
+  }
+  return grouped;
 }
 
 // Error codes that indicate transient network failures worth retrying
@@ -271,11 +306,17 @@ async function syncToServer(config, options = {}) {
   const state = await getSyncState(config);
   const since = options.since || state.lastSyncedAt || null;
   const rows = fetchRows(db, since, state.lastSyncedId);
-  db.close();
 
   if (rows.length === 0) {
+    db.close();
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
   }
+
+  const toolsByPrompt = fetchToolsForPrompts(
+    db,
+    rows.map((r) => r.id)
+  );
+  db.close();
 
   const chunkSize = options.chunkSize || 200;
   let totalAccepted = 0;
@@ -296,7 +337,7 @@ async function syncToServer(config, options = {}) {
   try {
     for (let i = 0; i < rows.length; i += chunkSize) {
       const chunk = rows.slice(i, i + chunkSize);
-      let records = chunk.map(rowToUploadRecord);
+      let records = chunk.map((r) => rowToUploadRecord(r, toolsByPrompt.get(r.id)));
       records = records.map((r) => postprocessUploadRecord(r, config));
       records = records.filter((r) => r.prompt_text && r.prompt_text.trim().length > 0);
 
