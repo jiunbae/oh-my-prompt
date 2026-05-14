@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026.514.1] - 2026-05-14
+
+### Added
+- **Tool invocation tracking**: every tool call an agent makes (Bash, Edit, Write, Read, WebFetch, etc.) is now persisted as its own row keyed by `(session_id, tool_use_id)`, parented to the prompt that produced it. Bash commands have an extracted `program` column (e.g. `npm`, `git`, `psql`) so you can query "which programs is this agent actually running"
+- **Cross-CLI coverage**: Claude Code Stop hook collects `tool_use` blocks from the transcript tail; OpenCode plugin walks `parts[]` for tool calls (and now accepts tools-only assistant turns); Codex notify hook tail-reads `~/.codex/sessions/.../rollout-*.jsonl` for `function_call` entries; Gemini AfterAgent hook mines `~/.gemini/tmp/<projectHash>/chats/session-*.json` for `toolCalls[]`
+- **Schema**: new `tool_invocations` table on both SQLite (CLI v5 migration) and Postgres (drizzle `0028_add_tool_invocations.sql`) with FK `ON DELETE CASCADE` to `prompts`, unique on `(session_id, tool_use_id)` for idempotent upsert
+- **Server sync**: CLI joins `tool_invocations` onto outgoing prompt batches; `/api/sync/upload` zod schema accepts `records[].tools[]`; upload service persists tools post-insert with `ON CONFLICT DO NOTHING` and never fails the parent upload on tool errors
+
+### Safety
+- Tool inputs are clipped at 32KB per field in every hook to keep large `Edit`/`WebFetch` payloads from overflowing the stdin pipe to `omp ingest`
+
 ## [2026.511.1] - 2026-05-11
 
 ### Improved

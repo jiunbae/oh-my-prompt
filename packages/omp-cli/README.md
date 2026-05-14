@@ -10,7 +10,8 @@
 
 ## Features
 
-- **Automatic capture**: Hook into Claude Code, Codex, and OpenCode
+- **Automatic capture**: Hook into Claude Code, Codex, OpenCode, and Gemini CLI
+- **Tool tracking**: Per-prompt log of every `tool_use` the agent ran (Bash, Edit, Write, Read, WebFetch, etc.) with extracted `program` name for Bash commands so you can answer "which programs did the agent actually run"
 - **Local storage**: SQLite database at `~/.omp/prompts.db`
 - **Server sync**: Upload prompts to self-hosted server for analytics
 - **Prompt analysis**: Get quality scores and improvement suggestions

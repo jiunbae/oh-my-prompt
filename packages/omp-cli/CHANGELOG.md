@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.514.1] - 2026-05-14
+
+### Added
+- Track every agent tool call (Bash, Edit, Write, Read, WebFetch, etc.) as its own row in a new `tool_invocations` table, parented to the prompt. Bash commands have an extracted `program` column (e.g. `npm`, `git`) so you can answer "which programs did the agent run"
+- Cross-CLI coverage: Claude Code Stop hook collects `tool_use` blocks from the transcript; OpenCode plugin walks `parts[]` and accepts tools-only assistant turns; Codex notify hook tail-reads `~/.codex/sessions/.../rollout-*.jsonl` for `function_call`; Gemini AfterAgent hook mines `~/.gemini/tmp/<projectHash>/chats/session-*.json`
+- SQLite migration v5 with unique `(session_id, tool_use_id)` index for idempotent upsert; CLI sync passes a `tools[]` array along with each prompt upload, server `/api/sync/upload` persists them with `ON CONFLICT DO NOTHING`
+
+### Safety
+- Tool inputs are clipped at 32KB per field in every hook to keep large `Edit`/`WebFetch` payloads from overflowing the stdin pipe to `omp ingest`
+
 ## [2026.505.5] - 2026-05-06
 
 ### Added

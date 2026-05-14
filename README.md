@@ -51,7 +51,7 @@ You write **hundreds of prompts a day** to AI coding agents. But do you actually
 
 **🎯 Capture**
 
-Shell hooks silently intercept<br/>every prompt you send
+Shell hooks silently intercept<br/>every prompt — and every tool<br/>the agent runs (Bash, Edit, …)
 
 </td>
 <td width="33%" align="center">
