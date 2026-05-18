@@ -40,7 +40,7 @@ services:
     environment:
       DATABASE_URL: postgresql://prompt:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/prompts
       REDIS_URL: redis://redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set — generate with: openssl rand -hex 32}
+      SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET must be set — generate with openssl rand -hex 32}"
       NODE_ENV: production
     depends_on:
       db:
