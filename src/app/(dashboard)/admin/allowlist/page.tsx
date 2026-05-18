@@ -129,7 +129,9 @@ export default function AllowlistPage() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Email Allowlist</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Manage which email addresses can register for an account
+          Manage who can register. Add an exact email
+          (<code>user@example.com</code>), a whole domain
+          (<code>@example.com</code>), or <code>*</code> to allow everyone.
         </p>
       </div>
 
@@ -137,14 +139,14 @@ export default function AllowlistPage() {
         <CardHeader>
           <CardTitle>Add Email</CardTitle>
           <CardDescription>
-            Add an email address to allow registration
+            Email, domain (@example.com), or * for everyone
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAddEmail} className="flex gap-3">
             <Input
-              type="email"
-              placeholder="user@example.com"
+              type="text"
+              placeholder="user@example.com, @example.com, or *"
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
               className="max-w-md"

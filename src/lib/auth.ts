@@ -128,16 +128,28 @@ export const AUTH_COOKIE_OPTIONS = {
 
 import { db } from "@/db/client";
 import { users, allowedEmails } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 /**
- * Check if email is in the allowlist
+ * Check if email is allowed to register / log in.
+ *
+ * An allowlist row matches if it is any of:
+ *   - "*"            → allow everyone (open registration)
+ *   - "@example.com" → allow any address at that domain
+ *   - "user@x.com"   → allow that exact address
  */
 export async function isEmailAllowed(email: string): Promise<boolean> {
+  const normalized = email.toLowerCase().trim();
+  const atIdx = normalized.lastIndexOf("@");
+  const domain = atIdx >= 0 ? normalized.slice(atIdx) : null; // includes leading "@"
+
+  const candidates = ["*", normalized];
+  if (domain) candidates.push(domain);
+
   const [allowed] = await db
     .select()
     .from(allowedEmails)
-    .where(eq(allowedEmails.email, email.toLowerCase()))
+    .where(inArray(allowedEmails.email, candidates))
     .limit(1);
 
   return !!allowed;

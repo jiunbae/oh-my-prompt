@@ -64,9 +64,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
-    const parsed = z.object({ email: z.string().email() }).safeParse(body);
+    // An allowlist entry may be an exact email, a domain ("@example.com"),
+    // or "*" (everyone).
+    const entrySchema = z.object({
+      email: z
+        .string()
+        .trim()
+        .transform((v) => v.toLowerCase())
+        .refine(
+          (v) =>
+            v === "*" ||
+            /^@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(v) ||
+            z.string().email().safeParse(v).success,
+          "Must be an email, a domain (@example.com), or * for everyone"
+        ),
+    });
+    const parsed = entrySchema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message || "Valid entry is required" },
+        { status: 400 }
+      );
     }
 
     const { email } = parsed.data;
