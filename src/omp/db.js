@@ -121,15 +121,23 @@ const MIGRATIONS = [
       // fails with "SQL logic error", making UPDATE/DELETE triggers unusable.
       // Remove content-table FTS and triggers entirely. Search falls back to
       // LIKE queries which work reliably with sql.js.
-      db.exec("DROP TRIGGER IF EXISTS prompts_ai");
-      db.exec("DROP TRIGGER IF EXISTS prompts_ad");
-      db.exec("DROP TRIGGER IF EXISTS prompts_au");
+      // Best-effort teardown. A legacy FTS5 prompts_fts can't be dropped by
+      // sql.js (no fts5 module); assertNoLegacyFts5() in openDb already fails
+      // fast for that case, so swallowing here only covers benign races.
+      const tryExec = (sql) => {
+        try {
+          db.exec(sql);
+        } catch {}
+      };
+      tryExec("DROP TRIGGER IF EXISTS prompts_ai");
+      tryExec("DROP TRIGGER IF EXISTS prompts_ad");
+      tryExec("DROP TRIGGER IF EXISTS prompts_au");
 
       const hasFts = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
         .get();
       if (hasFts) {
-        db.exec("DROP TABLE IF EXISTS prompts_fts");
+        tryExec("DROP TABLE IF EXISTS prompts_fts");
       }
     },
   },
@@ -220,12 +228,39 @@ function createFts(_db) {
   // Migration v4 drops any existing FTS tables and triggers.
 }
 
+/**
+ * Older versions created prompts_fts as an FTS5 virtual table. The current
+ * engine is sql.js, which ships FTS3/FTS4 only — no FTS5 module. Any
+ * operation that touches an FTS5 vtable (including the v4 cleanup migration's
+ * DROP TABLE) fails with a cryptic "no such module: fts5" and aborts openDb.
+ * Reading sqlite_master does NOT load the vtable module, so we can detect
+ * this cheaply and fail fast with an actionable message instead.
+ */
+function assertNoLegacyFts5(db, dbPath) {
+  let row;
+  try {
+    row = db
+      .prepare("SELECT sql FROM sqlite_master WHERE name = 'prompts_fts'")
+      .get();
+  } catch {
+    return; // sqlite_master unreadable here is handled elsewhere
+  }
+  if (row && typeof row.sql === "string" && /fts5/i.test(row.sql)) {
+    throw new Error(
+      `This database was created by an older oh-my-prompt that used SQLite FTS5, ` +
+        `which the current engine (sql.js) cannot open. Back up and remove ` +
+        `"${dbPath}", then run \`omp backfill\` to rebuild it from your transcripts.`
+    );
+  }
+}
+
 async function openDb(dbPath) {
   ensureDir(path.dirname(dbPath));
   const db = await openDatabase(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  assertNoLegacyFts5(db, dbPath);
   migrate(db);
   return db;
 }

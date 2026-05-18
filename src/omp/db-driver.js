@@ -202,13 +202,30 @@ class DatabaseWrapper {
   /** Persist the in-memory database to disk (no-op for readonly) */
   _save() {
     if (this._readonly || !this._filePath) return;
+    // Atomic write: a torn fs.writeFileSync of the whole DB (process killed
+    // mid-write, or a concurrent omp process) leaves a corrupt "database
+    // disk image is malformed" file. Write to a temp file, fsync, then
+    // rename — rename is atomic on the same filesystem, so the DB is always
+    // either fully old or fully new, never half-written.
+    const tmp = `${this._filePath}.tmp-${process.pid}`;
     try {
       const data = this._db.export();
       const dir = path.dirname(this._filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this._filePath, Buffer.from(data));
+      const fd = fs.openSync(tmp, "w");
+      try {
+        fs.writeSync(fd, Buffer.from(data));
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tmp, this._filePath);
     } catch {
-      // Silently ignore save errors (e.g. in-memory only usage)
+      // Silently ignore save errors (e.g. in-memory only usage), but don't
+      // leave a partial temp file behind.
+      try {
+        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {}
     }
   }
 }
