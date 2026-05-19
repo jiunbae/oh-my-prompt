@@ -50,6 +50,9 @@ k8s/secret.yaml
 # CLI build artifacts (rebuilt from src/omp/)
 packages/omp-cli/lib/
 
+# host-specific compose overrides (e.g. local port pins)
+docker-compose.override.yml
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
