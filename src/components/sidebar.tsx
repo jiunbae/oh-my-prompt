@@ -1,14 +1,50 @@
 "use client";
 
-import { useState, useEffect, useCallback, createContext, useContext, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  createContext,
+  useContext,
+  useMemo,
+  useRef,
+} from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
+import {
+  LayoutDashboard,
+  MessageSquare,
+  Search,
+  BarChart3,
+  FlaskConical,
+  Bell,
+  Sparkles,
+  Star,
+  LayoutTemplate,
+  Store,
+  BookOpen,
+  Users,
+  Settings,
+  Activity,
+  UsersRound,
+  ShieldCheck,
+  Menu,
+  LogOut,
+  Download,
+  User,
+  ChevronDown,
+  Plus,
+  AlertCircle,
+  type LucideIcon,
+} from "lucide-react";
 import { useUser } from "@/contexts/user-context";
 import { useTeam } from "@/contexts/team-context";
 import { usePwaContext } from "@/components/pwa-provider";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AlertNotificationBell } from "@/components/alert-notification-bell";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 
 // Context for mobile sidebar control
 const MobileSidebarContext = createContext<{
@@ -32,349 +68,58 @@ export function useMobileSidebar() {
 
 interface NavItem {
   href: string;
-  label: string;
-  icon: React.ReactNode;
+  /** Translation key under `nav.*`. */
+  labelKey: string;
+  Icon: LucideIcon;
   adminOnly?: boolean;
   badgeCount?: number;
 }
 
 const overviewItems: NavItem[] = [
-  {
-    href: "/dashboard",
-    label: "Dashboard",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/sessions",
-    label: "Sessions",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/search",
-    label: "Search",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-        />
-      </svg>
-    ),
-  },
+  { href: "/dashboard", labelKey: "dashboard", Icon: LayoutDashboard },
+  { href: "/sessions", labelKey: "sessions", Icon: MessageSquare },
+  { href: "/search", labelKey: "search", Icon: Search },
 ];
 
-const exploreItems: NavItem[] = [
-  {
-    href: "/analytics",
-    label: "Analytics",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/experiments",
-    label: "Experiments",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 00-1.905.924l-.317.158a6 6 0 01-2.084.66l-2.318.463a2 2 0 01-1.658-1.658l.463-2.318a6 6 0 01.66-2.084l.158-.317a6 6 0 00.924-1.905l.158-.318a6 6 0 00.517-3.86l-.477-2.387a2 2 0 00-1.294-1.294l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 00-1.905.924l-.317.158a6 6 0 01-2.084.66l-2.318.463a2 2 0 01-1.658-1.658l.463-2.318a6 6 0 01.66-2.084l.158-.317a6 6 0 00.924-1.905l.158-.318a6 6 0 00.517-3.86l-.477-2.387a2 2 0 00-1.294-1.294l-2.387-.477a6 6 0 00-3.86.517"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M9 12l2 2 4-4"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/alerts",
-    label: "Alerts",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/insights",
-    label: "AI Insights",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/prompts/favorites",
-    label: "Favorites",
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/templates",
-    label: "Templates",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/marketplace",
-    label: "Marketplace",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/docs",
-    label: "API Docs",
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-      </svg>
-    ),
-  },
-  {
-    href: "/teams",
-    label: "Teams",
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/settings",
-    label: "Settings",
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-        />
-      </svg>
-    ),
-  },
+const insightsItems: NavItem[] = [
+  { href: "/analytics", labelKey: "analytics", Icon: BarChart3 },
+  { href: "/experiments", labelKey: "experiments", Icon: FlaskConical },
+  { href: "/alerts", labelKey: "alerts", Icon: Bell },
+  { href: "/insights", labelKey: "aiInsights", Icon: Sparkles },
+];
+
+const libraryItems: NavItem[] = [
+  { href: "/prompts/favorites", labelKey: "favorites", Icon: Star },
+  { href: "/templates", labelKey: "templates", Icon: LayoutTemplate },
+  { href: "/marketplace", labelKey: "marketplace", Icon: Store },
+];
+
+const workspaceItems: NavItem[] = [
+  { href: "/teams", labelKey: "teams", Icon: Users },
+  { href: "/settings", labelKey: "settings", Icon: Settings },
+  { href: "/docs", labelKey: "docs", Icon: BookOpen },
 ];
 
 const adminNavItems: NavItem[] = [
-  {
-    href: "/admin/monitoring",
-    label: "Monitoring",
-    adminOnly: true,
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/admin/sessions",
-    label: "Sessions",
-    adminOnly: true,
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/admin/analytics",
-    label: "Insights",
-    adminOnly: true,
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/admin/users",
-    label: "Users",
-    adminOnly: true,
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-        />
-      </svg>
-    ),
-  },
-  {
-    href: "/admin/allowlist",
-    label: "Allowlist",
-    adminOnly: true,
-    icon: (
-      <svg
-        className="h-5 w-5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"
-        />
-      </svg>
-    ),
-  },
+  { href: "/admin/monitoring", labelKey: "monitoring", Icon: Activity, adminOnly: true },
+  { href: "/admin/sessions", labelKey: "sessions", Icon: MessageSquare, adminOnly: true },
+  { href: "/admin/analytics", labelKey: "aiInsights", Icon: BarChart3, adminOnly: true },
+  { href: "/admin/users", labelKey: "users", Icon: UsersRound, adminOnly: true },
+  { href: "/admin/allowlist", labelKey: "allowlist", Icon: ShieldCheck, adminOnly: true },
 ];
 
 function SidebarNavLink({
   item,
   isActive,
   onClick,
+  label,
 }: {
   item: NavItem;
   isActive: boolean;
   onClick?: () => void;
+  label: string;
 }) {
+  const { Icon } = item;
   return (
     <Link
       href={item.href}
@@ -382,11 +127,11 @@ function SidebarNavLink({
       onClick={onClick}
       className={`
         relative flex items-center gap-3 rounded-lg px-3 py-2
-        text-sm font-medium transition-colors
+        text-sm transition-colors
         ${
           isActive
-            ? "bg-sidebar-active text-sidebar-active-foreground"
-            : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+            ? "bg-sidebar-active text-sidebar-active-foreground font-semibold"
+            : "font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground"
         }
       `}
     >
@@ -394,9 +139,9 @@ function SidebarNavLink({
         <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-sidebar-active-indicator" />
       )}
       <span className={isActive ? "text-sidebar-active-indicator" : ""}>
-        {item.icon}
+        <Icon className="h-5 w-5" aria-hidden="true" />
       </span>
-      {item.label}
+      {label}
       {item.badgeCount !== undefined && item.badgeCount > 0 && (
         <span className="ml-auto flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">
           {item.badgeCount > 99 ? "99+" : item.badgeCount}
@@ -411,22 +156,30 @@ function SidebarGroup({
   items,
   pathname,
   onLinkClick,
+  tNav,
 }: {
   label: string;
   items: NavItem[];
   pathname: string;
   onLinkClick?: () => void;
+  tNav: (key: string) => string;
 }) {
   return (
     <div>
-      <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+      <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
       <div className="space-y-1">
         {items.map((item) => {
           const isActive = pathname.startsWith(item.href);
           return (
-            <SidebarNavLink key={item.href} item={item} isActive={isActive} onClick={onLinkClick} />
+            <SidebarNavLink
+              key={item.href}
+              item={item}
+              isActive={isActive}
+              onClick={onLinkClick}
+              label={tNav(item.labelKey)}
+            />
           );
         })}
       </div>
@@ -443,54 +196,62 @@ function TeamSwitcher() {
 
   if (loading || !user) return null;
 
+  // NOTE: "Personal", "Select team", and "Manage Teams" use plain English literals
+  // because their translation keys are not present in messages/{en,ko}.json and
+  // adding them would exceed the scoped "minimal exception" for this branch.
+  const personalLabel = "Personal";
+
   return (
     <div className="px-3 pb-3">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls="team-switcher-menu"
+        aria-label="Select team"
         className="flex w-full items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
       >
-        <svg className="h-4 w-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-        </svg>
+        <Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <span className="flex-1 truncate text-left">
-          {selectedTeam ? selectedTeam.name : "Personal"}
+          {selectedTeam ? selectedTeam.name : personalLabel}
         </span>
-        <svg
+        <ChevronDown
           className={`h-3 w-3 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+          aria-hidden="true"
+        />
       </button>
 
       {open && (
-        <div className="mt-1 rounded-lg border border-border bg-card shadow-sm">
+        <div
+          id="team-switcher-menu"
+          role="menu"
+          className="mt-1 rounded-lg border border-border bg-card shadow-sm"
+        >
           <button
+            type="button"
+            role="menuitem"
             onClick={() => {
               selectTeam(null);
               setOpen(false);
             }}
             className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent/50 ${!selectedTeamId ? "text-primary font-medium" : "text-muted-foreground"}`}
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
-            Personal
+            <User className="h-4 w-4" aria-hidden="true" />
+            {personalLabel}
           </button>
           {teams.map((team) => (
             <button
               key={team.id}
+              type="button"
+              role="menuitem"
               onClick={() => {
                 selectTeam(team.id);
                 setOpen(false);
               }}
               className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-accent/50 ${selectedTeamId === team.id ? "text-primary font-medium" : "text-muted-foreground"}`}
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
+              <Users className="h-4 w-4" aria-hidden="true" />
               <span className="flex-1 truncate text-left">{team.name}</span>
               <span className="text-[10px] uppercase text-muted-foreground/60">{team.role}</span>
             </button>
@@ -499,11 +260,10 @@ function TeamSwitcher() {
             <Link
               href="/teams"
               onClick={() => setOpen(false)}
+              role="menuitem"
               className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
+              <Plus className="h-3 w-3" aria-hidden="true" />
               Manage Teams
             </Link>
           </div>
@@ -519,6 +279,8 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
   const { teams } = useTeam();
   const { isOffline, isInstallable, installPrompt } = usePwaContext();
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const tNav = useTranslations("nav");
+  const tCommon = useTranslations("common");
 
   useEffect(() => {
     async function fetchUnread() {
@@ -537,7 +299,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
     return () => clearInterval(interval);
   }, []);
 
-  const exploreItemsWithBadges = exploreItems.map((item) =>
+  const insightsItemsWithBadges = insightsItems.map((item) =>
     item.href === "/alerts" && unreadAlerts > 0
       ? { ...item, badgeCount: unreadAlerts }
       : item
@@ -561,6 +323,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
               title="Offline"
             />
           )}
+          <LocaleSwitcher variant="compact" />
           <ThemeToggle />
         </div>
       </div>
@@ -569,23 +332,47 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
       {isOffline && (
         <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/20">
           <p className="text-xs text-destructive flex items-center gap-1.5">
-            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M5.636 18.364A9 9 0 1118.364 5.636 9 9 0 015.636 18.364z" />
-            </svg>
+            <AlertCircle className="h-3 w-3" aria-hidden="true" />
             Offline mode — syncing disabled
           </p>
         </div>
       )}
 
       <nav className="flex-1 space-y-5 px-3 py-4" aria-label="Main navigation">
-        <SidebarGroup label="Overview" items={overviewItems} pathname={pathname} onLinkClick={onLinkClick} />
-        <SidebarGroup label="Explore" items={exploreItemsWithBadges} pathname={pathname} onLinkClick={onLinkClick} />
+        <SidebarGroup
+          label={tNav("overview")}
+          items={overviewItems}
+          pathname={pathname}
+          onLinkClick={onLinkClick}
+          tNav={tNav}
+        />
+        <SidebarGroup
+          label={tNav("insights")}
+          items={insightsItemsWithBadges}
+          pathname={pathname}
+          onLinkClick={onLinkClick}
+          tNav={tNav}
+        />
+        <SidebarGroup
+          label={tNav("library")}
+          items={libraryItems}
+          pathname={pathname}
+          onLinkClick={onLinkClick}
+          tNav={tNav}
+        />
+        <SidebarGroup
+          label={tNav("workspace")}
+          items={workspaceItems}
+          pathname={pathname}
+          onLinkClick={onLinkClick}
+          tNav={tNav}
+        />
 
         {/* Teams Section */}
         {teams.length > 0 && (
           <div>
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-              Teams
+            <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {tNav("teams")}
             </p>
             <div className="space-y-1">
               {teams.map((team) => {
@@ -599,11 +386,11 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
                     onClick={onLinkClick}
                     className={`
                       relative flex items-center gap-3 rounded-lg px-3 py-2
-                      text-sm font-medium transition-colors
+                      text-sm transition-colors
                       ${
                         isActive
-                          ? "bg-sidebar-active text-sidebar-active-foreground"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                          ? "bg-sidebar-active text-sidebar-active-foreground font-semibold"
+                          : "font-medium text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                       }
                     `}
                   >
@@ -611,9 +398,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
                       <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-sidebar-active-indicator" />
                     )}
                     <span className={isActive ? "text-sidebar-active-indicator" : ""}>
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
+                      <Users className="h-5 w-5" aria-hidden="true" />
                     </span>
                     <span className="truncate">{team.name}</span>
                   </Link>
@@ -625,7 +410,13 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
 
         {/* Admin Section */}
         {user?.isAdmin && (
-          <SidebarGroup label="Admin" items={adminNavItems} pathname={pathname} onLinkClick={onLinkClick} />
+          <SidebarGroup
+            label={tNav("admin")}
+            items={adminNavItems}
+            pathname={pathname}
+            onLinkClick={onLinkClick}
+            tNav={tNav}
+          />
         )}
       </nav>
 
@@ -655,41 +446,29 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
               </div>
               {user.isAdmin && (
                 <Badge variant="warning" className="shrink-0">
-                  Admin
+                  {tNav("admin")}
                 </Badge>
               )}
             </div>
             {/* Install App button */}
             {isInstallable && (
               <button
+                type="button"
                 onClick={installPrompt}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-primary transition-colors hover:bg-primary/5 hover:border-primary/30"
               >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Install App
+                <Download className="h-4 w-4" aria-hidden="true" />
+                {tNav("installApp")}
               </button>
             )}
 
             <button
+              type="button"
               onClick={logout}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                />
-              </svg>
-              Sign Out
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+              {tCommon("signOut")}
             </button>
           </div>
         ) : null}
@@ -699,19 +478,20 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
 }
 
 export function MobileHeader() {
-  const { setOpen } = useMobileSidebar();
+  const { open, setOpen } = useMobileSidebar();
   const { isOffline } = usePwaContext();
 
   return (
     <div className="md:hidden flex items-center h-14 border-b border-border px-4 bg-card">
       <button
+        type="button"
         onClick={() => setOpen(true)}
-        className="p-2 -ml-2 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        aria-expanded={open}
+        aria-controls="mobile-sidebar"
         aria-label="Open navigation menu"
+        className="p-2 -ml-2 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
       >
-        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
+        <Menu className="h-5 w-5" aria-hidden="true" />
       </button>
       <Link href="/dashboard" className="ml-3">
         <img
@@ -732,6 +512,8 @@ export function MobileHeader() {
 
 function MobileSidebarOverlay() {
   const { open, setOpen } = useMobileSidebar();
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
 
   const close = useCallback(() => setOpen(false), [setOpen]);
 
@@ -757,6 +539,55 @@ function MobileSidebarOverlay() {
     };
   }, [open]);
 
+  // Focus trap + restore focus on close
+  useEffect(() => {
+    if (!open) {
+      // Restore focus when drawer closes
+      previouslyFocused.current?.focus?.();
+      previouslyFocused.current = null;
+      return;
+    }
+
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+
+    const drawer = drawerRef.current;
+    if (!drawer) return;
+
+    const focusableSelector =
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])';
+
+    const getFocusable = () =>
+      Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+        (el) => !el.hasAttribute("aria-hidden") && el.offsetParent !== null
+      );
+
+    // Focus the first focusable element on open
+    const focusables = getFocusable();
+    focusables[0]?.focus();
+
+    const handleTabKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const items = getFocusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    drawer.addEventListener("keydown", handleTabKey);
+    return () => drawer.removeEventListener("keydown", handleTabKey);
+  }, [open]);
+
   return (
     <div
       className={`fixed inset-0 z-50 md:hidden ${open ? "pointer-events-auto" : "pointer-events-none"}`}
@@ -771,6 +602,11 @@ function MobileSidebarOverlay() {
       />
       {/* Drawer */}
       <aside
+        ref={drawerRef}
+        id="mobile-sidebar"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation menu"
         className={`fixed left-0 top-0 h-full w-64 flex flex-col border-r border-border bg-card shadow-xl transition-transform duration-300 ease-in-out ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
