@@ -17,11 +17,15 @@
     "signUp": "회원가입",
     "submitting": "처리 중…",
     "close": "닫기",
-    "confirm": "확인"
+    "confirm": "확인",
+    "skipToContent": "본문으로 건너뛰기"
   },
   "nav": {
     "overview": "개요",
     "explore": "탐색",
+    "insights": "인사이트",
+    "library": "라이브러리",
+    "workspace": "워크스페이스",
     "admin": "관리자",
     "dashboard": "대시보드",
     "sessions": "세션",
@@ -29,7 +33,7 @@
     "analytics": "분석",
     "experiments": "실험",
     "alerts": "알림",
-    "insights": "AI 인사이트",
+    "aiInsights": "AI 인사이트",
     "favorites": "즐겨찾기",
     "templates": "템플릿",
     "marketplace": "마켓플레이스",
@@ -38,7 +42,8 @@
     "settings": "설정",
     "monitoring": "모니터링",
     "users": "사용자",
-    "allowlist": "허용 목록"
+    "allowlist": "허용 목록",
+    "installApp": "앱 설치"
   },
   "auth": {
     "loginTitle": "계정에 로그인",
