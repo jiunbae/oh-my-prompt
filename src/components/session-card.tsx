@@ -17,10 +17,20 @@ interface SessionCardProps {
   totalTokens?: number;
   variant?: "list" | "grid";
   isFavorited?: boolean;
+  /**
+   * BCP47 locale for date formatting (server components must pass this — there's
+   * no client-side `useLocale()` available because this is a server component).
+   * Defaults to "en-US" to preserve behaviour for existing callers.
+   */
+  locale?: string;
+  /** Translated "Untitled Session" string. */
+  untitledLabel?: string;
+  /** Translated "Empty prompt" string. */
+  emptyPromptLabel?: string;
 }
 
-function formatDate(dateStr: string): string {
-  return new Intl.DateTimeFormat("en-US", {
+function formatDate(dateStr: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -56,6 +66,9 @@ export function SessionCard({
   totalTokens,
   variant = "list",
   isFavorited = false,
+  locale = "en-US",
+  untitledLabel = "Untitled Session",
+  emptyPromptLabel = "Empty prompt",
 }: SessionCardProps) {
   if (variant === "grid") {
     return (
@@ -67,18 +80,18 @@ export function SessionCard({
             {/* Title */}
             <div className="flex items-start justify-between gap-1 mb-1">
               <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
-                {displayName || "Untitled Session"}
+                {displayName || untitledLabel}
               </h3>
               <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
             </div>
             {/* Preview */}
             <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-line mb-3">
-              {firstPrompt || "Empty prompt"}
+              {firstPrompt || emptyPromptLabel}
             </p>
 
             {/* Time */}
             <div className="text-xs text-muted-foreground mb-3">
-              {formatDate(startedAt)}
+              {formatDate(startedAt, locale)}
               <span className="mx-1 text-muted-foreground/50">&middot;</span>
               {formatDuration(startedAt, endedAt)}
             </div>
@@ -129,18 +142,18 @@ export function SessionCard({
               <div className="flex items-center gap-1 min-w-0">
                 <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
                 <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
-                  {displayName || firstPrompt || "Empty prompt"}
+                  {displayName || firstPrompt || emptyPromptLabel}
                 </h3>
               </div>
               <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
-                {formatDate(startedAt)}
+                {formatDate(startedAt, locale)}
               </span>
             </div>
 
             {/* First prompt preview (only when displayName exists) */}
             {displayName && (
               <p className="text-xs text-muted-foreground line-clamp-1 whitespace-pre-line mb-2">
-                {firstPrompt || "Empty prompt"}
+                {firstPrompt || emptyPromptLabel}
               </p>
             )}
 

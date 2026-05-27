@@ -16,6 +16,9 @@ interface TimelineSession {
 
 interface SessionTimelineViewProps {
   sessions: TimelineSession[];
+  locale?: string;
+  untitledLabel?: string;
+  emptyPromptLabel?: string;
 }
 
 function formatGroupDate(dateStr: string): string {
@@ -53,7 +56,12 @@ function groupByDate(sessions: TimelineSession[]): Map<string, TimelineSession[]
   return groups;
 }
 
-export function SessionTimelineView({ sessions }: SessionTimelineViewProps) {
+export function SessionTimelineView({
+  sessions,
+  locale,
+  untitledLabel,
+  emptyPromptLabel,
+}: SessionTimelineViewProps) {
   const groups = groupByDate(sessions);
 
   if (sessions.length === 0) {
@@ -99,6 +107,9 @@ export function SessionTimelineView({ sessions }: SessionTimelineViewProps) {
                   deviceName={s.device_name}
                   totalTokens={s.total_tokens}
                   variant="list"
+                  locale={locale}
+                  untitledLabel={untitledLabel}
+                  emptyPromptLabel={emptyPromptLabel}
                 />
               </div>
             ))}
