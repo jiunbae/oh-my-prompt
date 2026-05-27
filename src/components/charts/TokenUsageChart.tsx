@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface TokenUsageChartProps {
   data: Array<{ date: string; tokens: number }>;
@@ -31,11 +32,7 @@ export function TokenUsageChart({ data, isLoading }: TokenUsageChartProps) {
   }
 
   if (data.length === 0 || data.every((d) => d.tokens === 0)) {
-    return (
-      <div className="h-[280px] w-full flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No token usage data</p>
-      </div>
-    );
+    return <ChartEmpty message="No token usage data" />;
   }
 
   const formattedData = data.map((d) => ({
@@ -46,6 +43,8 @@ export function TokenUsageChart({ data, isLoading }: TokenUsageChartProps) {
     }),
   }));
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -55,27 +54,22 @@ export function TokenUsageChart({ data, isLoading }: TokenUsageChartProps) {
             dataKey="displayDate"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             minTickGap={30}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             tickFormatter={formatTick}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
             formatter={(value: number | string | undefined) => [`${formatTick(Number(value ?? 0))} tokens`, "Tokens"]}
           />
-          <Bar dataKey="tokens" fill="var(--chart-3)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="tokens" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

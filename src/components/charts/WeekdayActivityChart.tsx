@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface WeekdayActivityChartProps {
   data: Array<{ day: string; count: number }>;
@@ -37,11 +38,7 @@ export function WeekdayActivityChart({ data, isLoading }: WeekdayActivityChartPr
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return (
-      <div className="h-[280px] w-full flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No weekday activity data</p>
-      </div>
-    );
+    return <ChartEmpty message="No weekday activity data" />;
   }
 
   // Normalize day names and fill missing days
@@ -57,6 +54,8 @@ export function WeekdayActivityChart({ data, isLoading }: WeekdayActivityChartPr
     count: dataMap.get(day) ?? 0,
   }));
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -66,26 +65,21 @@ export function WeekdayActivityChart({ data, isLoading }: WeekdayActivityChartPr
             dataKey="label"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             allowDecimals={false}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
             formatter={(value: number | string | undefined) => [`${value ?? 0} prompts`, "Count"]}
           />
-          <Bar dataKey="count" fill="var(--chart-5)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="count" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

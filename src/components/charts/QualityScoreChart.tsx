@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface QualityScoreChartProps {
   data: Array<{ date: string; avgQuality: number }>;
@@ -28,11 +29,7 @@ export function QualityScoreChart({ data, isLoading }: QualityScoreChartProps) {
   const hasData = data.some((d) => d.avgQuality > 0);
 
   if (data.length === 0 || !hasData) {
-    return (
-      <div className="h-[280px] w-full flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No quality score data</p>
-      </div>
-    );
+    return <ChartEmpty message="No quality score data" />;
   }
 
   const formattedData = data.map((d) => ({
@@ -43,6 +40,8 @@ export function QualityScoreChart({ data, isLoading }: QualityScoreChartProps) {
     }),
   }));
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -52,34 +51,29 @@ export function QualityScoreChart({ data, isLoading }: QualityScoreChartProps) {
             dataKey="displayDate"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             minTickGap={30}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             domain={[0, 100]}
             allowDecimals={false}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
             formatter={(value: number | string | undefined) => [`${Number(value ?? 0).toFixed(1)} / 100`, "Avg Quality"]}
           />
           <Line
             type="monotone"
             dataKey="avgQuality"
-            stroke="var(--chart-2)"
+            stroke={chartColors.primary}
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, fill: "var(--chart-2)" }}
+            activeDot={{ r: 4, fill: chartColors.primary }}
           />
         </LineChart>
       </ResponsiveContainer>
