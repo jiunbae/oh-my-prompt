@@ -2,11 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function RegisterPage() {
+  const tAuth = useTranslations("auth");
+  const tCommon = useTranslations("common");
+  const tAuthErrors = useTranslations("auth.errors");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -23,13 +28,13 @@ export default function RegisterPage() {
 
     // Client-side validation
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError(tAuthErrors("passwordsDontMatch"));
       setLoading(false);
       return;
     }
 
     if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+      setError(tAuthErrors("passwordTooShort"));
       setLoading(false);
       return;
     }
@@ -54,10 +59,10 @@ export default function RegisterPage() {
         setConfirmPassword("");
         setName("");
       } else {
-        setError(data.error || "Registration failed");
+        setError(data.error || tAuthErrors("registrationFailed"));
       }
     } catch {
-      setError("Something went wrong");
+      setError(tAuthErrors("generic"));
     } finally {
       setLoading(false);
     }
@@ -68,16 +73,14 @@ export default function RegisterPage() {
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle>
-              Registration Successful
-            </CardTitle>
+            <CardTitle>{tAuth("registerSuccessTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="text-center">
             <p className="text-muted-foreground mb-4">
-              Your account has been created. You can now sign in.
+              {tAuth("registerSuccessMessage")}
             </p>
             <Link href="/login">
-              <Button className="w-full">Go to Login</Button>
+              <Button className="w-full">{tAuth("goToLogin")}</Button>
             </Link>
           </CardContent>
         </Card>
@@ -97,7 +100,7 @@ export default function RegisterPage() {
             />
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Create your account
+            {tAuth("registerTitle")}
           </p>
         </CardHeader>
         <CardContent>
@@ -105,7 +108,7 @@ export default function RegisterPage() {
             <div>
               <Input
                 type="email"
-                placeholder="Email"
+                placeholder={tAuth("email")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoFocus
@@ -115,7 +118,7 @@ export default function RegisterPage() {
             <div>
               <Input
                 type="text"
-                placeholder="Name (optional)"
+                placeholder={tAuth("nameOptional")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -123,7 +126,7 @@ export default function RegisterPage() {
             <div>
               <Input
                 type="password"
-                placeholder="Password"
+                placeholder={tAuth("password")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -132,7 +135,7 @@ export default function RegisterPage() {
             <div>
               <Input
                 type="password"
-                placeholder="Confirm Password"
+                placeholder={tAuth("confirmPassword")}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
@@ -146,13 +149,13 @@ export default function RegisterPage() {
               className="w-full"
               disabled={loading || !email || !password || !confirmPassword}
             >
-              {loading ? "..." : "Register"}
+              {loading ? "..." : tAuth("register")}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
+            {tAuth("alreadyHaveAccount")}{" "}
             <Link href="/login" className="text-primary hover:text-primary/80">
-              Sign in
+              {tCommon("signIn")}
             </Link>
           </div>
         </CardContent>
