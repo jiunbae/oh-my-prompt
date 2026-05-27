@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { MiniActivityChart } from "@/components/charts/mini-activity-chart";
@@ -16,11 +17,34 @@ export const dynamic = "force-dynamic";
 
 const getCurrentUser = getSessionUser;
 
-function getGreeting(): string {
+// T3's _chart-helpers isn't merged yet — inline fallback for now.
+// `betterDirection` says which direction of change is "good".
+// Returns Tailwind text-color class:
+//   improving  → text-chart-3 (semantic positive)
+//   regressing → text-destructive
+//   neutral    → text-muted-foreground
+type BetterDirection = "up" | "down";
+function deltaColorClass(delta: number, betterDirection: BetterDirection = "up"): string {
+  if (delta === 0) return "text-muted-foreground";
+  const isImproving = betterDirection === "up" ? delta > 0 : delta < 0;
+  return isImproving ? "text-chart-3" : "text-destructive";
+}
+
+// Fallback for chartColors.categorical (T3 helper not yet merged).
+// Cycles through chart-1..chart-5 CSS vars so each project gets a distinct color.
+const CATEGORICAL_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+];
+
+function getGreetingKey(): "greetingMorning" | "greetingAfternoon" | "greetingEvening" {
   const hour = new Date().getHours();
-  if (hour < 12) return "Good morning";
-  if (hour < 18) return "Good afternoon";
-  return "Good evening";
+  if (hour < 12) return "greetingMorning";
+  if (hour < 18) return "greetingAfternoon";
+  return "greetingEvening";
 }
 
 function formatTimeAgo(dateStr: string): string {
@@ -31,23 +55,78 @@ function formatTimeAgo(dateStr: string): string {
   return `${Math.round(ms / 86_400_000)}d ago`;
 }
 
-function DeltaBadge({ current, previous }: { current: number; previous: number }) {
+/**
+ * Big hero delta badge.
+ * - Bigger arrow + percentage (vs. raw delta), tinted by `betterDirection`.
+ */
+function HeroDeltaBadge({
+  current,
+  previous,
+  betterDirection = "up",
+}: {
+  current: number;
+  previous: number;
+  betterDirection?: BetterDirection;
+}) {
   if (current === 0 && previous === 0) return null;
   const delta = current - previous;
-  if (delta === 0) return <span className="text-xs text-muted-foreground">same</span>;
+  // Percentage change. Guard divide-by-zero by falling back to "new" indicator.
+  let pctLabel: string;
+  if (previous === 0) {
+    pctLabel = current > 0 ? "+∞" : "0%";
+  } else {
+    const pct = Math.round((delta / previous) * 100);
+    pctLabel = `${pct > 0 ? "+" : ""}${pct}%`;
+  }
+  const color = deltaColorClass(delta, betterDirection);
+  const isZero = delta === 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full bg-secondary/60 px-2.5 py-1 text-sm font-semibold tabular-nums ${color}`}
+    >
+      {!isZero &&
+        (delta > 0 ? (
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
+          </svg>
+        ) : (
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+          </svg>
+        ))}
+      {pctLabel}
+    </span>
+  );
+}
+
+/** Compact delta badge used in the supporting cards. */
+function DeltaBadge({
+  current,
+  previous,
+  betterDirection = "up",
+}: {
+  current: number;
+  previous: number;
+  betterDirection?: BetterDirection;
+}) {
+  if (current === 0 && previous === 0) return null;
+  const delta = current - previous;
+  if (delta === 0) return <span className="t-caption text-muted-foreground">same</span>;
+  const color = deltaColorClass(delta, betterDirection);
   const isPositive = delta > 0;
   return (
-    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${isPositive ? "text-chart-2" : "text-destructive"}`}>
+    <span className={`inline-flex items-center gap-0.5 t-caption tabular-nums ${color}`}>
       {isPositive ? (
-        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
         </svg>
       ) : (
-        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       )}
-      {isPositive ? "+" : ""}{formatNumber(delta)}
+      {isPositive ? "+" : ""}
+      {formatNumber(delta)}
     </span>
   );
 }
@@ -57,6 +136,7 @@ export default async function DashboardPage() {
   if (!user) redirect("/login");
 
   const data = await getDashboardData(user.userId);
+  const t = await getTranslations("dashboard");
 
   if (!data) {
     return (
@@ -67,14 +147,15 @@ export default async function DashboardPage() {
   }
 
   const userName = user.email.split("@")[0];
+  const greeting = t(getGreetingKey());
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">
-            {getGreeting()}, {userName}
+          <h1 className="t-h1">
+            {greeting}, {userName}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Here&apos;s your prompt activity overview
@@ -84,8 +165,8 @@ export default async function DashboardPage() {
           href="/analytics"
           className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
         >
-          View Insights
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {t("viewInsights")}
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         </Link>
@@ -94,26 +175,73 @@ export default async function DashboardPage() {
       {/* Onboarding Checklist */}
       <OnboardingChecklist hasAnySessions={data.today.sessions > 0 || data.recentSessions.length > 0} />
 
-      {/* Today's Snapshot */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: "Prompts Today", value: data.today.prompts, prev: data.yesterday.prompts },
-          { label: "Tokens Today", value: data.today.tokens, prev: data.yesterday.tokens, fmt: true },
-          { label: "Sessions Today", value: data.today.sessions, prev: data.yesterday.sessions },
-          { label: "Active Projects", value: data.today.projects, prev: data.yesterday.projects },
-        ].map((item) => (
-          <Card key={item.label} variant="elevated">
+      {/* Hero KPI — full width on mobile, col-span-2 on md/lg (of a 2-col grid). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card variant="elevated" className="md:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="t-caption uppercase tracking-wider text-muted-foreground font-medium">
+              {t("kpi.promptsToday")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-end gap-4 flex-wrap">
+              <div className="t-display tabular-nums text-foreground">{data.today.prompts}</div>
+              <HeroDeltaBadge
+                current={data.today.prompts}
+                previous={data.yesterday.prompts}
+                betterDirection="up"
+              />
+            </div>
+            <p className="t-caption text-muted-foreground mt-2">{t("kpi.vsYesterday")}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Three supporting cards on a 3-col grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {(
+          [
+            {
+              label: t("kpi.tokensToday"),
+              value: data.today.tokens,
+              prev: data.yesterday.tokens,
+              fmt: true,
+              // Note: chose 'up' so growth reads as positive (total usage is the user-visible
+              // story). If we ever want "less consumption is better" semantics, flip to 'down'.
+              betterDirection: "up" as const,
+            },
+            {
+              label: t("kpi.sessionsToday"),
+              value: data.today.sessions,
+              prev: data.yesterday.sessions,
+              betterDirection: "up" as const,
+            },
+            {
+              label: t("kpi.activeProjects"),
+              value: data.today.projects,
+              prev: data.yesterday.projects,
+              betterDirection: "up" as const,
+            },
+          ]
+        ).map((item) => (
+          <Card key={item.label} variant="default">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{item.label}</CardTitle>
+              <CardTitle className="t-caption text-muted-foreground font-medium">
+                {item.label}
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-baseline gap-2">
-                <div className="text-3xl font-bold text-foreground">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <div className="t-h1 tabular-nums text-foreground">
                   {item.fmt ? formatNumber(item.value) : item.value}
                 </div>
-                <DeltaBadge current={item.value} previous={item.prev} />
+                <DeltaBadge
+                  current={item.value}
+                  previous={item.prev}
+                  betterDirection={item.betterDirection}
+                />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">vs. yesterday</p>
+              <p className="t-caption text-muted-foreground mt-1">{t("kpi.vsYesterday")}</p>
             </CardContent>
           </Card>
         ))}
@@ -123,7 +251,7 @@ export default async function DashboardPage() {
       <div className="grid md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>This Week</CardTitle>
+            <CardTitle>{t("thisWeek")}</CardTitle>
           </CardHeader>
           <CardContent>
             <MiniActivityChart data={data.last7Days} />
@@ -144,31 +272,60 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Top Projects</CardTitle>
-              <span className="text-xs text-muted-foreground">Last 7 days</span>
+              <CardTitle>{t("topProjects")}</CardTitle>
+              <span className="text-xs text-muted-foreground">{t("lastNDays", { n: 7 })}</span>
             </div>
           </CardHeader>
           <CardContent>
             {data.topProjects.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">No project activity this week</p>
             ) : (
-              <div className="space-y-3">
-                {data.topProjects.map((p) => {
-                  const maxCount = data.topProjects[0]?.count ?? 1;
-                  const pct = (p.count / maxCount) * 100;
-                  return (
-                    <div key={p.project} className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-foreground font-medium truncate">{p.project}</span>
-                        <span className="text-muted-foreground shrink-0 ml-2">{p.count}</span>
-                      </div>
-                      <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
-                      </div>
+              (() => {
+                const maxCount = data.topProjects[0]?.count ?? 1;
+                // Tick marks at 25/50/75/100% of max — give users an absolute scale.
+                const ticks = [0.25, 0.5, 0.75, 1];
+                return (
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      {data.topProjects.map((p, i) => {
+                        const pct = (p.count / maxCount) * 100;
+                        const color = CATEGORICAL_COLORS[i % CATEGORICAL_COLORS.length];
+                        return (
+                          <div key={p.project} className="space-y-1">
+                            <div className="flex justify-between text-sm gap-2">
+                              <span className="text-foreground font-medium truncate">{p.project}</span>
+                              <span className="text-muted-foreground shrink-0 tabular-nums">
+                                {p.count} prompts
+                              </span>
+                            </div>
+                            <div className="relative h-1.5 bg-secondary rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{ width: `${pct}%`, backgroundColor: color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                    {/* Tick scale: absolute counts at 25/50/75/100% of the leader */}
+                    <div className="relative h-4 mt-1" aria-hidden>
+                      {ticks.map((frac) => (
+                        <div
+                          key={frac}
+                          className="absolute top-0 flex flex-col items-center -translate-x-1/2"
+                          style={{ left: `${frac * 100}%` }}
+                        >
+                          <div className="h-1 w-px bg-border" />
+                          <span className="t-caption text-muted-foreground tabular-nums leading-none mt-0.5">
+                            {Math.round(maxCount * frac)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </CardContent>
         </Card>
@@ -178,9 +335,9 @@ export default async function DashboardPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>Recent Sessions</CardTitle>
+            <CardTitle>{t("recentSessions")}</CardTitle>
             <Link href="/sessions" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              View all
+              {t("viewAll")}
             </Link>
           </div>
         </CardHeader>
@@ -247,18 +404,18 @@ export default async function DashboardPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Token Usage</CardTitle>
-              <span className="text-xs text-muted-foreground">Last 7 days</span>
+              <span className="text-xs text-muted-foreground">{t("lastNDays", { n: 7 })}</span>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-md bg-secondary/50 p-2">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total</p>
-                <p className="text-sm font-semibold text-foreground">{formatNumber(data.tokenUsage.totalTokens)}</p>
+                <p className="text-sm font-semibold text-foreground tabular-nums">{formatNumber(data.tokenUsage.totalTokens)}</p>
               </div>
               <div className="rounded-md bg-secondary/50 p-2">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Avg / Prompt</p>
-                <p className="text-sm font-semibold text-foreground">{formatNumber(data.tokenUsage.avgPerPrompt)}</p>
+                <p className="text-sm font-semibold text-foreground tabular-nums">{formatNumber(data.tokenUsage.avgPerPrompt)}</p>
               </div>
             </div>
             <div>
@@ -276,7 +433,7 @@ export default async function DashboardPage() {
                       <div key={p.project} className="space-y-0.5">
                         <div className="flex justify-between text-xs">
                           <span className="text-foreground truncate">{p.project}</span>
-                          <span className="text-muted-foreground shrink-0 ml-2">{formatNumber(p.tokens)}</span>
+                          <span className="text-muted-foreground shrink-0 ml-2 tabular-nums">{formatNumber(p.tokens)}</span>
                         </div>
                         <div className="h-1 bg-secondary rounded-full overflow-hidden">
                           <div className="h-full bg-chart-1 rounded-full" style={{ width: `${pct}%` }} />
@@ -299,18 +456,18 @@ export default async function DashboardPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Prompt Quality</CardTitle>
-              <span className="text-xs text-muted-foreground">Last 7 days</span>
+              <span className="text-xs text-muted-foreground">{t("lastNDays", { n: 7 })}</span>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-md bg-secondary/50 p-2">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Avg Score</p>
-                <p className="text-sm font-semibold text-foreground">{data.quality.avgScore}/100</p>
+                <p className="text-sm font-semibold text-foreground tabular-nums">{data.quality.avgScore}/100</p>
               </div>
               <div className="rounded-md bg-secondary/50 p-2">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Scored</p>
-                <p className="text-sm font-semibold text-foreground">{data.quality.totalScored}</p>
+                <p className="text-sm font-semibold text-foreground tabular-nums">{data.quality.totalScored}</p>
               </div>
             </div>
             <div>
@@ -344,7 +501,7 @@ export default async function DashboardPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Topics</CardTitle>
-              <span className="text-xs text-muted-foreground">Last 7 days</span>
+              <span className="text-xs text-muted-foreground">{t("lastNDays", { n: 7 })}</span>
             </div>
           </CardHeader>
           <CardContent>
@@ -352,15 +509,15 @@ export default async function DashboardPage() {
               <p className="text-sm text-muted-foreground py-4 text-center">No topic data yet</p>
             ) : (
               <div className="space-y-2.5">
-                {data.topics.map((t) => {
+                {data.topics.map((tp) => {
                   const maxCount = data.topics[0]?.count ?? 1;
-                  const pct = (t.count / maxCount) * 100;
+                  const pct = (tp.count / maxCount) * 100;
                   return (
-                    <Link key={t.tag} href={`/prompts?tag=${encodeURIComponent(t.tag)}`} className="block group">
+                    <Link key={tp.tag} href={`/prompts?tag=${encodeURIComponent(tp.tag)}`} className="block group">
                       <div className="space-y-1">
                         <div className="flex justify-between text-sm">
-                          <span className="text-foreground font-medium group-hover:text-primary transition-colors">{t.tag}</span>
-                          <span className="text-muted-foreground shrink-0 ml-2">{t.count}</span>
+                          <span className="text-foreground font-medium group-hover:text-primary transition-colors">{tp.tag}</span>
+                          <span className="text-muted-foreground shrink-0 ml-2 tabular-nums">{tp.count}</span>
                         </div>
                         <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                           <div className="h-full bg-chart-5 rounded-full transition-all" style={{ width: `${pct}%` }} />
