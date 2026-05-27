@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import {
   CartesianGrid,
   Line,
@@ -15,9 +16,22 @@ import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 interface QualityScoreChartProps {
   data: Array<{ date: string; avgQuality: number }>;
   isLoading?: boolean;
+  emptyMessage?: string;
+  /** Tooltip series label (e.g. "Avg Quality"). */
+  tooltipLabel?: string;
+  /** Format the toFixed(1) string into "X / 100"-style tooltip value. */
+  formatTooltipValue?: (formatted: string) => string;
 }
 
-export function QualityScoreChart({ data, isLoading }: QualityScoreChartProps) {
+export function QualityScoreChart({
+  data,
+  isLoading,
+  emptyMessage = "No quality score data",
+  tooltipLabel = "Avg Quality",
+  formatTooltipValue,
+}: QualityScoreChartProps) {
+  const locale = useLocale();
+
   if (isLoading) {
     return (
       <div className="h-[280px] w-full">
@@ -29,12 +43,12 @@ export function QualityScoreChart({ data, isLoading }: QualityScoreChartProps) {
   const hasData = data.some((d) => d.avgQuality > 0);
 
   if (data.length === 0 || !hasData) {
-    return <ChartEmpty message="No quality score data" />;
+    return <ChartEmpty message={emptyMessage} />;
   }
 
   const formattedData = data.map((d) => ({
     ...d,
-    displayDate: new Date(d.date + "T12:00:00Z").toLocaleDateString("en-US", {
+    displayDate: new Date(d.date + "T12:00:00Z").toLocaleDateString(locale, {
       month: "short",
       day: "numeric",
     }),
@@ -65,7 +79,13 @@ export function QualityScoreChart({ data, isLoading }: QualityScoreChartProps) {
             contentStyle={tooltipStyles.contentStyle}
             labelStyle={tooltipStyles.labelStyle}
             itemStyle={tooltipStyles.itemStyle}
-            formatter={(value: number | string | undefined) => [`${Number(value ?? 0).toFixed(1)} / 100`, "Avg Quality"]}
+            formatter={(value: number | string | undefined) => {
+              const formatted = Number(value ?? 0).toFixed(1);
+              return [
+                formatTooltipValue ? formatTooltipValue(formatted) : `${formatted} / 100`,
+                tooltipLabel,
+              ];
+            }}
           />
           <Line
             type="monotone"

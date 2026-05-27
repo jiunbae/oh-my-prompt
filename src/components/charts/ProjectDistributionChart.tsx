@@ -15,9 +15,14 @@ import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 interface ProjectDistributionChartProps {
   data: Array<{ name: string; count: number }>;
   isLoading?: boolean;
+  emptyMessage?: string;
 }
 
-export function ProjectDistributionChart({ data, isLoading }: ProjectDistributionChartProps) {
+export function ProjectDistributionChart({
+  data,
+  isLoading,
+  emptyMessage = "No project distribution data",
+}: ProjectDistributionChartProps) {
   const id = useId();
 
   if (isLoading) {
@@ -29,7 +34,7 @@ export function ProjectDistributionChart({ data, isLoading }: ProjectDistributio
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return <ChartEmpty message="No project distribution data" />;
+    return <ChartEmpty message={emptyMessage} />;
   }
 
   // Top 8 projects, group rest as "Other"

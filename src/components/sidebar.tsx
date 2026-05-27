@@ -191,15 +191,13 @@ function TeamSwitcher() {
   const { teams, selectedTeamId, selectTeam, loading } = useTeam();
   const [open, setOpen] = useState(false);
   const { user } = useUser();
+  const tNav = useTranslations("nav");
 
   const selectedTeam = teams.find((t) => t.id === selectedTeamId);
 
   if (loading || !user) return null;
 
-  // NOTE: "Personal", "Select team", and "Manage Teams" use plain English literals
-  // because their translation keys are not present in messages/{en,ko}.json and
-  // adding them would exceed the scoped "minimal exception" for this branch.
-  const personalLabel = "Personal";
+  const personalLabel = tNav("personal");
 
   return (
     <div className="px-3 pb-3">
@@ -264,7 +262,7 @@ function TeamSwitcher() {
               className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               <Plus className="h-3 w-3" aria-hidden="true" />
-              Manage Teams
+              {tNav("manageTeams")}
             </Link>
           </div>
         </div>
@@ -333,7 +331,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
         <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/20">
           <p className="text-xs text-destructive flex items-center gap-1.5">
             <AlertCircle className="h-3 w-3" aria-hidden="true" />
-            Offline mode — syncing disabled
+            {tCommon("offline")}
           </p>
         </div>
       )}
@@ -480,6 +478,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
 export function MobileHeader() {
   const { open, setOpen } = useMobileSidebar();
   const { isOffline } = usePwaContext();
+  const tCommon = useTranslations("common");
 
   return (
     <div className="md:hidden flex items-center h-14 border-b border-border px-4 bg-card">
@@ -488,7 +487,7 @@ export function MobileHeader() {
         onClick={() => setOpen(true)}
         aria-expanded={open}
         aria-controls="mobile-sidebar"
-        aria-label="Open navigation menu"
+        aria-label={tCommon("openNav")}
         className="p-2 -ml-2 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
       >
         <Menu className="h-5 w-5" aria-hidden="true" />

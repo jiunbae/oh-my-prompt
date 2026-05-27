@@ -15,6 +15,7 @@ import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 interface HourlyActivityChartProps {
   data: Array<{ hour: number; count: number }>;
   isLoading?: boolean;
+  emptyMessage?: string;
 }
 
 function formatHour(hour: number): string {
@@ -23,7 +24,11 @@ function formatHour(hour: number): string {
   return `${h} ${ampm}`;
 }
 
-export function HourlyActivityChart({ data, isLoading }: HourlyActivityChartProps) {
+export function HourlyActivityChart({
+  data,
+  isLoading,
+  emptyMessage = "No hourly activity data",
+}: HourlyActivityChartProps) {
   if (isLoading) {
     return (
       <div className="h-[280px] w-full">
@@ -33,7 +38,7 @@ export function HourlyActivityChart({ data, isLoading }: HourlyActivityChartProp
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return <ChartEmpty message="No hourly activity data" />;
+    return <ChartEmpty message={emptyMessage} />;
   }
 
   // Fill all 24 hours

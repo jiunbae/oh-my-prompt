@@ -15,6 +15,11 @@ import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 interface WeekdayActivityChartProps {
   data: Array<{ day: string; count: number }>;
   isLoading?: boolean;
+  emptyMessage?: string;
+  /** Tooltip series label (e.g. "Count"). */
+  tooltipLabel?: string;
+  /** Format the raw value into the tooltip's value text (e.g. "{n} prompts"). */
+  formatTooltipValue?: (value: number | string | undefined) => string;
 }
 
 const DAY_ORDER = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -28,7 +33,13 @@ const DAY_LABELS: Record<string, string> = {
   Sat: "Sat",
 };
 
-export function WeekdayActivityChart({ data, isLoading }: WeekdayActivityChartProps) {
+export function WeekdayActivityChart({
+  data,
+  isLoading,
+  emptyMessage = "No weekday activity data",
+  tooltipLabel = "Count",
+  formatTooltipValue,
+}: WeekdayActivityChartProps) {
   if (isLoading) {
     return (
       <div className="h-[280px] w-full">
@@ -38,7 +49,7 @@ export function WeekdayActivityChart({ data, isLoading }: WeekdayActivityChartPr
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return <ChartEmpty message="No weekday activity data" />;
+    return <ChartEmpty message={emptyMessage} />;
   }
 
   // Normalize day names and fill missing days
@@ -77,7 +88,10 @@ export function WeekdayActivityChart({ data, isLoading }: WeekdayActivityChartPr
             contentStyle={tooltipStyles.contentStyle}
             labelStyle={tooltipStyles.labelStyle}
             itemStyle={tooltipStyles.itemStyle}
-            formatter={(value: number | string | undefined) => [`${value ?? 0} prompts`, "Count"]}
+            formatter={(value: number | string | undefined) => [
+              formatTooltipValue ? formatTooltipValue(value) : `${value ?? 0} prompts`,
+              tooltipLabel,
+            ]}
           />
           <Bar dataKey="count" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>

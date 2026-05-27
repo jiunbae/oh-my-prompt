@@ -11,6 +11,7 @@ import { eq, and, gte, lte, sql, desc, inArray, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getLocale, getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
@@ -179,10 +180,17 @@ function PaginationNav({
   currentPage,
   totalPages,
   buildPageUrl,
+  labels,
 }: {
   currentPage: number;
   totalPages: number;
   buildPageUrl: (page: number) => string;
+  labels: {
+    aria: string;
+    previous: string;
+    next: string;
+    page: (n: number) => string;
+  };
 }) {
   // Generate page numbers to display
   const getPageNumbers = (): (number | "ellipsis")[] => {
@@ -204,12 +212,12 @@ function PaginationNav({
   };
 
   return (
-    <nav className="flex items-center justify-center gap-2 sm:gap-1" aria-label="Session list pagination">
+    <nav className="flex items-center justify-center gap-2 sm:gap-1" aria-label={labels.aria}>
       {currentPage > 1 && (
         <Link
           href={buildPageUrl(currentPage - 1)}
           className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:h-9 sm:w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          aria-label="Go to previous page"
+          aria-label={labels.previous}
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -231,7 +239,7 @@ function PaginationNav({
                 ? "bg-primary text-primary-foreground"
                 : "border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
             }`}
-            aria-label={`Go to page ${page}`}
+            aria-label={labels.page(page)}
             aria-current={page === currentPage ? "page" : undefined}
           >
             {page}
@@ -243,7 +251,7 @@ function PaginationNav({
         <Link
           href={buildPageUrl(currentPage + 1)}
           className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 sm:h-9 sm:w-9 rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          aria-label="Go to next page"
+          aria-label={labels.next}
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -262,6 +270,10 @@ export default async function SessionsPage({
   const params = await searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+
+  const tSessions = await getTranslations("sessions");
+  const tNav = await getTranslations("nav");
+  const locale = await getLocale();
 
   const activeTab = params.tab === "shared" ? "shared" : params.tab === "favorites" ? "favorites" : "all";
   const viewMode = (params.view as ViewMode) || "list";
@@ -301,13 +313,13 @@ export default async function SessionsPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Sessions</h1>
+          <h1 className="text-2xl font-semibold text-foreground">{tNav("sessions")}</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {activeTab === "shared"
-              ? "Manage your shared session links"
+              ? tSessions("subtitleShared")
               : activeTab === "favorites"
-              ? `Your favorite sessions (${totalCount} total)`
-              : `Browse your Claude Code sessions (${totalCount} total)`}
+              ? tSessions("subtitleFavorites", { n: totalCount })
+              : tSessions("subtitleAll", { n: totalCount })}
           </p>
         </div>
         {(activeTab === "all" || activeTab === "favorites") && <SessionViewToggle currentView={viewMode} />}
@@ -323,7 +335,7 @@ export default async function SessionsPage({
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
-          All Sessions
+          {tSessions("tabs.all")}
         </Link>
         <Link
           href="/sessions?tab=favorites"
@@ -336,7 +348,7 @@ export default async function SessionsPage({
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </svg>
-          Favorites
+          {tSessions("tabs.favorites")}
           {favoriteSessionIds.size > 0 && (
             <span className="text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
               {favoriteSessionIds.size}
@@ -354,7 +366,7 @@ export default async function SessionsPage({
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
           </svg>
-          Shared
+          {tSessions("tabs.shared")}
         </Link>
       </div>
 
@@ -379,16 +391,16 @@ export default async function SessionsPage({
 
       {error ? (
         <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
-          <p className="font-medium">Failed to load sessions</p>
-          <p className="mt-1 opacity-80">A database error occurred. Please try again later.</p>
+          <p className="font-medium">{tSessions("error.failedToLoad")}</p>
+          <p className="mt-1 opacity-80">{tSessions("error.dbError")}</p>
         </div>
       ) : sessions.length === 0 ? (
         <div className="text-center py-12 text-muted-foreground">
-          <p>No sessions found.</p>
+          <p>{tSessions("empty.none")}</p>
           <p className="text-sm mt-1">
             {activeTab === "favorites"
-              ? "Star a session to add it to your favorites."
-              : "Sessions are created when prompts share a session ID."}
+              ? tSessions("empty.favoritesHelp")
+              : tSessions("empty.allHelp")}
           </p>
         </div>
       ) : viewMode === "grid" ? (
@@ -409,11 +421,19 @@ export default async function SessionsPage({
               totalTokens={s.total_tokens}
               variant="grid"
               isFavorited={favoriteSessionIds.has(s.session_id)}
+              locale={locale}
+              untitledLabel={tSessions("card.untitled")}
+              emptyPromptLabel={tSessions("card.emptyPrompt")}
             />
           ))}
         </div>
       ) : viewMode === "timeline" ? (
-        <SessionTimelineView sessions={sessions} />
+        <SessionTimelineView
+          sessions={sessions}
+          locale={locale}
+          untitledLabel={tSessions("card.untitled")}
+          emptyPromptLabel={tSessions("card.emptyPrompt")}
+        />
       ) : (
         <div className="space-y-3">
           {sessions.map((s) => (
@@ -432,6 +452,9 @@ export default async function SessionsPage({
               totalTokens={s.total_tokens}
               variant="list"
               isFavorited={favoriteSessionIds.has(s.session_id)}
+              locale={locale}
+              untitledLabel={tSessions("card.untitled")}
+              emptyPromptLabel={tSessions("card.emptyPrompt")}
             />
           ))}
         </div>
@@ -442,6 +465,12 @@ export default async function SessionsPage({
           currentPage={currentPage}
           totalPages={totalPages}
           buildPageUrl={buildPageUrl}
+          labels={{
+            aria: tSessions("pagination.aria"),
+            previous: tSessions("pagination.previous"),
+            next: tSessions("pagination.next"),
+            page: (n: number) => tSessions("pagination.page", { n }),
+          }}
         />
       )}
       </>
