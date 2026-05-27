@@ -118,9 +118,23 @@ export function parseSessionToken(token: string): SessionPayload | null {
  */
 export const AUTH_COOKIE_NAME = "auth_session";
 
+/**
+ * Whether to mark the auth cookie `Secure` (HTTPS-only).
+ *
+ * Defaults to `true` in production so HTTPS deployments stay safe.
+ * Set `COOKIE_SECURE=false` to opt out — needed for plain-HTTP deployments
+ * (e.g. an internal host with no TLS terminator in front), where a `Secure`
+ * cookie would be silently dropped by the browser and login would appear
+ * to succeed but no session would be established.
+ */
+const COOKIE_SECURE =
+  process.env.COOKIE_SECURE != null
+    ? process.env.COOKIE_SECURE === "true"
+    : process.env.NODE_ENV === "production";
+
 export const AUTH_COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
+  secure: COOKIE_SECURE,
   sameSite: "lax" as const,
   maxAge: 60 * 60 * 24 * 7, // 7 days
   path: "/",
