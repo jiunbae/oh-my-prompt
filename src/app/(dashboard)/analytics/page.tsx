@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import {
+  Dropdown,
+  DropdownTrigger,
+  DropdownContent,
+} from "@/components/ui/dropdown";
 import { useTeam } from "@/contexts/team-context";
 import { PromptVolumeChart } from "@/components/charts/PromptVolumeChart";
 import { TokenUsageChart } from "@/components/charts/TokenUsageChart";
@@ -34,12 +41,12 @@ interface InsightsData {
 
 type DateRange = "7" | "30" | "90" | "custom";
 
-const RANGE_LABELS: Record<string, string> = {
-  "7": "Last 7 days",
-  "30": "Last 30 days",
-  "90": "Last 90 days",
-  custom: "Custom",
-};
+const RANGE_OPTIONS: ReadonlyArray<{ value: DateRange; label: string }> = [
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
+  { value: "custom", label: "Custom" },
+];
 
 function toDateInputValue(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -47,14 +54,13 @@ function toDateInputValue(date: Date): string {
 
 export default function AnalyticsPage() {
   const { selectedTeamId, isTeamContext } = useTeam();
+  const tDash = useTranslations("dashboard");
 
   const [range, setRange] = useState<DateRange>("30");
   const [customFrom, setCustomFrom] = useState<string>("");
   const [customTo, setCustomTo] = useState<string>("");
   const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
-  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
-  const [showSourceDropdown, setShowSourceDropdown] = useState(false);
 
   const [trendsData, setTrendsData] = useState<TrendsData | null>(null);
   const [insightsData, setInsightsData] = useState<InsightsData | null>(null);
@@ -115,18 +121,21 @@ export default function AnalyticsPage() {
     fetchData();
   }, [fetchData]);
 
-  // Close dropdowns on outside click
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as HTMLElement;
-      if (!target.closest("[data-project-dropdown]")) setShowProjectDropdown(false);
-      if (!target.closest("[data-source-dropdown]")) setShowSourceDropdown(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const summary = trendsData?.summary;
+
+  const handleRangeChange = (next: DateRange) => {
+    setRange(next);
+    if (next === "custom") {
+      if (!customFrom) {
+        const d = new Date();
+        d.setDate(d.getDate() - 30);
+        setCustomFrom(toDateInputValue(d));
+      }
+      if (!customTo) {
+        setCustomTo(toDateInputValue(new Date()));
+      }
+    }
+  };
 
   const toggleProject = (name: string) => {
     setSelectedProjects((prev) =>
@@ -152,7 +161,7 @@ export default function AnalyticsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Analytics</h1>
+          <h1 className="t-h1">Analytics</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {isTeamContext
               ? "Team-scoped prompt analytics"
@@ -162,47 +171,17 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col lg:flex-row gap-3">
-        {/* Date range */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground font-medium mr-1">Period:</span>
-          <div className="inline-flex rounded-lg border border-border overflow-hidden">
-            {(["7", "30", "90"] as DateRange[]).map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => setRange(preset)}
-                className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  range === preset
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
-              >
-                {RANGE_LABELS[preset]}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                setRange("custom");
-                if (!customFrom) {
-                  const d = new Date();
-                  d.setDate(d.getDate() - 30);
-                  setCustomFrom(toDateInputValue(d));
-                }
-                if (!customTo) {
-                  setCustomTo(toDateInputValue(new Date()));
-                }
-              }}
-              className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                range === "custom"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
-              }`}
-            >
-              Custom
-            </button>
-          </div>
+      <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+        {/* Date range — SegmentedControl */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground font-medium">Period:</span>
+          <SegmentedControl<DateRange>
+            value={range}
+            onValueChange={handleRangeChange}
+            options={RANGE_OPTIONS}
+            aria-label="Date range"
+            size="sm"
+          />
         </div>
 
         {/* Custom date inputs */}
@@ -224,86 +203,145 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {/* Project multi-select */}
-        <div className="relative" data-project-dropdown>
-          <button
-            type="button"
-            onClick={() => setShowProjectDropdown(!showProjectDropdown)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-foreground hover:bg-accent transition-colors"
-          >
-            <svg className="h-3.5 w-3.5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-            </svg>
-            Projects
-            {selectedProjects.length > 0 && (
-              <Badge variant="default" className="text-[10px] px-1.5 py-0">
-                {selectedProjects.length}
-              </Badge>
-            )}
-            <svg className={`h-3 w-3 text-muted-foreground transition-transform ${showProjectDropdown ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {showProjectDropdown && trendsData && trendsData.availableProjects.length > 0 && (
-            <div className="absolute z-50 mt-1 w-56 rounded-lg border border-border bg-card shadow-lg p-2 space-y-1">
-              {trendsData.availableProjects.map((p) => (
-                <label
-                  key={p.name}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-foreground hover:bg-accent/50 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedProjects.includes(p.name)}
-                    onChange={() => toggleProject(p.name)}
-                    className="rounded border-border text-primary focus:ring-primary"
-                  />
-                  <span className="truncate flex-1">{p.name}</span>
-                  <span className="text-muted-foreground shrink-0">{p.count}</span>
-                </label>
-              ))}
-            </div>
-          )}
+        {/* Project multi-select — Dropdown */}
+        <div className="relative">
+          <Dropdown>
+            <DropdownTrigger
+              className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-foreground hover:bg-accent transition-colors"
+            >
+              <svg
+                className="h-3.5 w-3.5 text-muted-foreground"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                />
+              </svg>
+              Projects
+              {selectedProjects.length > 0 && (
+                <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                  {selectedProjects.length}
+                </Badge>
+              )}
+              <svg
+                className="h-3 w-3 text-muted-foreground"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </DropdownTrigger>
+            {/*
+              Multi-select: each row is a <label> wrapping a checkbox. We do NOT
+              use <DropdownItem> because items auto-close on activation, which
+              would break repeated selection. The container still has role=menu
+              from DropdownContent; the labels participate in keyboard nav via
+              the checkbox's native focusability.
+            */}
+            <DropdownContent align="start" className="w-56 p-2 space-y-1">
+              {trendsData && trendsData.availableProjects.length > 0 ? (
+                trendsData.availableProjects.map((p) => (
+                  <label
+                    key={p.name}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-foreground hover:bg-accent/50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedProjects.includes(p.name)}
+                      onChange={() => toggleProject(p.name)}
+                      className="rounded border-border text-primary focus:ring-primary"
+                    />
+                    <span className="truncate flex-1">{p.name}</span>
+                    <span className="text-muted-foreground shrink-0 tabular-nums">
+                      {p.count}
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">No projects</p>
+              )}
+            </DropdownContent>
+          </Dropdown>
         </div>
 
-        {/* Source multi-select */}
-        <div className="relative" data-source-dropdown>
-          <button
-            type="button"
-            onClick={() => setShowSourceDropdown(!showSourceDropdown)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-foreground hover:bg-accent transition-colors"
-          >
-            <svg className="h-3.5 w-3.5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            Sources
-            {selectedSources.length > 0 && (
-              <Badge variant="default" className="text-[10px] px-1.5 py-0">
-                {selectedSources.length}
-              </Badge>
-            )}
-            <svg className={`h-3 w-3 text-muted-foreground transition-transform ${showSourceDropdown ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-          {showSourceDropdown && trendsData && trendsData.availableSources.length > 0 && (
-            <div className="absolute z-50 mt-1 w-56 rounded-lg border border-border bg-card shadow-lg p-2 space-y-1">
-              {trendsData.availableSources.map((s) => (
-                <label
-                  key={s.name}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-foreground hover:bg-accent/50 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedSources.includes(s.name)}
-                    onChange={() => toggleSource(s.name)}
-                    className="rounded border-border text-primary focus:ring-primary"
-                  />
-                  <span className="truncate flex-1">{s.name}</span>
-                  <span className="text-muted-foreground shrink-0">{s.count}</span>
-                </label>
-              ))}
-            </div>
-          )}
+        {/* Source multi-select — Dropdown */}
+        <div className="relative">
+          <Dropdown>
+            <DropdownTrigger
+              className="flex items-center gap-2 px-3 py-1.5 bg-card border border-border rounded-lg text-xs text-foreground hover:bg-accent transition-colors"
+            >
+              <svg
+                className="h-3.5 w-3.5 text-muted-foreground"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+              Sources
+              {selectedSources.length > 0 && (
+                <Badge variant="default" className="text-[10px] px-1.5 py-0">
+                  {selectedSources.length}
+                </Badge>
+              )}
+              <svg
+                className="h-3 w-3 text-muted-foreground"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </DropdownTrigger>
+            <DropdownContent align="start" className="w-56 p-2 space-y-1">
+              {trendsData && trendsData.availableSources.length > 0 ? (
+                trendsData.availableSources.map((s) => (
+                  <label
+                    key={s.name}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-foreground hover:bg-accent/50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSources.includes(s.name)}
+                      onChange={() => toggleSource(s.name)}
+                      className="rounded border-border text-primary focus:ring-primary"
+                    />
+                    <span className="truncate flex-1">{s.name}</span>
+                    <span className="text-muted-foreground shrink-0 tabular-nums">
+                      {s.count}
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">No sources</p>
+              )}
+            </DropdownContent>
+          </Dropdown>
         </div>
 
         {/* Clear filters */}
@@ -344,16 +382,16 @@ export default function AnalyticsPage() {
             { label: "Total Prompts", value: summary ? formatNumber(summary.totalPrompts) : "0" },
             { label: "Avg Quality", value: summary ? `${summary.avgQuality.toFixed(1)} / 5` : "0 / 5" },
             { label: "Total Tokens", value: summary ? formatNumber(summary.totalTokens) : "0" },
-            { label: "Active Projects", value: summary ? String(summary.activeProjects) : "0" },
+            { label: tDash("kpi.activeProjects"), value: summary ? String(summary.activeProjects) : "0" },
           ].map((item) => (
             <Card key={item.label}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
+                <CardTitle className="t-caption text-muted-foreground font-medium">
                   {item.label}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-foreground">{item.value}</div>
+                <div className="t-h1 tabular-nums text-foreground">{item.value}</div>
               </CardContent>
             </Card>
           ))
