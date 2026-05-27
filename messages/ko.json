@@ -18,7 +18,9 @@
     "submitting": "처리 중…",
     "close": "닫기",
     "confirm": "확인",
-    "skipToContent": "본문으로 건너뛰기"
+    "skipToContent": "본문으로 건너뛰기",
+    "offline": "오프라인 모드 — 동기화 중지됨",
+    "openNav": "내비게이션 메뉴 열기"
   },
   "nav": {
     "overview": "개요",
@@ -43,7 +45,9 @@
     "monitoring": "모니터링",
     "users": "사용자",
     "allowlist": "허용 목록",
-    "installApp": "앱 설치"
+    "installApp": "앱 설치",
+    "personal": "개인",
+    "manageTeams": "팀 관리"
   },
   "auth": {
     "loginTitle": "계정에 로그인",
@@ -111,9 +115,131 @@
     "lastNDays": "최근 {n}일",
     "recentSessions": "최근 세션",
     "viewAll": "전체 보기",
+    "aiInsights": "AI 인사이트",
+    "unableToLoad": "대시보드 데이터를 불러올 수 없어요.",
+    "noProjectActivity": "이번 주에는 프로젝트 활동이 없어요",
+    "noTopicData": "아직 주제 데이터가 없어요",
+    "emptySession": "빈 세션",
+    "readTheDocs": "자세한 내용은 문서를 참고하세요",
+    "weekly": {
+      "totalPrompts": "전체: 프롬프트 {n}건",
+      "avgPerDay": "평균: 하루 {n}건"
+    },
+    "tokenUsage": {
+      "title": "토큰 사용량",
+      "total": "전체",
+      "avgPerPrompt": "프롬프트당 평균",
+      "dailyTrend": "일별 추이",
+      "byProject": "프로젝트별",
+      "prompt": "프롬프트: {value}",
+      "response": "응답: {value}"
+    },
+    "promptQuality": {
+      "title": "프롬프트 품질",
+      "avgScore": "평균 점수",
+      "scored": "채점 완료",
+      "scoreDistribution": "점수 분포",
+      "qualityTrend": "품질 추이",
+      "topPrompts": "주요 프롬프트"
+    },
+    "topics": {
+      "title": "주제"
+    },
+    "topProject": {
+      "promptsSuffix": "프롬프트 {count}건"
+    },
+    "session": {
+      "promptsSuffix": "프롬프트 {count}건",
+      "tokensSuffix": "토큰 {value}"
+    },
+    "timeAgo": {
+      "justNow": "방금 전",
+      "minutes": "{n}분 전",
+      "hours": "{n}시간 전",
+      "days": "{n}일 전"
+    },
     "empty": {
-      "noPrompts": "아직 수집된 프롬프트가 없어요",
-      "noPromptsHelp": "훅을 설치하면 세션이 자동으로 기록돼요."
+      "noPrompts": "아직 캡처된 프롬프트가 없어요",
+      "noPromptsHelp": "후크를 설치하면 세션이 자동으로 캡처돼요."
+    }
+  },
+  "analytics": {
+    "subtitlePersonal": "개인 프롬프트 분석",
+    "subtitleTeam": "팀 프롬프트 분석",
+    "period": "기간:",
+    "dateRangeAria": "기간 선택",
+    "to": "~",
+    "projects": "프로젝트",
+    "sources": "소스",
+    "noProjects": "프로젝트가 없어요",
+    "noSources": "소스가 없어요",
+    "clearFilters": "필터 초기화",
+    "failedToLoad": "분석을 불러오지 못했어요",
+    "insights": "인사이트",
+    "range": {
+      "7": "최근 7일",
+      "30": "최근 30일",
+      "90": "최근 90일",
+      "custom": "사용자 지정"
+    },
+    "kpi": {
+      "totalPrompts": "전체 프롬프트",
+      "avgQuality": "평균 품질",
+      "totalTokens": "전체 토큰",
+      "avgQualityValue": "{value} / 5"
+    },
+    "charts": {
+      "promptVolume": "프롬프트 볼륨",
+      "tokenUsage": "토큰 사용량",
+      "qualityScoreTrend": "품질 점수 추이",
+      "projectDistribution": "프로젝트 분포",
+      "hourlyActivity": "시간대별 활동",
+      "weekdayActivity": "요일별 활동"
+    },
+    "empty": {
+      "promptVolume": "프롬프트 볼륨 데이터가 없어요",
+      "tokenUsage": "토큰 사용량 데이터가 없어요",
+      "qualityScore": "품질 점수 데이터가 없어요",
+      "projectDistribution": "프로젝트 분포 데이터가 없어요",
+      "hourly": "시간대별 활동 데이터가 없어요",
+      "weekday": "요일별 활동 데이터가 없어요"
+    },
+    "tooltip": {
+      "count": "건수",
+      "promptsSuffix": "프롬프트 {value}건",
+      "tokens": "토큰",
+      "tokensSuffix": "토큰 {value}",
+      "avgQuality": "평균 품질",
+      "avgQualityValue": "{value} / 100"
+    }
+  },
+  "sessions": {
+    "subtitleAll": "Claude Code 세션 탐색 (총 {n}개)",
+    "subtitleFavorites": "즐겨찾는 세션 (총 {n}개)",
+    "subtitleShared": "공유 세션 링크 관리",
+    "tabs": {
+      "all": "전체 세션",
+      "favorites": "즐겨찾기",
+      "shared": "공유"
+    },
+    "empty": {
+      "none": "세션이 없어요.",
+      "favoritesHelp": "세션에 별표를 눌러 즐겨찾기에 추가하세요.",
+      "allHelp": "동일한 세션 ID를 가진 프롬프트가 모이면 세션이 만들어져요."
+    },
+    "error": {
+      "failedToLoad": "세션을 불러오지 못했어요",
+      "dbError": "데이터베이스 오류가 발생했어요. 잠시 후 다시 시도해주세요."
+    },
+    "pagination": {
+      "aria": "세션 목록 페이지네이션",
+      "previous": "이전 페이지로",
+      "next": "다음 페이지로",
+      "page": "{n}페이지로"
+    },
+    "card": {
+      "untitled": "제목 없는 세션",
+      "emptyPrompt": "빈 프롬프트"
     }
   },
   "locale": {

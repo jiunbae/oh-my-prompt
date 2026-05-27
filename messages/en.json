@@ -18,7 +18,9 @@
     "submitting": "Submitting…",
     "close": "Close",
     "confirm": "Confirm",
-    "skipToContent": "Skip to main content"
+    "skipToContent": "Skip to main content",
+    "offline": "Offline mode — syncing disabled",
+    "openNav": "Open navigation menu"
   },
   "nav": {
     "overview": "Overview",
@@ -43,7 +45,9 @@
     "monitoring": "Monitoring",
     "users": "Users",
     "allowlist": "Allowlist",
-    "installApp": "Install App"
+    "installApp": "Install App",
+    "personal": "Personal",
+    "manageTeams": "Manage Teams"
   },
   "auth": {
     "loginTitle": "Sign in to your account",
@@ -111,9 +115,131 @@
     "lastNDays": "Last {n} days",
     "recentSessions": "Recent Sessions",
     "viewAll": "View all",
+    "aiInsights": "AI Insights",
+    "unableToLoad": "Unable to load dashboard data.",
+    "noProjectActivity": "No project activity this week",
+    "noTopicData": "No topic data yet",
+    "emptySession": "Empty session",
+    "readTheDocs": "Read the docs for more info",
+    "weekly": {
+      "totalPrompts": "Total: {n} prompts",
+      "avgPerDay": "Avg: {n}/day"
+    },
+    "tokenUsage": {
+      "title": "Token Usage",
+      "total": "Total",
+      "avgPerPrompt": "Avg / Prompt",
+      "dailyTrend": "Daily Trend",
+      "byProject": "By Project",
+      "prompt": "Prompt: {value}",
+      "response": "Response: {value}"
+    },
+    "promptQuality": {
+      "title": "Prompt Quality",
+      "avgScore": "Avg Score",
+      "scored": "Scored",
+      "scoreDistribution": "Score Distribution",
+      "qualityTrend": "Quality Trend",
+      "topPrompts": "Top Prompts"
+    },
+    "topics": {
+      "title": "Topics"
+    },
+    "topProject": {
+      "promptsSuffix": "{count} prompts"
+    },
+    "session": {
+      "promptsSuffix": "{count} prompts",
+      "tokensSuffix": "{value} tokens"
+    },
+    "timeAgo": {
+      "justNow": "just now",
+      "minutes": "{n}m ago",
+      "hours": "{n}h ago",
+      "days": "{n}d ago"
+    },
     "empty": {
       "noPrompts": "No prompts captured yet",
       "noPromptsHelp": "Install the hook to start capturing your sessions automatically."
+    }
+  },
+  "analytics": {
+    "subtitlePersonal": "Personal prompt analytics",
+    "subtitleTeam": "Team-scoped prompt analytics",
+    "period": "Period:",
+    "dateRangeAria": "Date range",
+    "to": "to",
+    "projects": "Projects",
+    "sources": "Sources",
+    "noProjects": "No projects",
+    "noSources": "No sources",
+    "clearFilters": "Clear filters",
+    "failedToLoad": "Failed to load analytics",
+    "insights": "Insights",
+    "range": {
+      "7": "Last 7 days",
+      "30": "Last 30 days",
+      "90": "Last 90 days",
+      "custom": "Custom"
+    },
+    "kpi": {
+      "totalPrompts": "Total Prompts",
+      "avgQuality": "Avg Quality",
+      "totalTokens": "Total Tokens",
+      "avgQualityValue": "{value} / 5"
+    },
+    "charts": {
+      "promptVolume": "Prompt Volume",
+      "tokenUsage": "Token Usage",
+      "qualityScoreTrend": "Quality Score Trend",
+      "projectDistribution": "Project Distribution",
+      "hourlyActivity": "Hourly Activity",
+      "weekdayActivity": "Weekday Activity"
+    },
+    "empty": {
+      "promptVolume": "No prompt volume data",
+      "tokenUsage": "No token usage data",
+      "qualityScore": "No quality score data",
+      "projectDistribution": "No project distribution data",
+      "hourly": "No hourly activity data",
+      "weekday": "No weekday activity data"
+    },
+    "tooltip": {
+      "count": "Count",
+      "promptsSuffix": "{value} prompts",
+      "tokens": "Tokens",
+      "tokensSuffix": "{value} tokens",
+      "avgQuality": "Avg Quality",
+      "avgQualityValue": "{value} / 100"
+    }
+  },
+  "sessions": {
+    "subtitleAll": "Browse your Claude Code sessions ({n} total)",
+    "subtitleFavorites": "Your favorite sessions ({n} total)",
+    "subtitleShared": "Manage your shared session links",
+    "tabs": {
+      "all": "All Sessions",
+      "favorites": "Favorites",
+      "shared": "Shared"
+    },
+    "empty": {
+      "none": "No sessions found.",
+      "favoritesHelp": "Star a session to add it to your favorites.",
+      "allHelp": "Sessions are created when prompts share a session ID."
+    },
+    "error": {
+      "failedToLoad": "Failed to load sessions",
+      "dbError": "A database error occurred. Please try again later."
+    },
+    "pagination": {
+      "aria": "Session list pagination",
+      "previous": "Go to previous page",
+      "next": "Go to next page",
+      "page": "Go to page {n}"
+    },
+    "card": {
+      "untitled": "Untitled Session",
+      "emptyPrompt": "Empty prompt"
     }
   },
   "locale": {
