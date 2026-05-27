@@ -17,11 +17,15 @@
     "signUp": "Sign up",
     "submitting": "Submitting…",
     "close": "Close",
-    "confirm": "Confirm"
+    "confirm": "Confirm",
+    "skipToContent": "Skip to main content"
   },
   "nav": {
     "overview": "Overview",
     "explore": "Explore",
+    "insights": "Insights",
+    "library": "Library",
+    "workspace": "Workspace",
     "admin": "Admin",
     "dashboard": "Dashboard",
     "sessions": "Sessions",
@@ -29,7 +33,7 @@
     "analytics": "Analytics",
     "experiments": "Experiments",
     "alerts": "Alerts",
-    "insights": "AI Insights",
+    "aiInsights": "AI Insights",
     "favorites": "Favorites",
     "templates": "Templates",
     "marketplace": "Marketplace",
@@ -38,7 +42,8 @@
     "settings": "Settings",
     "monitoring": "Monitoring",
     "users": "Users",
-    "allowlist": "Allowlist"
+    "allowlist": "Allowlist",
+    "installApp": "Install App"
   },
   "auth": {
     "loginTitle": "Sign in to your account",
