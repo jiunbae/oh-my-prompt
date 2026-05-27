@@ -9,7 +9,11 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
 
 const variantStyles: Record<CardVariant, string> = {
   default: "border border-border bg-card text-card-foreground shadow-sm",
-  elevated: "border border-border bg-surface-elevated text-card-foreground shadow-md",
+  // `elevated` must read as raised on every theme. In light mode, --card
+  // (#ffffff) and --surface-elevated (#fafafb) are intentionally a hair apart;
+  // we lean on shadow + a slightly stronger border to do the rest of the work.
+  elevated:
+    "border border-border bg-surface-elevated text-card-foreground shadow-lg shadow-black/[0.08] ring-1 ring-border-subtle",
   outlined: "border-2 border-border bg-transparent text-card-foreground",
   glass: "border border-border/50 bg-card/80 backdrop-blur-sm text-card-foreground shadow-sm",
   interactive:
