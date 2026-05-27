@@ -5,7 +5,14 @@ import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
 import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
-import { parseDate } from "@/lib/date-utils";
+import {
+  APP_TIME_ZONE,
+  addDaysToDateKey,
+  dateKeyInTimeZone,
+  parseDate,
+  startOfDateKeyInTimeZone,
+  endExclusiveOfDateKeyInTimeZone,
+} from "@/lib/date-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -40,16 +47,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Default range: last 90 days (all UTC)
+    // Default range: last 90 days in the app timezone
     const now = new Date();
-    const defaultFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 90));
+    const todayKey = dateKeyInTimeZone(now);
+    const defaultFrom = startOfDateKeyInTimeZone(addDaysToDateKey(todayKey, -90))!;
 
-    const from = fromParam ? parseDate(fromParam)! : defaultFrom;
+    const from = fromParam ? startOfDateKeyInTimeZone(fromParam)! : defaultFrom;
 
-    const toDateUTC = toParam
-      ? parseDate(toParam)!
-      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const toExclusive = new Date(toDateUTC.getTime() + 24 * 60 * 60 * 1000);
+    const toExclusive = toParam
+      ? endExclusiveOfDateKeyInTimeZone(toParam)!
+      : endExclusiveOfDateKeyInTimeZone(todayKey)!;
 
     const conditions = [
       eq(schema.prompts.userId, session.userId),
@@ -67,7 +74,7 @@ export async function GET(request: NextRequest) {
     // Get per-day distinct session counts — no session details, no pagination
     const result = await db.execute(sql`
       SELECT
-        (MIN(${schema.prompts.timestamp}) AT TIME ZONE 'UTC')::date::text as date,
+        (MIN(${schema.prompts.timestamp}) AT TIME ZONE ${APP_TIME_ZONE})::date::text as date,
         COUNT(DISTINCT ${schema.prompts.sessionId})::int as count
       FROM ${schema.prompts}
       WHERE ${whereClause}
@@ -76,7 +83,7 @@ export async function GET(request: NextRequest) {
 
     const rows = extractRows(result);
 
-    // Aggregate by date (a session's date is based on its first prompt's UTC date)
+    // Aggregate by date (a session's date is based on its first prompt's app-timezone date)
     const dayMap = new Map<string, number>();
     for (const row of rows) {
       const date = String(row.date);

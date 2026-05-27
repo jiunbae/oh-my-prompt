@@ -115,8 +115,8 @@ export function RecentInsights() {
           throw new Error("Failed to fetch insights");
         }
         const data = await res.json();
-        // tRPC wraps the result in { result: { data } }
-        const items = data?.result?.data ?? [];
+        // tRPC's superjson transformer wraps plain JSON under data.json.
+        const items = data?.result?.data?.json ?? data?.result?.data ?? [];
         setInsights(items);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load insights");
@@ -159,7 +159,7 @@ export function RecentInsights() {
 
         {!loading && !error && insights.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
-            No cached insights yet. Use "Ask Your Data" above or generate a session story to get started.
+            No cached insights yet. Use &quot;Ask Your Data&quot; above or generate a session story to get started.
           </p>
         )}
 

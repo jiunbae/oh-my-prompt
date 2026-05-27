@@ -3,6 +3,13 @@ import * as schema from "@/db/schema";
 import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import { formatNumber } from "@/lib/format";
 import { logger } from "@/lib/logger";
+import {
+  APP_TIME_ZONE,
+  addDaysToDateKey,
+  dateKeyInTimeZone,
+  dateTimePartsInTimeZone,
+  startOfDateKeyInTimeZone,
+} from "@/lib/date-utils";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,22 +54,17 @@ export interface WeekDigestData {
 // ---------------------------------------------------------------------------
 
 function startOfWeek(date: Date): Date {
-  const d = new Date(date);
-  d.setUTCHours(0, 0, 0, 0);
-  const day = d.getUTCDay();
+  const day = dateTimePartsInTimeZone(date).weekday;
   const diff = (day === 0 ? 6 : day - 1); // Monday = start of week
-  d.setUTCDate(d.getUTCDate() - diff);
-  return d;
+  return startOfDateKeyInTimeZone(addDaysToDateKey(dateKeyInTimeZone(date), -diff))!;
 }
 
 function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d;
+  return startOfDateKeyInTimeZone(addDaysToDateKey(dateKeyInTimeZone(date), days))!;
 }
 
 function toDateString(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return dateKeyInTimeZone(date);
 }
 
 async function queryWeekStats(
@@ -113,13 +115,13 @@ async function queryWeekStats(
 
     db
       .select({
-        date: sql<string>`date(${schema.prompts.timestamp})`,
+        date: sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`,
         count: sql<number>`count(*)`,
       })
       .from(schema.prompts)
       .where(whereClause)
-      .groupBy(sql`date(${schema.prompts.timestamp})`)
-      .orderBy(sql`date(${schema.prompts.timestamp})`),
+      .groupBy(sql`1`)
+      .orderBy(sql`1`),
 
     db
       .select({

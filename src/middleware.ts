@@ -124,7 +124,7 @@ export async function middleware(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
-    pathname.includes(".")
+    (!pathname.startsWith("/api/") && pathname.includes("."))
   ) {
     return NextResponse.next();
   }

@@ -6,6 +6,13 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { and, eq, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
+import {
+  APP_TIME_ZONE,
+  dateKeyInTimeZone,
+  dateKeysBetween,
+  getLastNDaysRange,
+  parseDateTimeOrDateInTimeZone,
+} from "@/lib/date-utils";
 
 function getDateRange(searchParams: URLSearchParams): { from: Date; to: Date } {
   const now = new Date();
@@ -13,32 +20,19 @@ function getDateRange(searchParams: URLSearchParams): { from: Date; to: Date } {
   const fromParam = searchParams.get("from");
   const toParam = searchParams.get("to");
 
-  const defaultTo = now;
-  const defaultFrom = new Date(now);
-  defaultFrom.setDate(defaultFrom.getDate() - 30);
+  const defaultRange = getLastNDaysRange(30, now);
 
   if (rangeParam && /^\d+$/.test(rangeParam)) {
     const days = parseInt(rangeParam, 10);
-    const from = new Date(now);
-    from.setDate(from.getDate() - days);
-    from.setHours(0, 0, 0, 0);
-    return { from, to: now };
+    const range = getLastNDaysRange(days, now);
+    return { from: range.from, to: range.to };
   }
 
-  const fromParsed = fromParam ? new Date(fromParam) : defaultFrom;
-  const toParsed = toParam ? new Date(toParam) : defaultTo;
-  const toExclusive =
-    toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam)
-      ? new Date(toParsed.getTime() + 24 * 60 * 60 * 1000)
-      : toParsed;
-
-  const from = Number.isNaN(fromParsed.getTime()) ? defaultFrom : fromParsed;
-  const to = Number.isNaN(toExclusive.getTime()) ? defaultTo : toExclusive;
+  const from = parseDateTimeOrDateInTimeZone(fromParam ?? undefined, "start") ?? defaultRange.from;
+  const to = parseDateTimeOrDateInTimeZone(toParam ?? undefined, "end-exclusive") ?? defaultRange.to;
 
   if (from >= to) {
-    const fallbackFrom = new Date(to);
-    fallbackFrom.setDate(fallbackFrom.getDate() - 30);
-    return { from: fallbackFrom, to };
+    return { from: defaultRange.from, to: defaultRange.to };
   }
 
   return { from, to };
@@ -133,7 +127,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const dateExpr = sql<string>`date(${schema.prompts.timestamp})`;
+    const dateExpr = sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`;
 
     // Daily stats
     const dailyPromise = db
@@ -145,8 +139,8 @@ export async function GET(request: NextRequest) {
       })
       .from(schema.prompts)
       .where(finalWhere)
-      .groupBy(dateExpr)
-      .orderBy(dateExpr);
+      .groupBy(sql`1`)
+      .orderBy(sql`1`);
 
     // By project
     const byProjectPromise = db
@@ -160,26 +154,30 @@ export async function GET(request: NextRequest) {
       .orderBy(sql`count(*) DESC`);
 
     // By hour
-    const hourExpr = sql`EXTRACT(hour FROM ${schema.prompts.timestamp})`;
     const byHourPromise = db
       .select({
-        hour: sql<number>`EXTRACT(hour FROM ${schema.prompts.timestamp})::int`,
+        hour: sql<number>`EXTRACT(hour FROM (${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE}))::int`,
         count: sql<number>`count(*)`,
       })
       .from(schema.prompts)
       .where(finalWhere)
-      .groupBy(hourExpr)
-      .orderBy(hourExpr);
+      .groupBy(sql`1`)
+      .orderBy(sql`1`);
 
     // By weekday
     const byWeekdayPromise = db.execute(sql`
       SELECT
-        TRIM(TO_CHAR(${schema.prompts.timestamp}, 'Dy')) as day,
+        day,
         COUNT(*)::int as count
-      FROM ${schema.prompts}
-      WHERE ${finalWhere}
-      GROUP BY TO_CHAR(${schema.prompts.timestamp}, 'Dy'), EXTRACT(DOW FROM ${schema.prompts.timestamp})
-      ORDER BY EXTRACT(DOW FROM ${schema.prompts.timestamp})
+      FROM (
+        SELECT
+          TRIM(TO_CHAR(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE}, 'Dy')) as day,
+          EXTRACT(DOW FROM ${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE}) as dow
+        FROM ${schema.prompts}
+        WHERE ${finalWhere}
+      ) weekday_counts
+      GROUP BY day, dow
+      ORDER BY dow
     `);
 
     // Summary
@@ -233,15 +231,10 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Fill missing days
-    const dayKeys: string[] = [];
-    const cursor = new Date(from);
-    cursor.setUTCHours(0, 0, 0, 0);
-    const end = new Date(to);
-    end.setUTCHours(0, 0, 0, 0);
-    while (cursor <= end) {
-      dayKeys.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-    }
+    const dayKeys = dateKeysBetween(
+      dateKeyInTimeZone(from),
+      dateKeyInTimeZone(new Date(to.getTime() - 1)),
+    );
 
     const dailyMap = new Map(daily.map((d) => [d.date, d]));
     const filledDaily = dayKeys.map((date) => ({

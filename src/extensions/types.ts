@@ -80,6 +80,8 @@ export interface LLMConfig {
   baseUrl?: string;
   maxTokens?: number;
   temperature?: number;
+  /** vLLM/Qwen-style thinking toggle for OpenAI-compatible providers */
+  enableThinking?: boolean;
   /** Azure OpenAI deployment name */
   azureDeployment?: string;
   /** Azure OpenAI API version (default: 2024-12-01-preview) */

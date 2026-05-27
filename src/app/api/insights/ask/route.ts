@@ -8,6 +8,7 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, gte, sql, desc, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
+import { APP_TIME_ZONE, getLastNDaysRange } from "@/lib/date-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -125,12 +126,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const last30Days = getLastNDaysRange(30);
 
     const baseConditions = and(
       eq(schema.prompts.userId, session.userId),
-      gte(schema.prompts.timestamp, thirtyDaysAgo),
+      gte(schema.prompts.timestamp, last30Days.from),
       isNull(schema.prompts.deletedAt),
     );
 
@@ -164,7 +164,7 @@ export async function POST(request: NextRequest) {
       // Daily summaries for last 7 days
       db.execute(sql`
         SELECT
-          date_trunc('day', ${schema.prompts.timestamp})::date as day,
+          (${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text as day,
           count(*)::int as prompt_count,
           count(distinct ${schema.prompts.sessionId})::int as session_count,
           count(distinct ${schema.prompts.projectName})::int as project_count,
@@ -172,10 +172,10 @@ export async function POST(request: NextRequest) {
         FROM ${schema.prompts}
         WHERE ${and(
           eq(schema.prompts.userId, session.userId),
-          gte(schema.prompts.timestamp, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+          gte(schema.prompts.timestamp, getLastNDaysRange(7).from),
           isNull(schema.prompts.deletedAt),
         )}
-        GROUP BY date_trunc('day', ${schema.prompts.timestamp})::date
+        GROUP BY 1
         ORDER BY day DESC
       `),
 

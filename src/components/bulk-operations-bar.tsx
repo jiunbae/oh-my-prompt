@@ -43,8 +43,8 @@ export function BulkOperationsBar({
       })
         .then((res) => res.json())
         .then((data) => {
-          // tRPC wraps result in { result: { data: [...] } }
-          const tags = data?.result?.data ?? [];
+          // tRPC's superjson transformer wraps plain JSON under data.json.
+          const tags = data?.result?.data?.json ?? data?.result?.data ?? [];
           setExistingTags(tags);
         })
         .catch(() => {

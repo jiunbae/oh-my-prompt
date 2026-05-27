@@ -34,9 +34,18 @@ export function getLLMConfig(): LLMConfig | null {
     baseUrl: process.env.OMP_LLM_BASE_URL,
     maxTokens: parseInt(process.env.OMP_LLM_MAX_TOKENS || "2048", 10),
     temperature: parseFloat(process.env.OMP_LLM_TEMPERATURE || "0.3"),
+    enableThinking: parseOptionalBoolean(process.env.OMP_LLM_ENABLE_THINKING),
     azureDeployment: process.env.OMP_LLM_AZURE_DEPLOYMENT,
     azureApiVersion: process.env.OMP_LLM_AZURE_API_VERSION,
   };
+}
+
+function parseOptionalBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined || value === "") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
 }
 
 function getDefaultModel(provider: string): string {
@@ -169,7 +178,18 @@ function buildOpenAIBody(messages: LLMMessage[], cfg: LLMConfig): Record<string,
     body.temperature = cfg.temperature ?? 0.3;
   }
 
+  if (typeof cfg.enableThinking === "boolean") {
+    body.chat_template_kwargs = { enable_thinking: cfg.enableThinking };
+  }
+
   return body;
+}
+
+function stripThinkingOutput(content: string): string {
+  const responseMatch = content.match(/\[RESPONSE\]([\s\S]*?)\[\/RESPONSE\]/i);
+  if (responseMatch?.[1]?.trim()) return responseMatch[1].trim();
+
+  return content.replace(/<(think|reasoning)>[\s\S]*?<\/\1>/gi, "").trim();
 }
 
 async function callOpenAICompatible(
@@ -194,7 +214,7 @@ async function callOpenAICompatible(
 
   const data = await res.json();
   return {
-    content: data.choices?.[0]?.message?.content || "",
+    content: stripThinkingOutput(data.choices?.[0]?.message?.content || ""),
     model: data.model || cfg.model,
     tokensUsed: data.usage
       ? (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0)

@@ -3,6 +3,12 @@ import * as schema from "@/db/schema";
 import { desc, sql, eq, and, gte, lt, isNull } from "drizzle-orm";
 import { computeSessions } from "@/lib/session-analysis";
 import { logger } from "@/lib/logger";
+import {
+  APP_TIME_ZONE,
+  dateKeyInTimeZone,
+  dateKeysBetween,
+  getLastNDaysRange,
+} from "@/lib/date-utils";
 
 export interface AnalyticsData {
   stats: {
@@ -42,20 +48,11 @@ export interface AnalyticsData {
 }
 
 export function toDateOnlyString(date: Date) {
-  return date.toISOString().slice(0, 10);
+  return dateKeyInTimeZone(date);
 }
 
 export function getLastNDays(end: Date, days: number) {
-  const base = new Date(end);
-  base.setUTCHours(0, 0, 0, 0);
-
-  const result: string[] = [];
-  for (let i = days - 1; i >= 0; i -= 1) {
-    const d = new Date(base);
-    d.setUTCDate(d.getUTCDate() - i);
-    result.push(toDateOnlyString(d));
-  }
-  return result;
+  return getLastNDaysRange(days, end).dayKeys;
 }
 
 export { formatNumber } from "@/lib/format";
@@ -92,16 +89,17 @@ export async function getAnalytics(
       ? sql`project_name is not null AND user_id = ${userId} AND deleted_at IS NULL`
       : sql`project_name is not null AND deleted_at IS NULL`;
 
-    const rangeTo = dateRange?.to ?? new Date();
+    const defaultRange = getLastNDaysRange(dateRange?.days ?? 30);
+    const rangeTo = dateRange?.to ?? defaultRange.to;
     const days = dateRange?.days ?? 30;
     const rangeFrom = dateRange?.from ?? (() => {
-      const d = new Date(rangeTo);
-      d.setUTCDate(d.getUTCDate() - (days - 1));
-      d.setUTCHours(0, 0, 0, 0);
-      return d;
+      if (dateRange?.to) {
+        return getLastNDaysRange(days, rangeTo).from;
+      }
+      return defaultRange.from;
     })();
 
-    const dateExpr = sql<string>`date(${schema.prompts.timestamp})`;
+    const dateExpr = sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`;
 
     const rangeWhere = and(
       ...(userFilter ? [userFilter] : []),
@@ -155,8 +153,8 @@ export async function getAnalytics(
         })
         .from(schema.prompts)
         .where(rangeWhere)
-        .groupBy(dateExpr)
-        .orderBy(dateExpr),
+        .groupBy(sql`1`)
+        .orderBy(sql`1`),
 
       // Top projects - filtered by user
       db
@@ -219,8 +217,9 @@ export async function getAnalytics(
     ]);
 
     // Fill daily series (even if some days have no data)
-    const actualDays = Math.ceil((rangeTo.getTime() - rangeFrom.getTime()) / (24 * 60 * 60 * 1000));
-    const dayKeys = getLastNDays(rangeTo, Math.max(actualDays, 1));
+    const fromKey = dateKeyInTimeZone(rangeFrom);
+    const toKey = dateKeyInTimeZone(new Date(rangeTo.getTime() - 1));
+    const dayKeys = dateKeysBetween(fromKey, toKey);
     const dailyMap = new Map(
       dailySeries.map((d) => [d.date, {
         count: Number(d.count ?? 0),

@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { callLLM, getLLMConfig } from "../llm";
 import { logger } from "@/lib/logger";
+import { APP_TIME_ZONE, resolveDateRange } from "@/lib/date-utils";
 
 interface DailyStats {
   totalPrompts: number;
@@ -50,12 +51,12 @@ async function queryDailyStats(
 
     db
       .select({
-        hour: sql<number>`extract(hour from ${schema.prompts.timestamp})`,
+        hour: sql<number>`extract(hour from (${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE}))`,
         count: sql<number>`count(*)`,
       })
       .from(schema.prompts)
       .where(whereClause)
-      .groupBy(sql`extract(hour from ${schema.prompts.timestamp})`)
+      .groupBy(sql`1`)
       .orderBy(sql`count(*) DESC`)
       .limit(1),
 
@@ -151,23 +152,7 @@ function buildStatsOnlyInsight(stats: DailyStats): InsightResult {
 }
 
 export async function handler(input: ProcessorInput): Promise<InsightResult> {
-  const fromDate = new Date(input.dateRange.from);
-  const toDate = new Date(input.dateRange.to);
-
-  // If "from" and "to" are the same day (date string), extend "to" to end of that day
-  if (input.dateRange.from === input.dateRange.to) {
-    toDate.setUTCDate(toDate.getUTCDate() + 1);
-  }
-
-  // If no explicit range, default to today
-  const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
-
-  const from = Number.isNaN(fromDate.getTime()) ? todayStart : fromDate;
-  const to = Number.isNaN(toDate.getTime()) ? tomorrowStart : toDate;
+  const { from, to } = resolveDateRange(input.dateRange, 1);
 
   const stats = await queryDailyStats(input.userId, from, to);
 

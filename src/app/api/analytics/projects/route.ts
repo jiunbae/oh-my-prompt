@@ -5,6 +5,7 @@ import { parseDateRange } from "../_helpers";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { and, desc, eq, gte, lt, sql, isNull } from "drizzle-orm";
+import { APP_TIME_ZONE } from "@/lib/date-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
       isNull(schema.prompts.deletedAt)
     );
 
-    const dateExpr = sql<string>`date(${schema.prompts.timestamp})`;
+    const dateExpr = sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`;
 
     const topProjectsPromise = db
       .select({
@@ -58,8 +59,8 @@ export async function GET(request: NextRequest) {
           })
           .from(schema.prompts)
           .where(and(baseWhere, eq(schema.prompts.projectName, project)))
-          .groupBy(dateExpr)
-          .orderBy(dateExpr)
+          .groupBy(sql`1`)
+          .orderBy(sql`1`)
       : [];
 
     return NextResponse.json({

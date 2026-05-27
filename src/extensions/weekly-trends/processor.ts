@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { callLLM, getLLMConfig } from "../llm";
 import { logger } from "@/lib/logger";
+import { APP_TIME_ZONE, resolveDateRange } from "@/lib/date-utils";
 
 interface WeekStats {
   totalPrompts: number;
@@ -59,13 +60,13 @@ async function queryWeekStats(
 
     db
       .select({
-        date: sql<string>`date(${schema.prompts.timestamp})`,
+        date: sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`,
         count: sql<number>`count(*)`,
       })
       .from(schema.prompts)
       .where(whereClause)
-      .groupBy(sql`date(${schema.prompts.timestamp})`)
-      .orderBy(sql`date(${schema.prompts.timestamp})`),
+      .groupBy(sql`1`)
+      .orderBy(sql`1`),
   ]);
 
   const row = overview[0];
@@ -224,40 +225,14 @@ function buildStatsOnlyInsight(
 }
 
 export async function handler(input: ProcessorInput): Promise<InsightResult> {
-  // Calculate current week and previous week date ranges
-  const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
-
-  // Current week: from 7 days ago to now
-  const currentWeekFrom = new Date(todayStart);
-  currentWeekFrom.setUTCDate(currentWeekFrom.getUTCDate() - 6);
-
-  // Previous week: 14 days ago to 7 days ago
-  const previousWeekFrom = new Date(todayStart);
-  previousWeekFrom.setUTCDate(previousWeekFrom.getUTCDate() - 13);
-  const previousWeekTo = new Date(todayStart);
-  previousWeekTo.setUTCDate(previousWeekTo.getUTCDate() - 6);
-
   // If the caller provided an explicit date range, use it for the current week
   // and compute the previous week relative to it
-  const inputFrom = new Date(input.dateRange.from);
-  const inputTo = new Date(input.dateRange.to);
-  let cwFrom = currentWeekFrom;
-  let cwTo = tomorrowStart;
-  let pwFrom = previousWeekFrom;
-  let pwTo = previousWeekTo;
-
-  if (!Number.isNaN(inputFrom.getTime()) && !Number.isNaN(inputTo.getTime())) {
-    cwFrom = inputFrom;
-    cwTo = inputTo;
-    // Compute the duration and use same duration for previous period
-    const durationMs = cwTo.getTime() - cwFrom.getTime();
-    pwTo = new Date(cwFrom.getTime());
-    pwFrom = new Date(cwFrom.getTime() - durationMs);
-  }
+  const explicitRange = resolveDateRange(input.dateRange, 7);
+  const cwFrom = explicitRange.from;
+  const cwTo = explicitRange.to;
+  const durationMs = cwTo.getTime() - cwFrom.getTime();
+  const pwTo = new Date(cwFrom.getTime());
+  const pwFrom = new Date(cwFrom.getTime() - durationMs);
 
   const [currentWeek, previousWeek] = await Promise.all([
     queryWeekStats(input.userId, cwFrom, cwTo),

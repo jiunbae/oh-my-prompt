@@ -3,8 +3,9 @@ import { db } from "@/db/client";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
-import { eq, and, gte, lte, sql, isNull } from "drizzle-orm";
+import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
+import { parseDateTimeOrDateInTimeZone } from "@/lib/date-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -47,11 +48,13 @@ export async function GET(request: NextRequest) {
 
     if (project) conditions.push(eq(schema.prompts.projectName, project));
     if (source) conditions.push(eq(schema.prompts.source, source));
-    if (from) conditions.push(gte(schema.prompts.timestamp, new Date(from)));
+    if (from) {
+      const fromDate = parseDateTimeOrDateInTimeZone(from, "start");
+      if (fromDate) conditions.push(gte(schema.prompts.timestamp, fromDate));
+    }
     if (to) {
-      const toDate = new Date(to);
-      toDate.setUTCHours(23, 59, 59, 999);
-      conditions.push(lte(schema.prompts.timestamp, toDate));
+      const toDate = parseDateTimeOrDateInTimeZone(to, "end-exclusive");
+      if (toDate) conditions.push(lt(schema.prompts.timestamp, toDate));
     }
 
     const whereClause = and(...conditions);

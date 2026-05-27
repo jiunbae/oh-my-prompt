@@ -8,6 +8,7 @@ import {
   cacheInsight,
   hashData,
 } from "@/extensions/insight-cache";
+import { getLastNDaysRange } from "@/lib/date-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -39,15 +40,13 @@ export async function GET(
     }
 
     // Generate fresh session story
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const last30Days = getLastNDaysRange(30);
 
     const result = await sessionStoryHandler({
       userId: session.userId,
       dateRange: {
-        from: thirtyDaysAgo.toISOString().slice(0, 10),
-        to: now.toISOString().slice(0, 10),
+        from: last30Days.fromKey,
+        to: last30Days.toKey,
       },
       parameters: { sessionId },
     });

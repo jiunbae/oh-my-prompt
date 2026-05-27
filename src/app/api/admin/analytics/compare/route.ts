@@ -3,15 +3,15 @@ import { requireAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sql, eq, gte, desc, and, inArray, isNull } from "drizzle-orm";
+import { sql, gte, desc, and, inArray, isNull } from "drizzle-orm";
+import { APP_TIME_ZONE, getLastNDaysRange } from "@/lib/date-utils";
 
 export async function GET(request: NextRequest) {
   try {
     await requireAdmin();
 
     const { searchParams } = new URL(request.url);
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+    const thirtyDaysAgo = getLastNDaysRange(31).from;
 
     // Determine which users to fetch
     let targetUserIds: string[];
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     const rows = await db
       .select({
         userId: schema.prompts.userId,
-        date: sql<string>`date(${schema.prompts.timestamp})`,
+        date: sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`,
         tokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
         inputTokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0)),0)`,
         outputTokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
@@ -56,8 +56,8 @@ export async function GET(request: NextRequest) {
           isNull(schema.prompts.deletedAt),
         )
       )
-      .groupBy(schema.prompts.userId, sql`date(${schema.prompts.timestamp})`)
-      .orderBy(sql`date(${schema.prompts.timestamp})`);
+      .groupBy(schema.prompts.userId, sql`2`)
+      .orderBy(sql`2`);
 
     // Get user names
     const userRows = await db

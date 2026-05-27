@@ -6,10 +6,7 @@ import { computeSessions } from "@/lib/session-analysis";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { and, eq, gte, lt, isNull } from "drizzle-orm";
-
-function toDateOnlyString(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
+import { dateKeyInTimeZone } from "@/lib/date-utils";
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,7 +49,7 @@ export async function GET(request: NextRequest) {
 
     const sessionsPerDayMap = new Map<string, number>();
     for (const s of sessions) {
-      const day = toDateOnlyString(s.start);
+      const day = dateKeyInTimeZone(s.start);
       sessionsPerDayMap.set(day, (sessionsPerDayMap.get(day) ?? 0) + 1);
     }
 

@@ -10,6 +10,7 @@ import {
 } from "@/extensions/insight-cache";
 import { getExtension } from "@/extensions/registry";
 import type { InsightResult } from "@/extensions/types";
+import { getLastNDaysRange } from "@/lib/date-utils";
 
 /**
  * GET /api/insights
@@ -80,13 +81,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const now = new Date();
-    const defaultFrom = new Date(now);
-    defaultFrom.setUTCDate(defaultFrom.getUTCDate() - 7);
+    const defaultRange = getLastNDaysRange(7);
 
     const resolvedRange = dateRange || {
-      from: defaultFrom.toISOString().slice(0, 10),
-      to: now.toISOString().slice(0, 10),
+      from: defaultRange.fromKey,
+      to: defaultRange.toKey,
     };
 
     const processorInput = {

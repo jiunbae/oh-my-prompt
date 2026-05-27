@@ -1,6 +1,7 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { sql, and, eq, gte, isNull } from "drizzle-orm";
+import { APP_TIME_ZONE, getLastNDaysRange } from "@/lib/date-utils";
 
 /**
  * Refreshes analytics_daily for a given user and date range.
@@ -17,19 +18,14 @@ export async function refreshDailyAggregations(
   // Default to 30 days ago if no fromDate provided
   const rangeFrom =
     fromDate ??
-    (() => {
-      const d = new Date();
-      d.setUTCDate(d.getUTCDate() - 30);
-      d.setUTCHours(0, 0, 0, 0);
-      return d;
-    })();
+    getLastNDaysRange(31).from;
 
   // Aggregate and upsert in a single transaction for consistency
   await db.transaction(async (tx) => {
     // Aggregate per-day stats from prompts for this user
     const dailyRows = await tx
         .select({
-          date: sql<string>`date(${schema.prompts.timestamp})`,
+          date: sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`,
           promptCount: sql<number>`count(*)::int`,
           totalChars: sql<number>`coalesce(sum(${schema.prompts.promptLength} + coalesce(${schema.prompts.responseLength}, 0)), 0)::int`,
           totalTokensEst: sql<number>`coalesce(sum(${schema.prompts.tokenEstimate} + coalesce(${schema.prompts.tokenEstimateResponse}, 0)), 0)::int`,
@@ -45,7 +41,7 @@ export async function refreshDailyAggregations(
             isNull(schema.prompts.deletedAt),
           ),
         )
-        .groupBy(sql`date(${schema.prompts.timestamp})`);
+        .groupBy(sql`1`);
 
       if (dailyRows.length > 0) {
         const values = dailyRows

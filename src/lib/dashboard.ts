@@ -3,6 +3,12 @@ import * as schema from "@/db/schema";
 import { eq, and, gte, lt, sql, desc, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import { logger } from "@/lib/logger";
+import {
+  APP_TIME_ZONE,
+  addDaysToDateKey,
+  getLastNDaysRange,
+  startOfDateKeyInTimeZone,
+} from "@/lib/date-utils";
 
 export interface DashboardData {
   today: { prompts: number; tokens: number; sessions: number; projects: number };
@@ -44,15 +50,12 @@ export interface DashboardData {
 
 export async function getDashboardData(userId: string): Promise<DashboardData | null> {
   try {
-    const now = new Date();
-    const todayStart = new Date(now);
-    todayStart.setUTCHours(0, 0, 0, 0);
-    const tomorrowStart = new Date(todayStart);
-    tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
-    const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setUTCDate(yesterdayStart.getUTCDate() - 1);
-    const weekAgoStart = new Date(todayStart);
-    weekAgoStart.setUTCDate(weekAgoStart.getUTCDate() - 6);
+    const last7DaysRange = getLastNDaysRange(7);
+    const todayStart = startOfDateKeyInTimeZone(last7DaysRange.toKey)!;
+    const tomorrowStart = last7DaysRange.to;
+    const yesterdayStart = startOfDateKeyInTimeZone(addDaysToDateKey(last7DaysRange.toKey, -1))!;
+    const weekAgoStart = last7DaysRange.from;
+    const dateExpr = sql<string>`(${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text`;
 
     const userFilter = eq(schema.prompts.userId, userId);
     const notDeleted = isNull(schema.prompts.deletedAt);
@@ -79,13 +82,13 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
         .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, yesterdayStart), lt(schema.prompts.timestamp, todayStart))),
 
         db.select({
-          date: sql<string>`date(${schema.prompts.timestamp})`,
+          date: dateExpr,
           count: sql<number>`count(*)`,
         })
         .from(schema.prompts)
         .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
-        .groupBy(sql`date(${schema.prompts.timestamp})`)
-        .orderBy(sql`date(${schema.prompts.timestamp})`),
+        .groupBy(sql`1`)
+        .orderBy(sql`1`),
 
         db.execute(sql`
           SELECT
@@ -137,13 +140,13 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
 
         // Daily token trend (7 days)
         db.select({
-          date: sql<string>`date(${schema.prompts.timestamp})`,
+          date: dateExpr,
           tokens: sql<number>`coalesce(sum(coalesce(${schema.prompts.tokenEstimate},0) + coalesce(${schema.prompts.tokenEstimateResponse},0)),0)`,
         })
         .from(schema.prompts)
         .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart)))
-        .groupBy(sql`date(${schema.prompts.timestamp})`)
-        .orderBy(sql`date(${schema.prompts.timestamp})`),
+        .groupBy(sql`1`)
+        .orderBy(sql`1`),
 
         // Tokens by project (top 5)
         db.select({
@@ -187,13 +190,13 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
 
         // Quality daily trend (7 days)
         db.select({
-          date: sql<string>`date(${schema.prompts.timestamp})`,
+          date: dateExpr,
           avg: sql<number>`coalesce(avg(${schema.prompts.qualityScore}),0)`,
         })
         .from(schema.prompts)
         .where(and(userFilter, notDeleted, gte(schema.prompts.timestamp, weekAgoStart), lt(schema.prompts.timestamp, tomorrowStart), sql`${schema.prompts.qualityScore} IS NOT NULL`))
-        .groupBy(sql`date(${schema.prompts.timestamp})`)
-        .orderBy(sql`date(${schema.prompts.timestamp})`),
+        .groupBy(sql`1`)
+        .orderBy(sql`1`),
 
         // Top 3 quality prompts (7 days)
         db.select({
@@ -222,12 +225,7 @@ export async function getDashboardData(userId: string): Promise<DashboardData | 
       ]);
 
     // Fill 7-day series with zeros for missing days
-    const dayKeys: string[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(todayStart);
-      d.setUTCDate(d.getUTCDate() - i);
-      dayKeys.push(d.toISOString().slice(0, 10));
-    }
+    const dayKeys = last7DaysRange.dayKeys;
     const dailyMap = new Map(dailyCounts.map(d => [d.date, Number(d.count)]));
     const last7Days = dayKeys.map(date => ({ date, count: dailyMap.get(date) ?? 0 }));
 

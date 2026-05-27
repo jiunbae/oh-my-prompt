@@ -1,6 +1,7 @@
-import { extensions, getExtension } from "@/extensions/registry";
+import { extensions } from "@/extensions/registry";
 import type { ExtensionProcessor } from "@/extensions/types";
 import { logger } from "@/lib/logger";
+import { dateTimePartsInTimeZone, getLastNDaysRange } from "@/lib/date-utils";
 
 /**
  * Minimal cron expression parser supporting the standard 5-field format:
@@ -52,12 +53,14 @@ export function shouldRun(cronExpr: string, date: Date = new Date()): boolean {
     return false;
   }
 
+  const local = dateTimePartsInTimeZone(date);
+
   return (
-    parsed.minutes.has(date.getUTCMinutes()) &&
-    parsed.hours.has(date.getUTCHours()) &&
-    parsed.daysOfMonth.has(date.getUTCDate()) &&
-    parsed.months.has(date.getUTCMonth() + 1) &&
-    parsed.daysOfWeek.has(date.getUTCDay())
+    parsed.minutes.has(local.minute) &&
+    parsed.hours.has(local.hour) &&
+    parsed.daysOfMonth.has(local.day) &&
+    parsed.months.has(local.month) &&
+    parsed.daysOfWeek.has(local.weekday)
   );
 }
 
@@ -81,18 +84,14 @@ export async function runScheduledJob(
 
   const processor = ext.processor as ExtensionProcessor;
 
-  // Default date range: last 7 days
-  const now = new Date();
-  const to = new Date(now);
-  to.setUTCHours(0, 0, 0, 0);
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 6);
+  // Default date range: last 7 app-timezone days
+  const defaultRange = getLastNDaysRange(7);
 
   const processorInput = {
     userId: input?.userId || "system",
     dateRange: input?.dateRange || {
-      from: from.toISOString().slice(0, 10),
-      to: to.toISOString().slice(0, 10),
+      from: defaultRange.fromKey,
+      to: defaultRange.toKey,
     },
     parameters: {},
   };

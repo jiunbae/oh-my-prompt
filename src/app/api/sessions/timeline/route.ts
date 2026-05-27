@@ -5,7 +5,13 @@ import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
 import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
-import { parseDate } from "@/lib/date-utils";
+import {
+  addDaysToDateKey,
+  dateKeyInTimeZone,
+  parseDate,
+  startOfDateKeyInTimeZone,
+  endExclusiveOfDateKeyInTimeZone,
+} from "@/lib/date-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -41,17 +47,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Default range: last 90 days (all UTC)
+    // Default range: last 90 days in the app timezone
     const now = new Date();
-    const defaultFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 90));
+    const todayKey = dateKeyInTimeZone(now);
+    const defaultFrom = startOfDateKeyInTimeZone(addDaysToDateKey(todayKey, -90))!;
 
-    const from = fromParam ? parseDate(fromParam)! : defaultFrom;
+    const from = fromParam ? startOfDateKeyInTimeZone(fromParam)! : defaultFrom;
 
-    // Use exclusive upper bound: to < (toDate + 1 day) — avoids setHours timezone skew
-    const toDateUTC = toParam
-      ? parseDate(toParam)!
-      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const toExclusive = new Date(toDateUTC.getTime() + 24 * 60 * 60 * 1000);
+    // Use exclusive upper bound: to < start of next local day
+    const toExclusive = toParam
+      ? endExclusiveOfDateKeyInTimeZone(toParam)!
+      : endExclusiveOfDateKeyInTimeZone(todayKey)!;
 
     // Pagination
     const limit = Math.min(Math.max(parseInt(limitParam ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
@@ -103,7 +109,7 @@ export async function GET(request: NextRequest) {
 
     const rows = extractRows(sessionsResult);
 
-    // Group sessions by day (UTC)
+    // Group sessions by day in the app timezone
     const dayMap = new Map<string, Array<{
       sessionId: string;
       displayName: string | null;
@@ -123,7 +129,7 @@ export async function GET(request: NextRequest) {
       const endDate = new Date(String(row.ended_at));
       const startedAt = startDate.toISOString();
       const endedAt = endDate.toISOString();
-      const dateKey = startedAt.slice(0, 10); // UTC date
+      const dateKey = dateKeyInTimeZone(startDate);
 
       const durationMs = endDate.getTime() - startDate.getTime();
       const durationMinutes = Math.round(durationMs / 60000);

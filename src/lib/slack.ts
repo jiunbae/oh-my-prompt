@@ -3,6 +3,7 @@ import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, sql, gte, lt, isNull } from "drizzle-orm";
+import { getLastNDaysRange } from "@/lib/date-utils";
 
 const SLACK_TIMEOUT_MS = env.SLACK_WEBHOOK_TIMEOUT_MS;
 
@@ -145,11 +146,9 @@ export async function queryDailySummaryData(
   userId: string,
   teamId?: string | null,
 ): Promise<DailySummaryData> {
-  const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const tomorrowStart = new Date(todayStart);
-  tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1);
+  const todayRange = getLastNDaysRange(1);
+  const todayStart = todayRange.from;
+  const tomorrowStart = todayRange.to;
 
   const baseWhere = teamId
     ? and(
