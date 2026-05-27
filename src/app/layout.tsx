@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 import { UserProvider } from "@/contexts/user-context";
 import { TeamProvider } from "@/contexts/team-context";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -69,28 +71,33 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <link rel="apple-touch-icon" href="/icon.svg" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        <PwaProvider>
-          <ThemeProvider>
-            <UserProvider>
-              <TeamProvider>
-                <OnboardingGuard>{children}</OnboardingGuard>
-              </TeamProvider>
-            </UserProvider>
-          </ThemeProvider>
-        </PwaProvider>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <PwaProvider>
+            <ThemeProvider>
+              <UserProvider>
+                <TeamProvider>
+                  <OnboardingGuard>{children}</OnboardingGuard>
+                </TeamProvider>
+              </UserProvider>
+            </ThemeProvider>
+          </PwaProvider>
+        </NextIntlClientProvider>
       </body>
     </html>
   );
