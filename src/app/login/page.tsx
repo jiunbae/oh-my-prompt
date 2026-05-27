@@ -3,11 +3,16 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useTranslations } from "next-intl";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function LoginPage() {
+  const tAuth = useTranslations("auth");
+  const tCommon = useTranslations("common");
+  const tAuthErrors = useTranslations("auth.errors");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -31,10 +36,10 @@ export default function LoginPage() {
         router.refresh();
       } else {
         const data = await res.json();
-        setError(data.error || "Invalid credentials");
+        setError(data.error || tAuthErrors("invalidCredentials"));
       }
     } catch {
-      setError("Something went wrong");
+      setError(tAuthErrors("generic"));
     } finally {
       setLoading(false);
     }
@@ -52,7 +57,7 @@ export default function LoginPage() {
             />
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Sign in to your prompt journal
+            {tAuth("loginTagline")}
           </p>
         </CardHeader>
         <CardContent>
@@ -60,7 +65,7 @@ export default function LoginPage() {
             <div>
               <Input
                 type="email"
-                placeholder="Email"
+                placeholder={tAuth("email")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoFocus
@@ -69,7 +74,7 @@ export default function LoginPage() {
             <div>
               <Input
                 type="password"
-                placeholder="Password"
+                placeholder={tAuth("password")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
@@ -82,7 +87,7 @@ export default function LoginPage() {
               className="w-full"
               disabled={loading || !email || !password}
             >
-              {loading ? "..." : "Sign In"}
+              {loading ? "..." : tCommon("signIn")}
             </Button>
           </form>
           <div className="mt-3 text-center">
@@ -90,19 +95,19 @@ export default function LoginPage() {
               href="/forgot-password"
               className="text-xs text-muted-foreground hover:text-primary"
             >
-              Forgot password?
+              {tAuth("forgotPassword")}
             </Link>
           </div>
           <div className="mt-4 text-center text-sm text-muted-foreground">
-            Don&apos;t have an account?{" "}
+            {tAuth("noAccount")}{" "}
             <Link href="/register" className="text-primary hover:text-primary/80">
-              Register
+              {tAuth("register")}
             </Link>
           </div>
           {process.env.NEXT_PUBLIC_APP_VERSION && (
             <div className="mt-6 pt-4 border-t border-border text-center">
               <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
-                Build: {process.env.NEXT_PUBLIC_APP_VERSION}
+                {tAuth("build")}: {process.env.NEXT_PUBLIC_APP_VERSION}
               </p>
             </div>
           )}

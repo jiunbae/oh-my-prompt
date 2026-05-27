@@ -3,11 +3,15 @@
 import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 function ResetPasswordForm() {
+  const tAuth = useTranslations("auth");
+  const tAuthErrors = useTranslations("auth.errors");
+
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
 
@@ -30,17 +34,16 @@ function ResetPasswordForm() {
               />
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              Invalid reset link
+              {tAuth("resetInvalidTitle")}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground text-center">
-              This password reset link is invalid or missing a token.
-              Please contact your administrator for a new reset link.
+              {tAuth("resetInvalidMessage")}
             </p>
             <Link href="/login">
               <Button variant="outline" className="w-full">
-                Back to Login
+                {tAuth("backToLogin")}
               </Button>
             </Link>
           </CardContent>
@@ -62,16 +65,15 @@ function ResetPasswordForm() {
               />
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              Password reset successful
+              {tAuth("resetSuccessTitle")}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground text-center">
-              Your password has been updated. You can now sign in with your new
-              password.
+              {tAuth("resetSuccessMessage")}
             </p>
             <Link href="/login">
-              <Button className="w-full">Go to Login</Button>
+              <Button className="w-full">{tAuth("goToLogin")}</Button>
             </Link>
           </CardContent>
         </Card>
@@ -84,12 +86,12 @@ function ResetPasswordForm() {
     setError("");
 
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
+      setError(tAuthErrors("passwordsDontMatch"));
       return;
     }
 
     if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+      setError(tAuthErrors("passwordTooShort"));
       return;
     }
 
@@ -107,10 +109,10 @@ function ResetPasswordForm() {
       if (res.ok) {
         setSuccess(true);
       } else {
-        setError(data.error || "Failed to reset password");
+        setError(data.error || tAuthErrors("resetFailed"));
       }
     } catch {
-      setError("Something went wrong");
+      setError(tAuthErrors("generic"));
     } finally {
       setLoading(false);
     }
@@ -128,7 +130,7 @@ function ResetPasswordForm() {
             />
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Set a new password
+            {tAuth("resetSubtitle")}
           </p>
         </CardHeader>
         <CardContent>
@@ -136,7 +138,7 @@ function ResetPasswordForm() {
             <div>
               <Input
                 type="password"
-                placeholder="New password"
+                placeholder={tAuth("newPassword")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoFocus
@@ -146,7 +148,7 @@ function ResetPasswordForm() {
             <div>
               <Input
                 type="password"
-                placeholder="Confirm new password"
+                placeholder={tAuth("confirmNewPassword")}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
@@ -160,7 +162,7 @@ function ResetPasswordForm() {
               className="w-full"
               disabled={loading || !password || !confirmPassword}
             >
-              {loading ? "..." : "Reset Password"}
+              {loading ? "..." : tAuth("resetButton")}
             </Button>
           </form>
           <div className="mt-4 text-center">
@@ -168,7 +170,7 @@ function ResetPasswordForm() {
               href="/login"
               className="text-sm text-muted-foreground hover:text-primary"
             >
-              Back to Login
+              {tAuth("backToLogin")}
             </Link>
           </div>
         </CardContent>
