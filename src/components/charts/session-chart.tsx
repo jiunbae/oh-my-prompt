@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface SessionPoint {
   date: string;
@@ -28,6 +29,8 @@ export function SessionChart({ data }: SessionChartProps) {
     }),
   }));
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[200px] w-full mt-4">
       <ResponsiveContainer width="100%" height="100%">
@@ -37,27 +40,22 @@ export function SessionChart({ data }: SessionChartProps) {
             dataKey="displayDate"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             minTickGap={30}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             allowDecimals={false}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            itemStyle={{ color: "var(--chart-4)" }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
             formatter={(value) => [`${value}`, "Sessions"]}
           />
-          <Bar dataKey="sessions" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="sessions" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

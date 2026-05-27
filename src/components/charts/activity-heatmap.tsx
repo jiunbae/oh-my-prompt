@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { ChartEmpty } from "./_chart-helpers";
 
 interface ActivityData {
   date: string;
@@ -67,7 +68,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
   }, []);
 
   if (data.length === 0) {
-    return <p className="text-sm text-muted-foreground text-center py-4">No activity data</p>;
+    return <ChartEmpty message="No activity data" height={120} />;
   }
 
   const countMap = new Map(data.map((d) => [d.date, d.count]));

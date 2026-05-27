@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface TokenData {
   date: string;
@@ -36,6 +37,8 @@ interface TokenUsageChartProps {
 export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 200 }: TokenUsageChartProps) {
   const formatTick = (value: number) =>
     value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+
+  const tooltipStyles = chartTooltipStyles();
 
   // Multi-user comparison mode
   if (compareUsers && compareUsers.length > 0) {
@@ -67,23 +70,19 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
               dataKey="displayDate"
               axisLine={false}
               tickLine={false}
-              tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+              tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
               minTickGap={30}
             />
             <YAxis
               axisLine={false}
               tickLine={false}
-              tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+              tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
               tickFormatter={formatTick}
             />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "var(--color-card)",
-                borderColor: "var(--color-border)",
-                fontSize: "12px",
-                color: "var(--color-foreground)",
-              }}
-              labelStyle={{ color: "var(--color-muted-foreground)" }}
+              contentStyle={tooltipStyles.contentStyle}
+              labelStyle={tooltipStyles.labelStyle}
+              itemStyle={tooltipStyles.itemStyle}
             />
             {compareUsers.map((u) => {
               const dimmed = highlightUserId != null && highlightUserId !== u.id;
@@ -115,22 +114,27 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
     displayDate: new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
   }));
 
+  // Input keeps the primary accent; output uses the positive/green semantic
+  // colour to read as "value produced".
+  const inputColor = chartColors.primary;
+  const outputColor = chartColors.semantic.positive;
+
   return (
     <div style={{ height }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={formattedData}>
           <defs>
             <linearGradient id="colorInput" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
+              <stop offset="5%" stopColor={inputColor} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={inputColor} stopOpacity={0} />
             </linearGradient>
             <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="var(--chart-3)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="var(--chart-3)" stopOpacity={0} />
+              <stop offset="5%" stopColor={outputColor} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={outputColor} stopOpacity={0} />
             </linearGradient>
             <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
+              <stop offset="5%" stopColor={inputColor} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={inputColor} stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" />
@@ -138,23 +142,19 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
             dataKey="displayDate"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             minTickGap={30}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             tickFormatter={formatTick}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
           />
           {hasIOSplit ? (
             <>
@@ -162,7 +162,7 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
                 type="monotone"
                 dataKey="inputTokens"
                 name="Input"
-                stroke="var(--chart-1)"
+                stroke={inputColor}
                 fillOpacity={1}
                 fill="url(#colorInput)"
                 stackId="1"
@@ -171,7 +171,7 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
                 type="monotone"
                 dataKey="outputTokens"
                 name="Output"
-                stroke="var(--chart-3)"
+                stroke={outputColor}
                 fillOpacity={1}
                 fill="url(#colorOutput)"
                 stackId="1"
@@ -181,7 +181,7 @@ export function TokenUsageChart({ data, compareUsers, highlightUserId, height = 
             <Area
               type="monotone"
               dataKey="tokens"
-              stroke="var(--chart-1)"
+              stroke={inputColor}
               fillOpacity={1}
               fill="url(#colorTokens)"
             />
