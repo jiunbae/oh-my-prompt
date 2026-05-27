@@ -96,6 +96,7 @@ const publicRoutes = [
   "/reset-password",
   "/share",
   "/api/share",
+  "/api/locale", // language switcher must work on /login (pre-auth)
 ];
 
 // Routes that accept alternative authentication (X-User-Token header)
