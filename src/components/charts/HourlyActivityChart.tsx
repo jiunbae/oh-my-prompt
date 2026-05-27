@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface HourlyActivityChartProps {
   data: Array<{ hour: number; count: number }>;
@@ -32,11 +33,7 @@ export function HourlyActivityChart({ data, isLoading }: HourlyActivityChartProp
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return (
-      <div className="h-[280px] w-full flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No hourly activity data</p>
-      </div>
-    );
+    return <ChartEmpty message="No hourly activity data" />;
   }
 
   // Fill all 24 hours
@@ -50,6 +47,8 @@ export function HourlyActivityChart({ data, isLoading }: HourlyActivityChartProp
   // Only show every 3rd label to avoid crowding
   const tickHours = [0, 3, 6, 9, 12, 15, 18, 21];
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -59,27 +58,22 @@ export function HourlyActivityChart({ data, isLoading }: HourlyActivityChartProp
             dataKey="hour"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             ticks={tickHours}
             tickFormatter={(hour: number) => formatHour(hour)}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             allowDecimals={false}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
           />
-          <Bar dataKey="count" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="count" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

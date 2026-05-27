@@ -10,22 +10,12 @@ import {
   Legend,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface ProjectDistributionChartProps {
   data: Array<{ name: string; count: number }>;
   isLoading?: boolean;
 }
-
-const COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-  "#8b5cf6",
-  "#ec4899",
-  "#06b6d4",
-];
 
 export function ProjectDistributionChart({ data, isLoading }: ProjectDistributionChartProps) {
   const id = useId();
@@ -39,11 +29,7 @@ export function ProjectDistributionChart({ data, isLoading }: ProjectDistributio
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return (
-      <div className="h-[280px] w-full flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No project distribution data</p>
-      </div>
-    );
+    return <ChartEmpty message="No project distribution data" />;
   }
 
   // Top 8 projects, group rest as "Other"
@@ -52,7 +38,7 @@ export function ProjectDistributionChart({ data, isLoading }: ProjectDistributio
   const otherCount = sorted.slice(8).reduce((sum, d) => sum + d.count, 0);
   const chartData = otherCount > 0 ? [...top, { name: "Other", count: otherCount }] : top;
 
-  const total = chartData.reduce((sum, d) => sum + d.count, 0);
+  const tooltipStyles = chartTooltipStyles();
 
   return (
     <div className="h-[280px] w-full">
@@ -73,18 +59,14 @@ export function ProjectDistributionChart({ data, isLoading }: ProjectDistributio
             {chartData.map((entry, index) => (
               <Cell
                 key={`cell-${id}-${index}`}
-                fill={COLORS[index % COLORS.length]}
+                fill={chartColors.categorical[index % chartColors.categorical.length]}
               />
             ))}
           </Pie>
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
           />
           <Legend
             verticalAlign="bottom"

@@ -1,12 +1,15 @@
 "use client";
 
 import { Bar, BarChart, ResponsiveContainer, XAxis, Tooltip } from "recharts";
+import { chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface QualityDistributionChartProps {
   data: Array<{ range: string; count: number }>;
 }
 
 export function QualityDistributionChart({ data }: QualityDistributionChartProps) {
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-24 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -15,17 +18,14 @@ export function QualityDistributionChart({ data }: QualityDistributionChartProps
             dataKey="range"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
           />
-          <Bar dataKey="count" fill="var(--chart-2)" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="count" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

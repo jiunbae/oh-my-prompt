@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface PromptVolumeChartProps {
   data: Array<{ date: string; count: number }>;
@@ -30,11 +31,7 @@ export function PromptVolumeChart({ data, isLoading }: PromptVolumeChartProps) {
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return (
-      <div className="h-[280px] w-full flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">No prompt volume data</p>
-      </div>
-    );
+    return <ChartEmpty message="No prompt volume data" />;
   }
 
   const formattedData = data.map((d) => ({
@@ -45,14 +42,16 @@ export function PromptVolumeChart({ data, isLoading }: PromptVolumeChartProps) {
     }),
   }));
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[280px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={formattedData} margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="var(--chart-1)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0} />
+              <stop offset="5%" stopColor={chartColors.primary} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={chartColors.primary} stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" />
@@ -60,30 +59,25 @@ export function PromptVolumeChart({ data, isLoading }: PromptVolumeChartProps) {
             dataKey="displayDate"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             minTickGap={30}
           />
           <YAxis
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             allowDecimals={false}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              borderRadius: "8px",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
             formatter={(value: number | string | undefined) => [`${value ?? 0} prompts`, "Count"]}
           />
           <Area
             type="monotone"
             dataKey="count"
-            stroke="var(--chart-1)"
+            stroke={chartColors.primary}
             strokeWidth={2}
             fillOpacity={1}
             fill={`url(#${gradientId})`}

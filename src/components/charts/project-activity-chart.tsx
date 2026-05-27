@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { chartColors, chartTooltipStyles } from "./_chart-helpers";
 
 interface ProjectActivityDatum {
   project: string;
@@ -30,6 +31,8 @@ export function ProjectActivityChart({ data }: ProjectActivityChartProps) {
     displayProject: truncate(d.project || "No project", 18),
   }));
 
+  const tooltipStyles = chartTooltipStyles();
+
   return (
     <div className="h-[240px] w-full mt-4">
       <ResponsiveContainer width="100%" height="100%">
@@ -39,7 +42,7 @@ export function ProjectActivityChart({ data }: ProjectActivityChartProps) {
             type="number"
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
             allowDecimals={false}
           />
           <YAxis
@@ -48,20 +51,15 @@ export function ProjectActivityChart({ data }: ProjectActivityChartProps) {
             axisLine={false}
             tickLine={false}
             width={110}
-            tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+            tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
           />
           <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--color-card)",
-              borderColor: "var(--color-border)",
-              fontSize: "12px",
-              color: "var(--color-foreground)",
-            }}
-            itemStyle={{ color: "var(--chart-1)" }}
-            labelStyle={{ color: "var(--color-muted-foreground)" }}
+            contentStyle={tooltipStyles.contentStyle}
+            labelStyle={tooltipStyles.labelStyle}
+            itemStyle={tooltipStyles.itemStyle}
             formatter={(value) => [`${value}`, "Prompts"]}
           />
-          <Bar dataKey="count" fill="var(--chart-1)" radius={[0, 4, 4, 0]} />
+          <Bar dataKey="count" fill={chartColors.primary} radius={[0, 3, 3, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
