@@ -19,8 +19,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const variantStyles: Record<ButtonVariant, string> = {
   default:
     "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80",
+  // outline uses the bumped `--border` (3:1+) directly, plus an inset shadow that
+  // sharpens the edge in light mode where bg-card and bg-background often match.
   outline:
-    "border border-border bg-transparent text-foreground hover:bg-accent active:bg-accent/80",
+    "border border-border bg-transparent text-foreground shadow-[inset_0_0_0_1px_var(--border)] hover:bg-accent hover:text-accent-foreground active:bg-accent/80",
   ghost:
     "bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent/80",
   destructive:
