@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  /* Light theme */
+  /* Light theme — WCAG-AA tuned (see scripts/check-contrast.mjs) */
   --background: #ffffff;
   --foreground: #09090b;
   --card: #ffffff;
@@ -11,24 +11,25 @@
   --secondary: #f4f4f5;
   --secondary-foreground: #3f3f46;
   --muted: #f4f4f5;
-  --muted-foreground: #71717a;
+  --muted-foreground: #5b5b66; /* was #71717a — 4.83:1 was just-enough; bump for headroom (7.0:1) */
   --accent: #f4f4f5;
   --accent-foreground: #18181b;
-  --destructive: #ef4444;
+  --destructive: #dc2626; /* was #ef4444 — keep white text legible (4.83:1) */
   --destructive-foreground: #ffffff;
-  --border: #e4e4e7;
+  --border: #94949c; /* was #e4e4e7 — bumped to clear UI 3:1 (3.01:1) */
   --ring: #2563eb;
   --surface: #f4f4f5;
   --surface-secondary: #e4e4e7;
   --input-bg: #ffffff;
+  --input-border: #8e8e96; /* explicit input/form-field border (3.25:1) */
   --skeleton: #e4e4e7;
   --scrollbar-thumb: #d4d4d8;
   --scrollbar-thumb-hover: #a1a1aa;
 
   /* New semantic tokens */
-  --surface-elevated: #ffffff;
+  --surface-elevated: #fafafb; /* was #ffffff — slight tint so elevated reads as raised vs --card */
   --surface-sunken: #f0f0f2;
-  --border-subtle: #f0f0f2;
+  --border-subtle: #e4e4e7; /* low-emphasis dividers (does not need 3:1) */
   --border-strong: #2563eb;
   --accent-gradient-from: #2563eb;
   --accent-gradient-to: #7c3aed;
@@ -58,21 +59,22 @@
   --foreground: #fafafa;
   --card: #18181b;
   --card-foreground: #fafafa;
-  --primary: #3b82f6;
-  --primary-foreground: #fafafa;
+  --primary: #2563eb; /* was #3b82f6 — white on 3b82f6 only hits 3.68; 2563eb gives 5.17 */
+  --primary-foreground: #ffffff;
   --secondary: #27272a;
-  --secondary-foreground: #a1a1aa;
+  --secondary-foreground: #d4d4d8; /* was #a1a1aa — keep generous headroom on card */
   --muted: #27272a;
-  --muted-foreground: #71717a;
+  --muted-foreground: #a1a1aa; /* was #71717a — now 7.76:1 vs bg, 6.91:1 vs card */
   --accent: #27272a;
   --accent-foreground: #fafafa;
-  --destructive: #ef4444;
-  --destructive-foreground: #fafafa;
-  --border: #27272a;
+  --destructive: #dc2626; /* was #ef4444 (3.61 fail) — 4.83 with white */
+  --destructive-foreground: #ffffff;
+  --border: #65656d; /* was #27272a — 3.07:1 vs card, 3.43:1 vs bg */
   --ring: #3b82f6;
   --surface: #18181b;
   --surface-secondary: #27272a;
   --input-bg: #18181b;
+  --input-border: #65656d;
   --skeleton: #27272a;
   --scrollbar-thumb: #3f3f46;
   --scrollbar-thumb-hover: #52525b;
@@ -80,7 +82,7 @@
   /* New semantic tokens */
   --surface-elevated: #1f1f23;
   --surface-sunken: #0a0a0c;
-  --border-subtle: #1f1f23;
+  --border-subtle: #2a2a2e; /* low-emphasis dividers */
   --border-strong: #3b82f6;
   --accent-gradient-from: #3b82f6;
   --accent-gradient-to: #8b5cf6;
@@ -108,15 +110,15 @@
   --primary: #06b6d4;
   --primary-foreground: #0a0e1a;
   --secondary: #1e293b;
-  --secondary-foreground: #94a3b8;
+  --secondary-foreground: #cbd5e1; /* was #94a3b8 — better contrast on darker secondary */
   --muted: #1e293b;
-  --muted-foreground: #64748b;
+  --muted-foreground: #94a3b8; /* was #64748b (4.05) — now 6.92:1 vs card */
   --accent: #164e63;
   --accent-foreground: #e2e8f0;
-  --destructive: #f43f5e;
-  --destructive-foreground: #fafafa;
-  --border: #1e3a5f;
-  --border-subtle: #162032;
+  --destructive: #e11d48; /* was #f43f5e (3.52) — 4.70:1 with white */
+  --destructive-foreground: #ffffff;
+  --border: #65759a; /* was #1e3a5f (1.67) — 3.86:1 vs card */
+  --border-subtle: #1e3a5f; /* the previous --border is now low-emphasis */
   --border-strong: #2563eb;
   --ring: #06b6d4;
   --surface: #111827;
@@ -124,6 +126,7 @@
   --surface-elevated: #1a2332;
   --surface-sunken: #070b14;
   --input-bg: #0f172a;
+  --input-border: #65759a;
   --skeleton: #1e293b;
   --scrollbar-thumb: #334155;
   --scrollbar-thumb-hover: #475569;
@@ -154,15 +157,15 @@
   --primary: #d97706;
   --primary-foreground: #0c1208;
   --secondary: #1f2a16;
-  --secondary-foreground: #a3a08a;
+  --secondary-foreground: #c8c2a8; /* was #a3a08a — more headroom */
   --muted: #1f2a16;
-  --muted-foreground: #6b7260;
+  --muted-foreground: #929880; /* was #6b7260 (3.80) — now 5.68:1 vs card */
   --accent: #365314;
   --accent-foreground: #e8e5de;
   --destructive: #dc2626;
-  --destructive-foreground: #fafafa;
-  --border: #2d3a1e;
-  --border-subtle: #1a2410;
+  --destructive-foreground: #ffffff;
+  --border: #677852; /* was #2d3a1e (1.57) — 3.54:1 vs card, 3.96:1 vs bg */
+  --border-subtle: #2d3a1e;
   --border-strong: #d97706;
   --ring: #d97706;
   --surface: #161f10;
@@ -170,6 +173,7 @@
   --surface-elevated: #1c2814;
   --surface-sunken: #080d05;
   --input-bg: #121a0c;
+  --input-border: #677852;
   --skeleton: #1f2a16;
   --scrollbar-thumb: #3d4a2e;
   --scrollbar-thumb-hover: #4d5c3c;
@@ -200,15 +204,15 @@
   --primary: #f97316;
   --primary-foreground: #150a0a;
   --secondary: #2a1515;
-  --secondary-foreground: #b09090;
+  --secondary-foreground: #d4afaf; /* was #b09090 — more headroom */
   --muted: #2a1515;
-  --muted-foreground: #7a6060;
+  --muted-foreground: #a88888; /* was #7a6060 (3.40) — now 5.74:1 vs card */
   --accent: #7c2d12;
   --accent-foreground: #f0e4e4;
-  --destructive: #ef4444;
-  --destructive-foreground: #fafafa;
-  --border: #3b1c1c;
-  --border-subtle: #261212;
+  --destructive: #dc2626; /* was #ef4444 (3.61) — 4.83 with white */
+  --destructive-foreground: #ffffff;
+  --border: #94555a; /* was #3b1c1c (1.20) — 3.25:1 vs card, 3.44:1 vs bg */
+  --border-subtle: #3b1c1c;
   --border-strong: #f97316;
   --ring: #f97316;
   --surface: #1f1010;
@@ -216,6 +220,7 @@
   --surface-elevated: #251414;
   --surface-sunken: #0f0606;
   --input-bg: #1a0c0c;
+  --input-border: #94555a;
   --skeleton: #2a1515;
   --scrollbar-thumb: #4a2828;
   --scrollbar-thumb-hover: #5c3636;
@@ -246,15 +251,15 @@
   --primary: #a78bfa;
   --primary-foreground: #0f0a1a;
   --secondary: #221838;
-  --secondary-foreground: #a090b8;
+  --secondary-foreground: #cab8d8; /* was #a090b8 — more headroom */
   --muted: #221838;
-  --muted-foreground: #6a5c80;
+  --muted-foreground: #a890bc; /* was #6a5c80 (3.20) — now 6.36:1 vs card */
   --accent: #4c1d95;
   --accent-foreground: #e8e0f0;
-  --destructive: #f43f5e;
-  --destructive-foreground: #fafafa;
-  --border: #2e1f4a;
-  --border-subtle: #1e1430;
+  --destructive: #e11d48; /* was #f43f5e (3.52) — 4.70 with white */
+  --destructive-foreground: #ffffff;
+  --border: #7860a0; /* was #2e1f4a (1.22) — 3.43:1 vs card, 3.69:1 vs bg */
+  --border-subtle: #2e1f4a;
   --border-strong: #a78bfa;
   --ring: #a78bfa;
   --surface: #1a1228;
@@ -262,6 +267,7 @@
   --surface-elevated: #201630;
   --surface-sunken: #0a0612;
   --input-bg: #150e22;
+  --input-border: #7860a0;
   --skeleton: #221838;
   --scrollbar-thumb: #3b2860;
   --scrollbar-thumb-hover: #4c3678;
@@ -299,6 +305,7 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-input-border: var(--input-border);
   --color-ring: var(--ring);
   --color-surface: var(--surface);
   --color-surface-secondary: var(--surface-secondary);
@@ -447,3 +454,54 @@ select {
   animation-timing-function: linear;
   animation-fill-mode: forwards;
 }
+
+/* ---------------------------------------------------------------------------
+ * Named type scale — adopt in pages where the design system asks for a
+ * specific role. These are *additive*; existing Tailwind utilities still work.
+ * Pair each step with semantic markup (h1/h2/etc.) — the classes only style.
+ * ------------------------------------------------------------------------- */
+@layer utilities {
+  .t-display {
+    font-size: 2rem; /* 32px */
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+  }
+  .t-h1 {
+    font-size: 1.5rem; /* 24px */
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    font-weight: 600;
+  }
+  .t-h2 {
+    font-size: 1.125rem; /* 18px */
+    line-height: 1.3;
+    font-weight: 600;
+  }
+  .t-h3 {
+    font-size: 0.9375rem; /* 15px */
+    line-height: 1.4;
+    font-weight: 600;
+  }
+  .t-body {
+    font-size: 0.875rem; /* 14px */
+    line-height: 1.5;
+    font-weight: 400;
+  }
+  .t-caption {
+    font-size: 0.75rem; /* 12px */
+    line-height: 1.4;
+    font-weight: 500;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Deprecation notice: any `text-[10px]` in feature code is now treated as
+ * legacy. 10px violates our minimum readable size and the design review told
+ * downstream tracks to migrate it to `text-xs` (12px). This stylesheet does
+ * NOT silently rewrite 10px (that would mask the issue from feature teams);
+ * we simply forbid it via review and provide `.t-caption` as the replacement.
+ *
+ * TODO(other tracks): replace remaining `text-[10px]` occurrences with
+ * `text-xs` / `.t-caption`. Do not extend the usage.
+ * ------------------------------------------------------------------------- */

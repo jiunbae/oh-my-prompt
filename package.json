@@ -19,7 +19,8 @@
     "docker:down": "docker compose down",
     "setup": "docker compose up -d && bash -c 'for i in $(seq 1 30); do docker compose exec -T db pg_isready -q && break || sleep 1; done' && pnpm db:push",
     "build:cli": "bash scripts/build-cli.sh",
-    "verify:cli": "node packages/omp-cli/scripts/verify-build.js"
+    "verify:cli": "node packages/omp-cli/scripts/verify-build.js",
+    "check-contrast": "node scripts/check-contrast.mjs"
   },
   "dependencies": {
     "@clack/prompts": "^1.0.1",
