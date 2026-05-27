@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { useLocale } from "next-intl";
 import {
   Area,
   AreaChart,
@@ -16,9 +17,21 @@ import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 interface PromptVolumeChartProps {
   data: Array<{ date: string; count: number }>;
   isLoading?: boolean;
+  emptyMessage?: string;
+  /** Tooltip series label (e.g. "Count"). */
+  tooltipLabel?: string;
+  /** Format the raw value into the tooltip's value text (e.g. "{n} prompts"). */
+  formatTooltipValue?: (value: number | string | undefined) => string;
 }
 
-export function PromptVolumeChart({ data, isLoading }: PromptVolumeChartProps) {
+export function PromptVolumeChart({
+  data,
+  isLoading,
+  emptyMessage = "No prompt volume data",
+  tooltipLabel = "Count",
+  formatTooltipValue,
+}: PromptVolumeChartProps) {
+  const locale = useLocale();
   const id = useId();
   const gradientId = `colorVolume-${id}`;
 
@@ -31,12 +44,12 @@ export function PromptVolumeChart({ data, isLoading }: PromptVolumeChartProps) {
   }
 
   if (data.length === 0 || data.every((d) => d.count === 0)) {
-    return <ChartEmpty message="No prompt volume data" />;
+    return <ChartEmpty message={emptyMessage} />;
   }
 
   const formattedData = data.map((d) => ({
     ...d,
-    displayDate: new Date(d.date + "T12:00:00Z").toLocaleDateString("en-US", {
+    displayDate: new Date(d.date + "T12:00:00Z").toLocaleDateString(locale, {
       month: "short",
       day: "numeric",
     }),
@@ -72,7 +85,10 @@ export function PromptVolumeChart({ data, isLoading }: PromptVolumeChartProps) {
             contentStyle={tooltipStyles.contentStyle}
             labelStyle={tooltipStyles.labelStyle}
             itemStyle={tooltipStyles.itemStyle}
-            formatter={(value: number | string | undefined) => [`${value ?? 0} prompts`, "Count"]}
+            formatter={(value: number | string | undefined) => [
+              formatTooltipValue ? formatTooltipValue(value) : `${value ?? 0} prompts`,
+              tooltipLabel,
+            ]}
           />
           <Area
             type="monotone"

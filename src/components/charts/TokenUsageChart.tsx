@@ -1,5 +1,6 @@
 "use client";
 
+import { useLocale } from "next-intl";
 import {
   Bar,
   BarChart,
@@ -15,6 +16,14 @@ import { ChartEmpty, chartColors, chartTooltipStyles } from "./_chart-helpers";
 interface TokenUsageChartProps {
   data: Array<{ date: string; tokens: number }>;
   isLoading?: boolean;
+  emptyMessage?: string;
+  /** Tooltip series label (e.g. "Tokens"). */
+  tooltipLabel?: string;
+  /**
+   * Format the already-shortened tick string ("4.2k") into the tooltip's
+   * value text (e.g. "{value} tokens"). Receives the formatted string.
+   */
+  formatTooltipValue?: (formatted: string) => string;
 }
 
 function formatTick(value: number): string {
@@ -22,7 +31,15 @@ function formatTick(value: number): string {
   return String(value);
 }
 
-export function TokenUsageChart({ data, isLoading }: TokenUsageChartProps) {
+export function TokenUsageChart({
+  data,
+  isLoading,
+  emptyMessage = "No token usage data",
+  tooltipLabel = "Tokens",
+  formatTooltipValue,
+}: TokenUsageChartProps) {
+  const locale = useLocale();
+
   if (isLoading) {
     return (
       <div className="h-[280px] w-full">
@@ -32,12 +49,12 @@ export function TokenUsageChart({ data, isLoading }: TokenUsageChartProps) {
   }
 
   if (data.length === 0 || data.every((d) => d.tokens === 0)) {
-    return <ChartEmpty message="No token usage data" />;
+    return <ChartEmpty message={emptyMessage} />;
   }
 
   const formattedData = data.map((d) => ({
     ...d,
-    displayDate: new Date(d.date + "T12:00:00Z").toLocaleDateString("en-US", {
+    displayDate: new Date(d.date + "T12:00:00Z").toLocaleDateString(locale, {
       month: "short",
       day: "numeric",
     }),
@@ -67,7 +84,13 @@ export function TokenUsageChart({ data, isLoading }: TokenUsageChartProps) {
             contentStyle={tooltipStyles.contentStyle}
             labelStyle={tooltipStyles.labelStyle}
             itemStyle={tooltipStyles.itemStyle}
-            formatter={(value: number | string | undefined) => [`${formatTick(Number(value ?? 0))} tokens`, "Tokens"]}
+            formatter={(value: number | string | undefined) => {
+              const formatted = formatTick(Number(value ?? 0));
+              return [
+                formatTooltipValue ? formatTooltipValue(formatted) : `${formatted} tokens`,
+                tooltipLabel,
+              ];
+            }}
           />
           <Bar dataKey="tokens" fill={chartColors.primary} radius={[3, 3, 0, 0]} />
         </BarChart>
