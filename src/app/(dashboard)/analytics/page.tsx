@@ -41,13 +41,6 @@ interface InsightsData {
 
 type DateRange = "7" | "30" | "90" | "custom";
 
-const RANGE_OPTIONS: ReadonlyArray<{ value: DateRange; label: string }> = [
-  { value: "7", label: "Last 7 days" },
-  { value: "30", label: "Last 30 days" },
-  { value: "90", label: "Last 90 days" },
-  { value: "custom", label: "Custom" },
-];
-
 function toDateInputValue(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -55,6 +48,15 @@ function toDateInputValue(date: Date): string {
 export default function AnalyticsPage() {
   const { selectedTeamId, isTeamContext } = useTeam();
   const tDash = useTranslations("dashboard");
+  const tNav = useTranslations("nav");
+  const tAnalytics = useTranslations("analytics");
+
+  const RANGE_OPTIONS: ReadonlyArray<{ value: DateRange; label: string }> = [
+    { value: "7", label: tAnalytics("range.7") },
+    { value: "30", label: tAnalytics("range.30") },
+    { value: "90", label: tAnalytics("range.90") },
+    { value: "custom", label: tAnalytics("range.custom") },
+  ];
 
   const [range, setRange] = useState<DateRange>("30");
   const [customFrom, setCustomFrom] = useState<string>("");
@@ -111,7 +113,7 @@ export default function AnalyticsPage() {
       setTrendsData(trends);
       setInsightsData(insights);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics");
+      setError(err instanceof Error ? err.message : tAnalytics("failedToLoad"));
     } finally {
       setLoading(false);
     }
@@ -161,11 +163,11 @@ export default function AnalyticsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="t-h1">Analytics</h1>
+          <h1 className="t-h1">{tNav("analytics")}</h1>
           <p className="text-sm text-muted-foreground mt-1">
             {isTeamContext
-              ? "Team-scoped prompt analytics"
-              : "Personal prompt analytics"}
+              ? tAnalytics("subtitleTeam")
+              : tAnalytics("subtitlePersonal")}
           </p>
         </div>
       </div>
@@ -174,12 +176,12 @@ export default function AnalyticsPage() {
       <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
         {/* Date range — SegmentedControl */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground font-medium">Period:</span>
+          <span className="text-xs text-muted-foreground font-medium">{tAnalytics("period")}</span>
           <SegmentedControl<DateRange>
             value={range}
             onValueChange={handleRangeChange}
             options={RANGE_OPTIONS}
-            aria-label="Date range"
+            aria-label={tAnalytics("dateRangeAria")}
             size="sm"
           />
         </div>
@@ -193,7 +195,7 @@ export default function AnalyticsPage() {
               onChange={(e) => setCustomFrom(e.target.value)}
               className="px-2 py-1.5 bg-background border border-border rounded-md text-foreground text-xs"
             />
-            <span className="text-xs text-muted-foreground">to</span>
+            <span className="text-xs text-muted-foreground">{tAnalytics("to")}</span>
             <input
               type="date"
               value={customTo}
@@ -223,7 +225,7 @@ export default function AnalyticsPage() {
                   d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
                 />
               </svg>
-              Projects
+              {tAnalytics("projects")}
               {selectedProjects.length > 0 && (
                 <Badge variant="default" className="text-[10px] px-1.5 py-0">
                   {selectedProjects.length}
@@ -271,7 +273,7 @@ export default function AnalyticsPage() {
                   </label>
                 ))
               ) : (
-                <p className="px-2 py-1.5 text-xs text-muted-foreground">No projects</p>
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">{tAnalytics("noProjects")}</p>
               )}
             </DropdownContent>
           </Dropdown>
@@ -297,7 +299,7 @@ export default function AnalyticsPage() {
                   d="M13 10V3L4 14h7v7l9-11h-7z"
                 />
               </svg>
-              Sources
+              {tAnalytics("sources")}
               {selectedSources.length > 0 && (
                 <Badge variant="default" className="text-[10px] px-1.5 py-0">
                   {selectedSources.length}
@@ -338,7 +340,7 @@ export default function AnalyticsPage() {
                   </label>
                 ))
               ) : (
-                <p className="px-2 py-1.5 text-xs text-muted-foreground">No sources</p>
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">{tAnalytics("noSources")}</p>
               )}
             </DropdownContent>
           </Dropdown>
@@ -351,7 +353,7 @@ export default function AnalyticsPage() {
             onClick={clearFilters}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2"
           >
-            Clear filters
+            {tAnalytics("clearFilters")}
           </button>
         )}
       </div>
@@ -359,7 +361,7 @@ export default function AnalyticsPage() {
       {/* Error */}
       {error && (
         <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
-          <p className="font-medium">Failed to load analytics</p>
+          <p className="font-medium">{tAnalytics("failedToLoad")}</p>
           <p className="mt-1 opacity-80">{error}</p>
         </div>
       )}
@@ -379,9 +381,9 @@ export default function AnalyticsPage() {
           ))
         ) : (
           [
-            { label: "Total Prompts", value: summary ? formatNumber(summary.totalPrompts) : "0" },
-            { label: "Avg Quality", value: summary ? `${summary.avgQuality.toFixed(1)} / 5` : "0 / 5" },
-            { label: "Total Tokens", value: summary ? formatNumber(summary.totalTokens) : "0" },
+            { label: tAnalytics("kpi.totalPrompts"), value: summary ? formatNumber(summary.totalPrompts) : "0" },
+            { label: tAnalytics("kpi.avgQuality"), value: tAnalytics("kpi.avgQualityValue", { value: summary ? summary.avgQuality.toFixed(1) : "0" }) },
+            { label: tAnalytics("kpi.totalTokens"), value: summary ? formatNumber(summary.totalTokens) : "0" },
             { label: tDash("kpi.activeProjects"), value: summary ? String(summary.activeProjects) : "0" },
           ].map((item) => (
             <Card key={item.label}>
@@ -403,7 +405,7 @@ export default function AnalyticsPage() {
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-chart-5" />
-            Insights
+            {tAnalytics("insights")}
           </h2>
           <div className="flex flex-wrap gap-2">
             {insightsData.insights.map((insight, i) => (
@@ -420,12 +422,17 @@ export default function AnalyticsPage() {
         {/* Prompt Volume */}
         <Card>
           <CardHeader>
-            <CardTitle>Prompt Volume</CardTitle>
+            <CardTitle>{tAnalytics("charts.promptVolume")}</CardTitle>
           </CardHeader>
           <CardContent>
             <PromptVolumeChart
               data={trendsData?.daily ?? []}
               isLoading={loading}
+              emptyMessage={tAnalytics("empty.promptVolume")}
+              tooltipLabel={tAnalytics("tooltip.count")}
+              formatTooltipValue={(value) =>
+                tAnalytics("tooltip.promptsSuffix", { value: String(value ?? 0) })
+              }
             />
           </CardContent>
         </Card>
@@ -433,12 +440,17 @@ export default function AnalyticsPage() {
         {/* Token Usage */}
         <Card>
           <CardHeader>
-            <CardTitle>Token Usage</CardTitle>
+            <CardTitle>{tAnalytics("charts.tokenUsage")}</CardTitle>
           </CardHeader>
           <CardContent>
             <TokenUsageChart
               data={trendsData?.daily.map((d) => ({ date: d.date, tokens: d.tokens })) ?? []}
               isLoading={loading}
+              emptyMessage={tAnalytics("empty.tokenUsage")}
+              tooltipLabel={tAnalytics("tooltip.tokens")}
+              formatTooltipValue={(formatted) =>
+                tAnalytics("tooltip.tokensSuffix", { value: formatted })
+              }
             />
           </CardContent>
         </Card>
@@ -446,12 +458,17 @@ export default function AnalyticsPage() {
         {/* Quality Score */}
         <Card>
           <CardHeader>
-            <CardTitle>Quality Score Trend</CardTitle>
+            <CardTitle>{tAnalytics("charts.qualityScoreTrend")}</CardTitle>
           </CardHeader>
           <CardContent>
             <QualityScoreChart
               data={trendsData?.daily ?? []}
               isLoading={loading}
+              emptyMessage={tAnalytics("empty.qualityScore")}
+              tooltipLabel={tAnalytics("tooltip.avgQuality")}
+              formatTooltipValue={(formatted) =>
+                tAnalytics("tooltip.avgQualityValue", { value: formatted })
+              }
             />
           </CardContent>
         </Card>
@@ -459,12 +476,13 @@ export default function AnalyticsPage() {
         {/* Project Distribution */}
         <Card>
           <CardHeader>
-            <CardTitle>Project Distribution</CardTitle>
+            <CardTitle>{tAnalytics("charts.projectDistribution")}</CardTitle>
           </CardHeader>
           <CardContent>
             <ProjectDistributionChart
               data={trendsData?.byProject ?? []}
               isLoading={loading}
+              emptyMessage={tAnalytics("empty.projectDistribution")}
             />
           </CardContent>
         </Card>
@@ -472,12 +490,13 @@ export default function AnalyticsPage() {
         {/* Hourly Activity */}
         <Card>
           <CardHeader>
-            <CardTitle>Hourly Activity</CardTitle>
+            <CardTitle>{tAnalytics("charts.hourlyActivity")}</CardTitle>
           </CardHeader>
           <CardContent>
             <HourlyActivityChart
               data={trendsData?.byHour ?? []}
               isLoading={loading}
+              emptyMessage={tAnalytics("empty.hourly")}
             />
           </CardContent>
         </Card>
@@ -485,12 +504,17 @@ export default function AnalyticsPage() {
         {/* Weekday Activity */}
         <Card>
           <CardHeader>
-            <CardTitle>Weekday Activity</CardTitle>
+            <CardTitle>{tAnalytics("charts.weekdayActivity")}</CardTitle>
           </CardHeader>
           <CardContent>
             <WeekdayActivityChart
               data={trendsData?.byWeekday ?? []}
               isLoading={loading}
+              emptyMessage={tAnalytics("empty.weekday")}
+              tooltipLabel={tAnalytics("tooltip.count")}
+              formatTooltipValue={(value) =>
+                tAnalytics("tooltip.promptsSuffix", { value: String(value ?? 0) })
+              }
             />
           </CardContent>
         </Card>
