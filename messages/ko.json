@@ -242,6 +242,83 @@
       "emptyPrompt": "빈 프롬프트"
     }
   },
+  "insights": {
+    "title": "AI 인사이트",
+    "subtitle": "프롬프트 기록에 대해 질문하고, 세션 내러티브를 살펴보고, 코딩 워크플로의 패턴을 발견해 보세요.",
+    "common": {
+      "highlights": "하이라이트",
+      "trends": "추이",
+      "recommendations": "추천",
+      "confidence": "신뢰도: {value}%",
+      "generated": "생성됨 {time}",
+      "active": "활성",
+      "notGenerated": "미생성",
+      "generating": "생성 중",
+      "loading": "불러오는 중",
+      "refresh": "새로고침"
+    },
+    "timeAgo": {
+      "justNow": "방금 전",
+      "minutes": "{n}분 전",
+      "hours": "{n}시간 전",
+      "days": "{n}일 전"
+    },
+    "ask": {
+      "title": "데이터에 질문하기",
+      "description": "프롬프트 기록에 대해 자연어로 질문해 보세요",
+      "placeholder": "예: 지난주에 무슨 작업을 했나요?",
+      "submit": "질문",
+      "thinking": "분석 중…",
+      "recentQuestions": "최근 질문",
+      "error": "예기치 못한 오류가 발생했어요",
+      "examples": [
+        "지난주에 무슨 작업을 했나요?",
+        "토큰을 가장 많이 쓴 프로젝트는?",
+        "가장 바빴던 날 보여줘",
+        "내가 가장 자주 쓰는 프롬프트 유형은?",
+        "내 사용량은 시간에 따라 어떻게 변했나요?"
+      ]
+    },
+    "cards": {
+      "generate": "인사이트 생성",
+      "generating": "생성 중…",
+      "dailySummary": {
+        "title": "일일 요약",
+        "description": "추이와 하이라이트가 담긴 일일 프롬프트 활동의 AI 생성 요약"
+      },
+      "weeklyTrends": {
+        "title": "주간 추이",
+        "description": "프롬프트 패턴의 주 단위 비교 분석과 추천"
+      }
+    },
+    "recent": {
+      "title": "최근 인사이트",
+      "description": "이전에 생성된 AI 인사이트 — 빠르게 다시 볼 수 있도록 캐시됨",
+      "empty": "아직 캐시된 인사이트가 없어요. 위의 ‘데이터에 질문하기’를 이용하거나 세션 스토리를 생성해 보세요.",
+      "error": "인사이트를 불러오지 못했어요"
+    },
+    "sessionStories": {
+      "title": "세션 스토리",
+      "description": "최근 코딩 세션에 대한 AI 내러티브를 생성하세요",
+      "viewAll": "전체 세션 보기",
+      "empty": "세션이 없어요. 동일한 세션 ID를 가진 프롬프트가 모이면 세션이 만들어져요.",
+      "error": "세션을 불러오지 못했어요",
+      "generateStory": "스토리 생성",
+      "hide": "숨기기",
+      "promptsSuffix": "프롬프트 {count}건",
+      "tokensSuffix": "{value} 토큰",
+      "duration": {
+        "seconds": "{count}초",
+        "minutes": "{count}분",
+        "hoursMinutes": "{hours}시간 {minutes}분"
+      }
+    },
+    "story": {
+      "generate": "세션 스토리 생성",
+      "generating": "스토리 생성 중…",
+      "error": "스토리를 생성하지 못했어요"
+    }
+  },
   "locale": {
     "english": "English",
     "korean": "한국어",

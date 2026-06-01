@@ -8,6 +8,7 @@ export const weeklyTrends: Extension = {
   cacheTtlHours: 168,
   processor: {
     schedule: "0 4 * * 1", // 4 AM every Monday
+    defaultRangeDays: 7,
     jobName: "insight:weekly-trends",
     handler,
   },

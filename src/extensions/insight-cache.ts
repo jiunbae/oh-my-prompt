@@ -1,7 +1,8 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { sql, and, eq, gt } from "drizzle-orm";
+import { sql, and, eq, gt, type SQL } from "drizzle-orm";
 import { createHash } from "crypto";
+import { defaultLocale } from "@/i18n/config";
 import type { InsightResult } from "./types";
 
 /** Hash input data to detect staleness */
@@ -12,10 +13,25 @@ export function hashData(data: unknown): string {
     .slice(0, 16);
 }
 
+/**
+ * Build a condition matching cached rows for a given locale. Insights are
+ * scoped per-locale via `parameters.locale` so an English and a Korean copy
+ * of the same insight type can coexist. Legacy rows (written before locale
+ * scoping, with no `parameters.locale`) are treated as the default locale.
+ */
+function localeCondition(locale?: string): SQL | undefined {
+  if (!locale) return undefined;
+  if (locale === defaultLocale) {
+    return sql`(${schema.aiInsights.parameters} ->> 'locale' = ${locale} OR ${schema.aiInsights.parameters} ->> 'locale' IS NULL)`;
+  }
+  return sql`${schema.aiInsights.parameters} ->> 'locale' = ${locale}`;
+}
+
 /** Get a cached insight if it exists and is not expired */
 export async function getCachedInsight(
   userId: string,
   insightType: string,
+  locale?: string,
 ): Promise<InsightResult | null> {
 
   const conditions = [
@@ -23,6 +39,9 @@ export async function getCachedInsight(
     eq(schema.aiInsights.insightType, insightType),
     gt(schema.aiInsights.expiresAt, new Date()),
   ];
+
+  const localeCond = localeCondition(locale);
+  if (localeCond) conditions.push(localeCond);
 
   const [row] = await db
     .select({ result: schema.aiInsights.result })
@@ -45,10 +64,20 @@ export async function cacheInsight(
     model?: string;
     tokensUsed?: number;
     ttlHours?: number;
+    /** Locale this insight was generated for. Scopes the cache per-language. */
+    locale?: string;
   },
 ): Promise<void> {
   const ttl = options.ttlHours ?? 24;
   const expiresAt = new Date(Date.now() + ttl * 60 * 60 * 1000);
+
+  // Persist the locale alongside any caller parameters so reads can scope by it.
+  const parameters = options.locale
+    ? { ...(options.parameters || {}), locale: options.locale }
+    : options.parameters || {};
+
+  // Only evict the same-locale copy so other languages of this insight survive.
+  const localeCond = localeCondition(options.locale);
 
   // Atomic delete+insert in a transaction to prevent race conditions
   await db.transaction(async (tx) => {
@@ -58,13 +87,14 @@ export async function cacheInsight(
         and(
           eq(schema.aiInsights.userId, userId),
           eq(schema.aiInsights.insightType, insightType),
+          ...(localeCond ? [localeCond] : []),
         ),
       );
 
     await tx.insert(schema.aiInsights).values({
       userId,
       insightType,
-      parameters: options.parameters || {},
+      parameters,
       dataHash: options.dataHash,
       result: result as unknown as Record<string, unknown>,
       model: options.model,
@@ -83,10 +113,12 @@ export async function cleanExpiredInsights(): Promise<number> {
   return result.length;
 }
 
-/** Get all cached insights for a user */
+/** Get all cached insights for a user, optionally scoped to a locale */
 export async function getUserInsights(
   userId: string,
+  locale?: string,
 ): Promise<Array<{ id: string; type: string; result: InsightResult; generatedAt: Date }>> {
+  const localeCond = localeCondition(locale);
   const rows = await db
     .select({
       id: schema.aiInsights.id,
@@ -99,6 +131,7 @@ export async function getUserInsights(
       and(
         eq(schema.aiInsights.userId, userId),
         gt(schema.aiInsights.expiresAt, new Date()),
+        ...(localeCond ? [localeCond] : []),
       ),
     )
     .orderBy(sql`generated_at DESC`);

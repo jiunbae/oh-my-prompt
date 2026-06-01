@@ -9,15 +9,17 @@ import {
   hashData,
 } from "@/extensions/insight-cache";
 import { getLastNDaysRange } from "@/lib/date-utils";
+import { getRequestLocale } from "@/i18n/server-locale";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   try {
     const session = await requireAuth();
+    const locale = await getRequestLocale(request.headers);
 
     const rl = rateLimiters.llm(session.userId);
     if (!rl.allowed) {
@@ -32,9 +34,9 @@ export async function GET(
       return NextResponse.json({ error: "Session ID is required" }, { status: 400 });
     }
 
-    // Check cache first
+    // Check cache first (scoped to the user's locale)
     const cacheKey = `session-story:${sessionId}`;
-    const cached = await getCachedInsight(session.userId, cacheKey);
+    const cached = await getCachedInsight(session.userId, cacheKey, locale);
     if (cached) {
       return NextResponse.json(cached);
     }
@@ -49,13 +51,15 @@ export async function GET(
         to: last30Days.toKey,
       },
       parameters: { sessionId },
+      locale,
     });
 
     // Cache the result (24 hours)
     await cacheInsight(session.userId, cacheKey, result, {
       parameters: { sessionId },
-      dataHash: hashData({ sessionId, userId: session.userId }),
+      dataHash: hashData({ sessionId, userId: session.userId, locale }),
       ttlHours: 24,
+      locale,
     });
 
     return NextResponse.json(result);

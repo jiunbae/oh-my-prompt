@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -50,9 +51,16 @@ function TrendArrow({ direction }: { direction: "up" | "down" | "stable" }) {
 }
 
 export function SessionStoryButton({ sessionId }: { sessionId: string }) {
+  const t = useTranslations("insights");
+  const locale = useLocale();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<InsightResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+  }, [locale, sessionId]);
 
   const generateStory = useCallback(async () => {
     setLoading(true);
@@ -60,19 +68,21 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
     setResult(null);
 
     try {
-      const res = await fetch(`/api/insights/session/${encodeURIComponent(sessionId)}`);
+      const res = await fetch(`/api/insights/session/${encodeURIComponent(sessionId)}`, {
+        headers: { "X-OMP-Locale": locale },
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Request failed" }));
         throw new Error(data.error || `Request failed (${res.status})`);
       }
       const data: InsightResult = await res.json();
       setResult(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate story");
+    } catch {
+      setError(t("story.error"));
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [locale, sessionId, t]);
 
   return (
     <div className="space-y-4">
@@ -89,14 +99,14 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
-              Generating Story...
+              {t("story.generating")}
             </span>
           ) : (
             <span className="flex items-center gap-2">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
-              Generate Session Story
+              {t("story.generate")}
             </span>
           )}
         </Button>
@@ -180,10 +190,10 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
 
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline">
-                Confidence: {Math.round(result.confidence * 100)}%
+                {t("common.confidence", { value: Math.round(result.confidence * 100) })}
               </Badge>
               <span>
-                Generated {new Date(result.generatedAt).toLocaleString()}
+                {t("common.generated", { time: new Date(result.generatedAt).toLocaleString(locale) })}
               </span>
             </div>
           </CardContent>

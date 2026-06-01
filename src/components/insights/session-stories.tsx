@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SessionStoryButton } from "./session-story-button";
@@ -20,13 +21,15 @@ interface SessionSummary {
   totalTokens: number;
 }
 
-function formatDuration(start: string, end: string): string {
+type InsightsT = (key: string, values?: Record<string, string | number>) => string;
+
+function formatDuration(start: string, end: string, t: InsightsT): string {
   const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  if (ms < 60_000) return t("sessionStories.duration.seconds", { count: Math.round(ms / 1000) });
+  if (ms < 3_600_000) return t("sessionStories.duration.minutes", { count: Math.round(ms / 60_000) });
   const hours = Math.floor(ms / 3_600_000);
   const mins = Math.round((ms % 3_600_000) / 60_000);
-  return `${hours}h ${mins}m`;
+  return t("sessionStories.duration.hoursMinutes", { hours, minutes: mins });
 }
 
 function formatTokens(count: number): string {
@@ -35,6 +38,8 @@ function formatTokens(count: number): string {
 }
 
 function SessionRow({ session }: { session: SessionSummary }) {
+  const t = useTranslations("insights");
+  const locale = useLocale();
   const [showStory, setShowStory] = useState(false);
 
   return (
@@ -56,17 +61,17 @@ function SessionRow({ session }: { session: SessionSummary }) {
             {session.firstPrompt}
           </p>
           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-            <span>{new Date(session.startedAt).toLocaleDateString()}</span>
-            <span>{formatDuration(session.startedAt, session.endedAt)}</span>
-            <span>{session.promptCount} prompts</span>
-            <span>{formatTokens(session.totalTokens)} tokens</span>
+            <span>{new Date(session.startedAt).toLocaleDateString(locale)}</span>
+            <span>{formatDuration(session.startedAt, session.endedAt, t)}</span>
+            <span>{t("sessionStories.promptsSuffix", { count: session.promptCount })}</span>
+            <span>{t("sessionStories.tokensSuffix", { value: formatTokens(session.totalTokens) })}</span>
           </div>
         </div>
         <button
           onClick={() => setShowStory(!showStory)}
           className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          {showStory ? "Hide" : "Generate Story"}
+          {showStory ? t("sessionStories.hide") : t("sessionStories.generateStory")}
         </button>
       </div>
 
@@ -80,6 +85,7 @@ function SessionRow({ session }: { session: SessionSummary }) {
 }
 
 export function SessionStories() {
+  const t = useTranslations("insights");
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,30 +100,28 @@ export function SessionStories() {
         const data = await res.json();
         // Take only the 10 most recent sessions
         setSessions((data.sessions || []).slice(0, 10));
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load sessions");
+      } catch {
+        setError(t("sessionStories.error"));
       } finally {
         setLoading(false);
       }
     }
     fetchSessions();
-  }, []);
+  }, [t]);
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Session Stories</CardTitle>
-            <CardDescription>
-              Generate AI narratives for your recent coding sessions
-            </CardDescription>
+            <CardTitle>{t("sessionStories.title")}</CardTitle>
+            <CardDescription>{t("sessionStories.description")}</CardDescription>
           </div>
           <Link
             href="/sessions"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            View all sessions
+            {t("sessionStories.viewAll")}
           </Link>
         </div>
       </CardHeader>
@@ -147,7 +151,7 @@ export function SessionStories() {
 
         {!loading && !error && sessions.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
-            No sessions found. Sessions are created when prompts share a session ID.
+            {t("sessionStories.empty")}
           </p>
         )}
 

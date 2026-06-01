@@ -242,6 +242,83 @@
       "emptyPrompt": "Empty prompt"
     }
   },
+  "insights": {
+    "title": "AI Insights",
+    "subtitle": "Ask questions about your prompt history, explore session narratives, and discover patterns in your coding workflow.",
+    "common": {
+      "highlights": "Highlights",
+      "trends": "Trends",
+      "recommendations": "Recommendations",
+      "confidence": "Confidence: {value}%",
+      "generated": "Generated {time}",
+      "active": "Active",
+      "notGenerated": "Not generated",
+      "generating": "Generating",
+      "loading": "Loading",
+      "refresh": "Refresh"
+    },
+    "timeAgo": {
+      "justNow": "just now",
+      "minutes": "{n}m ago",
+      "hours": "{n}h ago",
+      "days": "{n}d ago"
+    },
+    "ask": {
+      "title": "Ask Your Data",
+      "description": "Ask a natural language question about your prompt history",
+      "placeholder": "e.g. What did I work on last week?",
+      "submit": "Ask",
+      "thinking": "Thinking…",
+      "recentQuestions": "Recent questions",
+      "error": "An unexpected error occurred",
+      "examples": [
+        "What did I work on last week?",
+        "Which project uses the most tokens?",
+        "Show my busiest day",
+        "What are my most common prompt types?",
+        "How has my usage changed over time?"
+      ]
+    },
+    "cards": {
+      "generate": "Generate Insight",
+      "generating": "Generating…",
+      "dailySummary": {
+        "title": "Daily Summary",
+        "description": "AI-generated summary of your daily prompt activity with trends and highlights"
+      },
+      "weeklyTrends": {
+        "title": "Weekly Trends",
+        "description": "Week-over-week analysis of your prompting patterns and recommendations"
+      }
+    },
+    "recent": {
+      "title": "Recent Insights",
+      "description": "Previously generated AI insights, cached for quick access",
+      "empty": "No cached insights yet. Use “Ask Your Data” above or generate a session story to get started.",
+      "error": "Failed to load insights"
+    },
+    "sessionStories": {
+      "title": "Session Stories",
+      "description": "Generate AI narratives for your recent coding sessions",
+      "viewAll": "View all sessions",
+      "empty": "No sessions found. Sessions are created when prompts share a session ID.",
+      "error": "Failed to load sessions",
+      "generateStory": "Generate Story",
+      "hide": "Hide",
+      "promptsSuffix": "{count} prompts",
+      "tokensSuffix": "{value} tokens",
+      "duration": {
+        "seconds": "{count}s",
+        "minutes": "{count}m",
+        "hoursMinutes": "{hours}h {minutes}m"
+      }
+    },
+    "story": {
+      "generate": "Generate Session Story",
+      "generating": "Generating Story…",
+      "error": "Failed to generate story"
+    }
+  },
   "locale": {
     "english": "English",
     "korean": "한국어",

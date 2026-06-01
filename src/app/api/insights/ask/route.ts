@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { rateLimiters } from "@/lib/rate-limit";
-import { callLLM, getLLMConfig } from "@/extensions/llm";
+import { callLLM, getLLMConfig, localeInstruction } from "@/extensions/llm";
 import type { InsightResult } from "@/extensions/types";
+import { getRequestLocale } from "@/i18n/server-locale";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, gte, sql, desc, isNull } from "drizzle-orm";
@@ -100,6 +101,7 @@ function normalizeInsightResult(parsed: unknown): InsightResult {
 export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
+    const locale = await getRequestLocale(request.headers);
 
     const rl = rateLimiters.llm(session.userId);
     if (!rl.allowed) {
@@ -270,7 +272,7 @@ Guidelines:
 - Confidence should reflect how well the available data answers the question (0-1)
 - If data is insufficient to answer, say so honestly and set confidence low
 - Do NOT include any text outside the JSON object
-- Do NOT make up data that isn't in the context`,
+- Do NOT make up data that isn't in the context${localeInstruction(locale)}`,
         },
         {
           role: "user",

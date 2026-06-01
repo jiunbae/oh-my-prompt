@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -40,7 +41,19 @@ function formatInsightType(type: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+type InsightsT = (key: string, values?: Record<string, string | number>) => string;
+
+/** Localized badge label for a cached insight's type key. */
+function typeLabel(type: string, t: InsightsT): string {
+  if (type === "daily-summary") return t("cards.dailySummary.title");
+  if (type === "weekly-trends") return t("cards.weeklyTrends.title");
+  if (type.startsWith("session-story:")) return t("sessionStories.title");
+  return formatInsightType(type);
+}
+
 function InsightCard({ insight }: { insight: CachedInsight }) {
+  const t = useTranslations("insights");
+  const locale = useLocale();
   const [expanded, setExpanded] = useState(false);
   const result = insight.result;
 
@@ -51,7 +64,7 @@ function InsightCard({ insight }: { insight: CachedInsight }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-1">
               <Badge variant="secondary" className="text-xs shrink-0">
-                {formatInsightType(insight.type)}
+                {typeLabel(insight.type, t)}
               </Badge>
               <Badge variant="outline" className="text-xs shrink-0">
                 {Math.round(result.confidence * 100)}%
@@ -65,7 +78,7 @@ function InsightCard({ insight }: { insight: CachedInsight }) {
             </p>
           </div>
           <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
-            {new Date(insight.generatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
+            {new Date(insight.generatedAt).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" })}
           </span>
         </div>
 
@@ -100,16 +113,23 @@ function InsightCard({ insight }: { insight: CachedInsight }) {
 }
 
 export function RecentInsights() {
+  const t = useTranslations("insights");
+  const locale = useLocale();
   const [insights, setInsights] = useState<CachedInsight[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchInsights() {
+      setLoading(true);
+      setError(null);
       try {
         const res = await fetch("/api/trpc/insights.list", {
           method: "GET",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-OMP-Locale": locale,
+          },
         });
         if (!res.ok) {
           throw new Error("Failed to fetch insights");
@@ -118,22 +138,20 @@ export function RecentInsights() {
         // tRPC's superjson transformer wraps plain JSON under data.json.
         const items = data?.result?.data?.json ?? data?.result?.data ?? [];
         setInsights(items);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load insights");
+      } catch {
+        setError(t("recent.error"));
       } finally {
         setLoading(false);
       }
     }
     fetchInsights();
-  }, []);
+  }, [locale, t]);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Recent Insights</CardTitle>
-        <CardDescription>
-          Previously generated AI insights, cached for quick access
-        </CardDescription>
+        <CardTitle>{t("recent.title")}</CardTitle>
+        <CardDescription>{t("recent.description")}</CardDescription>
       </CardHeader>
       <CardContent>
         {loading && (
@@ -159,7 +177,7 @@ export function RecentInsights() {
 
         {!loading && !error && insights.length === 0 && (
           <p className="text-sm text-muted-foreground py-4 text-center">
-            No cached insights yet. Use &quot;Ask Your Data&quot; above or generate a session story to get started.
+            {t("recent.empty")}
           </p>
         )}
 

@@ -7,7 +7,7 @@ import type {
   InsightHighlight,
   InsightTrend,
 } from "../types";
-import { callLLM, getLLMConfig } from "../llm";
+import { callLLM, getLLMConfig, localeInstruction } from "../llm";
 import { logger } from "@/lib/logger";
 import { APP_TIME_ZONE, resolveDateRange } from "@/lib/date-utils";
 
@@ -90,61 +90,115 @@ async function queryDailyStats(
   };
 }
 
-function formatHour(hour: number): string {
+function formatHour(hour: number, locale?: string): string {
+  if (locale === "ko") return `${hour}시`;
   const suffix = hour >= 12 ? "PM" : "AM";
   const display = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
   return `${display}${suffix}`;
 }
 
-function buildStatsOnlyInsight(stats: DailyStats): InsightResult {
+/** Localized title + fallback strings for the daily-summary insight. */
+function dailyDict(locale?: string) {
+  const ko = locale === "ko";
+  return {
+    title: ko ? "일일 요약" : "Daily Summary",
+    noActivity: ko
+      ? "이 기간에는 프롬프트 활동이 없어요. 프롬프트를 작성하면 일일 요약을 볼 수 있어요!"
+      : "No prompt activity found for this period. Start prompting to see your daily summary!",
+    aiUnavailable: ko
+      ? "AI 요약을 사용할 수 없어요. LLM 설정을 확인해 주세요."
+      : "AI-enhanced summary unavailable. Check your LLM configuration.",
+    labels: {
+      totalPrompts: ko ? "전체 프롬프트" : "Total Prompts",
+      inputTokens: ko ? "입력 토큰" : "Input Tokens",
+      outputTokens: ko ? "출력 토큰" : "Output Tokens",
+      uniqueProjects: ko ? "고유 프로젝트" : "Unique Projects",
+      sessions: ko ? "세션" : "Sessions",
+      peakHour: ko ? "피크 시간대" : "Peak Hour",
+      avgPromptLength: ko ? "평균 프롬프트 길이" : "Avg Prompt Length",
+      mostActiveProject: ko ? "가장 활발한 프로젝트" : "Most Active Project",
+    },
+  };
+}
+
+function buildStatsOnlyInsight(stats: DailyStats, locale?: string): InsightResult {
+  const ko = locale === "ko";
+  const d = dailyDict(locale);
   const highlights: InsightHighlight[] = [
-    { label: "Total Prompts", value: stats.totalPrompts },
-    { label: "Input Tokens", value: stats.totalTokens },
-    { label: "Output Tokens", value: stats.totalResponseTokens },
-    { label: "Unique Projects", value: stats.uniqueProjects },
-    { label: "Sessions", value: stats.uniqueSessions },
-    { label: "Peak Hour", value: formatHour(stats.peakHour) },
-    { label: "Avg Prompt Length", value: `${stats.avgPromptLength} chars` },
+    { label: d.labels.totalPrompts, value: stats.totalPrompts },
+    { label: d.labels.inputTokens, value: stats.totalTokens },
+    { label: d.labels.outputTokens, value: stats.totalResponseTokens },
+    { label: d.labels.uniqueProjects, value: stats.uniqueProjects },
+    { label: d.labels.sessions, value: stats.uniqueSessions },
+    { label: d.labels.peakHour, value: formatHour(stats.peakHour, locale) },
+    {
+      label: d.labels.avgPromptLength,
+      value: ko ? `${stats.avgPromptLength}자` : `${stats.avgPromptLength} chars`,
+    },
   ];
+
+  const totalTokens = stats.totalTokens + stats.totalResponseTokens;
 
   if (stats.mostActiveProject) {
     highlights.push({
-      label: "Most Active Project",
-      value: `${stats.mostActiveProject} (${stats.mostActiveProjectCount} prompts)`,
+      label: d.labels.mostActiveProject,
+      value: ko
+        ? `${stats.mostActiveProject} (${stats.mostActiveProjectCount}건)`
+        : `${stats.mostActiveProject} (${stats.mostActiveProjectCount} prompts)`,
     });
   }
 
-  const summaryParts: string[] = [];
-  summaryParts.push(
-    `You made ${stats.totalPrompts} prompt${stats.totalPrompts !== 1 ? "s" : ""} today`,
-  );
-  if (stats.uniqueProjects > 0) {
+  let summary: string;
+  if (ko) {
+    const segs: string[] = [];
+    const scope: string[] = [];
+    if (stats.uniqueProjects > 0) scope.push(`프로젝트 ${stats.uniqueProjects}개`);
+    if (stats.uniqueSessions > 0) scope.push(`세션 ${stats.uniqueSessions}개`);
+    let lead = `오늘 프롬프트 ${stats.totalPrompts}건을 작성했어요`;
+    if (scope.length) lead += ` (${scope.join(", ")})`;
+    lead += `, 총 약 ${totalTokens} 토큰을 사용했어요.`;
+    segs.push(lead);
+    if (stats.peakHourCount > 0) {
+      segs.push(
+        `가장 활발했던 시간대는 ${formatHour(stats.peakHour, locale)}로 프롬프트 ${stats.peakHourCount}건이 있었어요.`,
+      );
+    }
+    if (stats.mostActiveProject) {
+      segs.push(`주요 프로젝트: ${stats.mostActiveProject} (${stats.mostActiveProjectCount}건).`);
+    }
+    summary = segs.join(" ");
+  } else {
+    const summaryParts: string[] = [];
     summaryParts.push(
-      `across ${stats.uniqueProjects} project${stats.uniqueProjects !== 1 ? "s" : ""}`,
+      `You made ${stats.totalPrompts} prompt${stats.totalPrompts !== 1 ? "s" : ""} today`,
     );
-  }
-  if (stats.uniqueSessions > 0) {
-    summaryParts.push(
-      `in ${stats.uniqueSessions} session${stats.uniqueSessions !== 1 ? "s" : ""}`,
-    );
-  }
-  summaryParts.push(
-    `using approximately ${stats.totalTokens + stats.totalResponseTokens} tokens total.`,
-  );
-  if (stats.peakHourCount > 0) {
-    summaryParts.push(
-      `Your most active hour was ${formatHour(stats.peakHour)} with ${stats.peakHourCount} prompts.`,
-    );
-  }
-  if (stats.mostActiveProject) {
-    summaryParts.push(
-      `Top project: ${stats.mostActiveProject} (${stats.mostActiveProjectCount} prompts).`,
-    );
+    if (stats.uniqueProjects > 0) {
+      summaryParts.push(
+        `across ${stats.uniqueProjects} project${stats.uniqueProjects !== 1 ? "s" : ""}`,
+      );
+    }
+    if (stats.uniqueSessions > 0) {
+      summaryParts.push(
+        `in ${stats.uniqueSessions} session${stats.uniqueSessions !== 1 ? "s" : ""}`,
+      );
+    }
+    summaryParts.push(`using approximately ${totalTokens} tokens total.`);
+    if (stats.peakHourCount > 0) {
+      summaryParts.push(
+        `Your most active hour was ${formatHour(stats.peakHour, locale)} with ${stats.peakHourCount} prompts.`,
+      );
+    }
+    if (stats.mostActiveProject) {
+      summaryParts.push(
+        `Top project: ${stats.mostActiveProject} (${stats.mostActiveProjectCount} prompts).`,
+      );
+    }
+    summary = summaryParts.join(" ");
   }
 
   return {
-    title: "Daily Summary",
-    summary: summaryParts.join(" "),
+    title: d.title,
+    summary,
     highlights,
     confidence: 0.9,
     generatedAt: new Date().toISOString(),
@@ -153,15 +207,17 @@ function buildStatsOnlyInsight(stats: DailyStats): InsightResult {
 
 export async function handler(input: ProcessorInput): Promise<InsightResult> {
   const { from, to } = resolveDateRange(input.dateRange, 1);
+  const { locale } = input;
+  const d = dailyDict(locale);
 
   const stats = await queryDailyStats(input.userId, from, to);
 
   // If no prompts at all, return a minimal result
   if (stats.totalPrompts === 0) {
     return {
-      title: "Daily Summary",
-      summary: "No prompt activity found for this period. Start prompting to see your daily summary!",
-      highlights: [{ label: "Total Prompts", value: 0 }],
+      title: d.title,
+      summary: d.noActivity,
+      highlights: [{ label: d.labels.totalPrompts, value: 0 }],
       confidence: 1,
       generatedAt: new Date().toISOString(),
     };
@@ -170,7 +226,7 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
   // If LLM is not configured, return stats-only insight
   const llmConfig = getLLMConfig();
   if (!llmConfig) {
-    return buildStatsOnlyInsight(stats);
+    return buildStatsOnlyInsight(stats, locale);
   }
 
   // Build LLM prompt
@@ -185,7 +241,7 @@ Always respond with valid JSON matching this exact schema:
   "trends": [{"metric": "string", "direction": "up|down|stable", "magnitude": number (0-100), "explanation": "string"}],
   "recommendations": ["string - actionable tip based on the data"],
   "confidence": number (0-1)
-}`;
+}${localeInstruction(locale)}`;
 
   const userPrompt = `Here are today's prompt activity statistics for a user:
 
@@ -220,12 +276,11 @@ Respond ONLY with valid JSON.`;
     const parsed = JSON.parse(content);
 
     // Validate required fields and build result
+    const fallback = buildStatsOnlyInsight(stats, locale);
     const result: InsightResult = {
-      title: typeof parsed.title === "string" ? parsed.title : "Daily Summary",
+      title: typeof parsed.title === "string" ? parsed.title : d.title,
       summary:
-        typeof parsed.summary === "string"
-          ? parsed.summary
-          : buildStatsOnlyInsight(stats).summary,
+        typeof parsed.summary === "string" ? parsed.summary : fallback.summary,
       highlights: Array.isArray(parsed.highlights)
         ? parsed.highlights.filter(
             (h: unknown): h is InsightHighlight =>
@@ -234,7 +289,7 @@ Respond ONLY with valid JSON.`;
               "label" in h &&
               "value" in h,
           )
-        : buildStatsOnlyInsight(stats).highlights,
+        : fallback.highlights,
       trends: Array.isArray(parsed.trends)
         ? parsed.trends.filter(
             (t: unknown): t is InsightTrend =>
@@ -262,10 +317,8 @@ Respond ONLY with valid JSON.`;
   } catch (error) {
     logger.error({ err: error }, "Daily summary LLM error");
     // Fall back to stats-only on LLM failure
-    const fallback = buildStatsOnlyInsight(stats);
-    fallback.recommendations = [
-      "AI-enhanced summary unavailable. Check your LLM configuration.",
-    ];
+    const fallback = buildStatsOnlyInsight(stats, locale);
+    fallback.recommendations = [d.aiUnavailable];
     return fallback;
   }
 }

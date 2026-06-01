@@ -11,6 +11,7 @@ import {
 import { getExtension } from "@/extensions/registry";
 import type { InsightResult } from "@/extensions/types";
 import { getLastNDaysRange } from "@/lib/date-utils";
+import { getRequestLocale } from "@/i18n/server-locale";
 
 /**
  * GET /api/insights
@@ -20,16 +21,17 @@ import { getLastNDaysRange } from "@/lib/date-utils";
 export async function GET(request: NextRequest) {
   try {
     const session = await requireAuth();
+    const locale = await getRequestLocale(request.headers);
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type");
 
     if (type) {
-      const insight = await getCachedInsight(session.userId, type);
+      const insight = await getCachedInsight(session.userId, type, locale);
       return NextResponse.json({ insight });
     }
 
-    const insights = await getUserInsights(session.userId);
+    const insights = await getUserInsights(session.userId, locale);
     return NextResponse.json({ insights });
   } catch (error) {
     if (error instanceof AuthError) {
@@ -51,6 +53,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
+    const locale = await getRequestLocale(request.headers);
 
     const rl = rateLimiters.llm(session.userId);
     if (!rl.allowed) {
@@ -81,7 +84,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const defaultRange = getLastNDaysRange(7);
+    const defaultRange = getLastNDaysRange(ext.processor.defaultRangeDays ?? 7);
 
     const resolvedRange = dateRange || {
       from: defaultRange.fromKey,
@@ -91,6 +94,7 @@ export async function POST(request: NextRequest) {
     const processorInput = {
       userId: session.userId,
       dateRange: resolvedRange,
+      locale,
     };
 
     const result: InsightResult = await ext.processor.handler(processorInput);
@@ -98,6 +102,7 @@ export async function POST(request: NextRequest) {
     await cacheInsight(session.userId, type, result, {
       dataHash: hashData(processorInput),
       ttlHours: ext.cacheTtlHours ?? 24,
+      locale,
     });
 
     return NextResponse.json({ insight: result });

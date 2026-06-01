@@ -8,6 +8,7 @@ export const dailySummary: Extension = {
   cacheTtlHours: 24,
   processor: {
     schedule: "0 3 * * *", // 3 AM daily
+    defaultRangeDays: 1,
     jobName: "insight:daily-summary",
     handler,
   },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,32 +29,28 @@ interface InsightResult {
   generatedAt: string;
 }
 
-const EXAMPLE_QUESTIONS = [
-  "What did I work on last week?",
-  "Which project uses the most tokens?",
-  "Show my busiest day",
-  "What are my most common prompt types?",
-  "How has my usage changed over time?",
-];
-
 const STORAGE_KEY = "omp-ask-data-recent";
 const MAX_RECENT = 5;
 
-function getRecentQuestions(): string[] {
+function recentStorageKey(locale: string): string {
+  return `${STORAGE_KEY}:${locale}`;
+}
+
+function getRecentQuestions(locale: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(recentStorageKey(locale));
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
   }
 }
 
-function saveRecentQuestion(question: string) {
+function saveRecentQuestion(question: string, locale: string) {
   try {
-    const recent = getRecentQuestions().filter((q) => q !== question);
+    const recent = getRecentQuestions(locale).filter((q) => q !== question);
     recent.unshift(question);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)));
+    localStorage.setItem(recentStorageKey(locale), JSON.stringify(recent.slice(0, MAX_RECENT)));
   } catch {
     // localStorage may be unavailable
   }
@@ -82,6 +79,8 @@ function TrendArrow({ direction }: { direction: "up" | "down" | "stable" }) {
 }
 
 function InsightResultDisplay({ result }: { result: InsightResult }) {
+  const t = useTranslations("insights");
+  const locale = useLocale();
   return (
     <div className="space-y-4">
       <div>
@@ -91,7 +90,7 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
 
       {result.highlights && result.highlights.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-foreground mb-2">Highlights</h4>
+          <h4 className="text-sm font-medium text-foreground mb-2">{t("common.highlights")}</h4>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {result.highlights.map((h, i) => (
               <div
@@ -110,7 +109,7 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
 
       {result.trends && result.trends.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-foreground mb-2">Trends</h4>
+          <h4 className="text-sm font-medium text-foreground mb-2">{t("common.trends")}</h4>
           <div className="space-y-2">
             {result.trends.map((t, i) => (
               <div
@@ -128,7 +127,7 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
 
       {result.recommendations && result.recommendations.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium text-foreground mb-2">Recommendations</h4>
+          <h4 className="text-sm font-medium text-foreground mb-2">{t("common.recommendations")}</h4>
           <ul className="space-y-1">
             {result.recommendations.map((r, i) => (
               <li
@@ -147,10 +146,12 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <Badge variant="outline">
-          Confidence: {Math.round(result.confidence * 100)}%
+          {t("common.confidence", { value: Math.round(result.confidence * 100) })}
         </Badge>
         <span>
-          Generated {new Date(result.generatedAt).toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+          {t("common.generated", {
+            time: new Date(result.generatedAt).toLocaleString(locale, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+          })}
         </span>
       </div>
     </div>
@@ -158,6 +159,9 @@ function InsightResultDisplay({ result }: { result: InsightResult }) {
 }
 
 export function AskData() {
+  const t = useTranslations("insights");
+  const locale = useLocale();
+  const exampleQuestions = t.raw("ask.examples") as string[];
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -165,8 +169,10 @@ export function AskData() {
   const [recentQuestions, setRecentQuestions] = useState<string[]>([]);
 
   useEffect(() => {
-    setRecentQuestions(getRecentQuestions());
-  }, []);
+    setRecentQuestions(getRecentQuestions(locale));
+    setResult(null);
+    setError(null);
+  }, [locale]);
 
   const askQuestion = useCallback(async (q: string) => {
     const trimmed = q.trim();
@@ -179,7 +185,10 @@ export function AskData() {
     try {
       const res = await fetch("/api/insights/ask", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-OMP-Locale": locale,
+        },
         body: JSON.stringify({ question: trimmed }),
       });
 
@@ -190,14 +199,14 @@ export function AskData() {
 
       const data: InsightResult = await res.json();
       setResult(data);
-      saveRecentQuestion(trimmed);
-      setRecentQuestions(getRecentQuestions());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
+      saveRecentQuestion(trimmed, locale);
+      setRecentQuestions(getRecentQuestions(locale));
+    } catch {
+      setError(t("ask.error"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [locale, t]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,17 +221,15 @@ export function AskData() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Ask Your Data</CardTitle>
-        <CardDescription>
-          Ask a natural language question about your prompt history
-        </CardDescription>
+        <CardTitle>{t("ask.title")}</CardTitle>
+        <CardDescription>{t("ask.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <form onSubmit={handleSubmit} className="flex gap-2">
           <Input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="e.g. What did I work on last week?"
+            placeholder={t("ask.placeholder")}
             disabled={loading}
             className="flex-1"
           />
@@ -233,17 +240,17 @@ export function AskData() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Thinking...
+                {t("ask.thinking")}
               </span>
             ) : (
-              "Ask"
+              t("ask.submit")
             )}
           </Button>
         </form>
 
         {/* Example question chips */}
         <div className="flex flex-wrap gap-2">
-          {EXAMPLE_QUESTIONS.map((q) => (
+          {exampleQuestions.map((q) => (
             <button
               key={q}
               onClick={() => handleChipClick(q)}
@@ -258,7 +265,7 @@ export function AskData() {
         {/* Recent questions */}
         {recentQuestions.length > 0 && !result && !loading && (
           <div>
-            <p className="text-xs font-medium text-muted-foreground mb-2">Recent questions</p>
+            <p className="text-xs font-medium text-muted-foreground mb-2">{t("ask.recentQuestions")}</p>
             <div className="flex flex-wrap gap-2">
               {recentQuestions.map((q) => (
                 <button

@@ -9,18 +9,21 @@ import {
 import { getExtension } from "@/extensions/registry";
 import type { InsightResult } from "@/extensions/types";
 import { getLastNDaysRange } from "@/lib/date-utils";
+import { getRequestLocale } from "@/i18n/server-locale";
 
 export const insightsRouter = createTRPCRouter({
-  /** Get all cached insights for the current user */
+  /** Get all cached insights for the current user (scoped to their locale) */
   list: protectedProcedure.query(async ({ ctx }) => {
-    return getUserInsights(ctx.user.id);
+    const locale = await getRequestLocale(ctx.headers);
+    return getUserInsights(ctx.user.id, locale);
   }),
 
   /** Get a specific cached insight by type */
   get: protectedProcedure
     .input(z.object({ type: z.string() }))
     .query(async ({ ctx, input }) => {
-      return getCachedInsight(ctx.user.id, input.type);
+      const locale = await getRequestLocale(ctx.headers);
+      return getCachedInsight(ctx.user.id, input.type, locale);
     }),
 
   /** Generate (or refresh) an insight on-demand */
@@ -42,7 +45,8 @@ export const insightsRouter = createTRPCRouter({
         throw new Error(`Extension "${input.type}" not found or has no processor`);
       }
 
-      const defaultRange = getLastNDaysRange(7);
+      const locale = await getRequestLocale(ctx.headers);
+      const defaultRange = getLastNDaysRange(ext.processor.defaultRangeDays ?? 7);
 
       const dateRange = input.dateRange || {
         from: defaultRange.fromKey,
@@ -52,6 +56,7 @@ export const insightsRouter = createTRPCRouter({
       const processorInput = {
         userId: ctx.user.id,
         dateRange,
+        locale,
       };
 
       const result: InsightResult = await ext.processor.handler(processorInput);
@@ -59,6 +64,7 @@ export const insightsRouter = createTRPCRouter({
       await cacheInsight(ctx.user.id, input.type, result, {
         dataHash: hashData(processorInput),
         ttlHours: ext.cacheTtlHours ?? 24,
+        locale,
       });
 
       return result;

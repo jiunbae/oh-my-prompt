@@ -1,5 +1,6 @@
 import type { AnyRouter } from "@trpc/server";
 import type { ComponentType } from "react";
+import type { Locale } from "@/i18n/config";
 
 // ── Canonical insight output format ──────────────────────────────
 
@@ -31,6 +32,12 @@ export interface ProcessorInput {
   userId: string;
   dateRange: { from: string; to: string };
   parameters?: Record<string, unknown>;
+  /**
+   * Active UI locale of the requesting user. Processors use it to render
+   * LLM-generated and fallback text in the user's language. Defaults to
+   * English when omitted (e.g. scheduled/batch runs without a request).
+   */
+  locale?: Locale;
 }
 
 export interface ProcessorOutput {
@@ -43,6 +50,8 @@ export interface ProcessorOutput {
 export interface ExtensionProcessor {
   /** cron expression for batch processing (e.g. "0 3 * * *") */
   schedule?: string;
+  /** Default date range in days for on-demand generation. */
+  defaultRangeDays?: number;
   /** Unique job name for BullMQ */
   jobName: string;
   /** Handler that produces an insight */

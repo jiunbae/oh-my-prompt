@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   Card,
   CardContent,
@@ -22,12 +23,14 @@ interface CachedInsight {
   generatedAt: string;
 }
 
-function formatTimeAgo(dateStr: string): string {
+type TimeAgoT = (key: string, values?: Record<string, string | number>) => string;
+
+function formatTimeAgo(dateStr: string, t: TimeAgoT): string {
   const ms = Date.now() - new Date(dateStr).getTime();
-  if (ms < 60_000) return "just now";
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
-  return `${Math.round(ms / 86_400_000)}d ago`;
+  if (ms < 60_000) return t("timeAgo.justNow");
+  if (ms < 3_600_000) return t("timeAgo.minutes", { n: Math.round(ms / 60_000) });
+  if (ms < 86_400_000) return t("timeAgo.hours", { n: Math.round(ms / 3_600_000) });
+  return t("timeAgo.days", { n: Math.round(ms / 86_400_000) });
 }
 
 function TrendArrow({ direction }: { direction: InsightTrend["direction"] }) {
@@ -121,6 +124,7 @@ function InsightCard({
   loading: boolean;
   onGenerate: (type: string) => void;
 }) {
+  const t = useTranslations("insights");
   const result = insight?.result ?? null;
 
   return (
@@ -131,12 +135,12 @@ function InsightCard({
           {loading ? (
             <Badge variant="secondary" className="gap-1">
               <LoadingSpinner />
-              Generating
+              {t("common.generating")}
             </Badge>
           ) : result ? (
-            <Badge variant="success">Active</Badge>
+            <Badge variant="success">{t("common.active")}</Badge>
           ) : (
-            <Badge variant="outline">Not generated</Badge>
+            <Badge variant="outline">{t("common.notGenerated")}</Badge>
           )}
         </div>
         <CardDescription>
@@ -169,7 +173,7 @@ function InsightCard({
             {result.trends && result.trends.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground">
-                  Trends
+                  {t("common.trends")}
                 </p>
                 {result.trends.slice(0, 4).map((t: InsightTrend) => (
                   <div
@@ -192,7 +196,7 @@ function InsightCard({
             {result.recommendations && result.recommendations.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground">
-                  Recommendations
+                  {t("common.recommendations")}
                 </p>
                 <ul className="space-y-1">
                   {result.recommendations.slice(0, 3).map((r: string, i: number) => (
@@ -213,19 +217,20 @@ function InsightCard({
             {/* Footer: timestamp + refresh */}
             <div className="flex items-center justify-between pt-2 border-t border-border">
               <span className="text-[10px] text-muted-foreground">
-                Generated{" "}
-                {insight?.generatedAt
-                  ? formatTimeAgo(insight.generatedAt)
-                  : result.generatedAt
-                    ? formatTimeAgo(result.generatedAt)
-                    : ""}
+                {t("common.generated", {
+                  time: insight?.generatedAt
+                    ? formatTimeAgo(insight.generatedAt, t)
+                    : result.generatedAt
+                      ? formatTimeAgo(result.generatedAt, t)
+                      : "",
+                })}
               </span>
               <button
                 onClick={() => onGenerate(type)}
                 disabled={loading}
                 className="text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
               >
-                Refresh
+                {t("common.refresh")}
               </button>
             </div>
           </div>
@@ -252,10 +257,10 @@ function InsightCard({
               {loading ? (
                 <>
                   <LoadingSpinner />
-                  Generating...
+                  {t("cards.generating")}
                 </>
               ) : (
-                "Generate Insight"
+                t("cards.generate")
               )}
             </button>
           </div>
@@ -268,28 +273,30 @@ function InsightCard({
 const INSIGHT_TYPES = [
   {
     type: "daily-summary",
-    title: "Daily Summary",
-    description:
-      "AI-generated summary of your daily prompt activity with trends and highlights",
+    titleKey: "cards.dailySummary.title",
+    descKey: "cards.dailySummary.description",
   },
   {
     type: "weekly-trends",
-    title: "Weekly Trends",
-    description:
-      "Week-over-week analysis of your prompting patterns and recommendations",
+    titleKey: "cards.weeklyTrends.title",
+    descKey: "cards.weeklyTrends.description",
   },
 ] as const;
 
 export function InsightCards() {
+  const t = useTranslations("insights");
+  const locale = useLocale();
   const [insights, setInsights] = useState<Map<string, CachedInsight>>(
     new Map(),
   );
   const [loadingTypes, setLoadingTypes] = useState<Set<string>>(new Set());
   const [initialLoaded, setInitialLoaded] = useState(false);
 
-  const fetchInsights = useCallback(async () => {
+  const fetchInsights = useCallback(async (_locale: string) => {
     try {
-      const res = await fetch("/api/insights");
+      const res = await fetch("/api/insights", {
+        headers: { "X-OMP-Locale": _locale },
+      });
       if (!res.ok) return;
       const data = await res.json();
       const map = new Map<string, CachedInsight>();
@@ -307,8 +314,10 @@ export function InsightCards() {
   }, []);
 
   useEffect(() => {
-    fetchInsights();
-  }, [fetchInsights]);
+    setInitialLoaded(false);
+    setInsights(new Map());
+    fetchInsights(locale);
+  }, [fetchInsights, locale]);
 
   const generateInsight = useCallback(
     async (type: string) => {
@@ -328,7 +337,7 @@ export function InsightCards() {
           return;
         }
         // Refetch all insights to get updated cache state
-        await fetchInsights();
+        await fetchInsights(locale);
       } catch (error) {
         console.error("Failed to generate insight:", error);
       } finally {
@@ -339,20 +348,20 @@ export function InsightCards() {
         });
       }
     },
-    [fetchInsights],
+    [fetchInsights, locale],
   );
 
   if (!initialLoaded) {
     return (
       <div className="grid md:grid-cols-2 gap-4">
-        {INSIGHT_TYPES.map(({ type, title }) => (
+        {INSIGHT_TYPES.map(({ type, titleKey }) => (
           <Card key={type}>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base">{title}</CardTitle>
+                <CardTitle className="text-base">{t(titleKey)}</CardTitle>
                 <Badge variant="secondary" className="gap-1">
                   <LoadingSpinner />
-                  Loading
+                  {t("common.loading")}
                 </Badge>
               </div>
             </CardHeader>
@@ -375,12 +384,12 @@ export function InsightCards() {
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
-      {INSIGHT_TYPES.map(({ type, title, description }) => (
+      {INSIGHT_TYPES.map(({ type, titleKey, descKey }) => (
         <InsightCard
           key={type}
           type={type}
-          title={title}
-          description={description}
+          title={t(titleKey)}
+          description={t(descKey)}
           insight={insights.get(type) ?? null}
           loading={loadingTypes.has(type)}
           onGenerate={generateInsight}

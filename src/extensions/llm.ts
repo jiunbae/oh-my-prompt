@@ -65,6 +65,24 @@ function getDefaultModel(provider: string): string {
   }
 }
 
+/**
+ * Build a system-prompt suffix instructing the model to write all
+ * human-readable output in the user's locale. Returns an empty string for
+ * the default (English) locale so existing prompts are unchanged.
+ *
+ * Append the result to a JSON-emitting system prompt: it keeps the JSON
+ * structure, key names, and `direction` enum values in English while
+ * localizing every value the user actually reads.
+ */
+export function localeInstruction(locale?: string): string {
+  if (locale === "ko") {
+    return `
+
+IMPORTANT — OUTPUT LANGUAGE: Write ALL human-readable text fields in natural, fluent Korean (한국어). This includes "title", "summary", every "label" and "value" in highlights, every "metric" and "explanation" in trends, and every item in "recommendations". Keep the JSON structure, the JSON key names, and the "direction" enum values ("up" / "down" / "stable") exactly as specified in English. Do not translate numbers or proper nouns such as project names.`;
+  }
+  return "";
+}
+
 interface LLMMessage {
   role: "system" | "user" | "assistant";
   content: string;
