@@ -426,6 +426,11 @@ The self-hosted web dashboard turns raw prompts into insights.
 </tr>
 </table>
 
+**Admin Diagnostics** — admins can open `/admin/diagnostics` to check database,
+Redis, LLM configuration, optional live LLM probe, timezone/KST handling, i18n
+locale support, sync recency, and AI insight cache health. The diagnostics API
+only returns redacted configuration state; secrets and API keys are never shown.
+
 <details>
 <summary><b>Screenshots</b></summary>
 <br />
@@ -553,6 +558,37 @@ docker run -p 3000:3000 \
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis for caching |
 | `OMP_ADMIN_EMAIL` | No | — | Auto-seed admin email on startup |
 | `NODE_ENV` | No | `production` | Environment mode |
+| `NEXT_PUBLIC_APP_URL` | No | — | Public base URL for absolute links |
+| `COOKIE_SECURE` | No | `true` in production | Set `false` only for plain-HTTP deployments |
+| `OMP_TIME_ZONE` | No | `TZ` or `UTC` | App analytics timezone, e.g. `Asia/Seoul` |
+
+### AI Insights / LLM
+
+AI insights use an OpenAI-compatible or provider-specific LLM configured by
+environment variables:
+
+| Variable | Required | Default | Description |
+|:---------|:--------:|:--------|:------------|
+| `OMP_LLM_PROVIDER` | No | — | `openai`, `custom`, `ollama`, `anthropic`, `azure`, or `gemini` |
+| `OMP_LLM_API_KEY` | Provider-dependent | — | API key; optional for local `custom`/`ollama` servers that do not require auth |
+| `OMP_LLM_BASE_URL` | No | provider default | Base URL for OpenAI-compatible/local serving |
+| `OMP_LLM_MODEL` | No | provider default | Model name |
+| `OMP_LLM_MAX_TOKENS` | No | `2048` | Max output tokens for insight generation |
+| `OMP_LLM_TEMPERATURE` | No | `0.3` | Sampling temperature |
+| `OMP_LLM_ENABLE_THINKING` | No | — | Optional `true`/`false` flag for compatible local models |
+
+For a local OpenAI-compatible server:
+
+```bash
+OMP_LLM_PROVIDER=custom
+OMP_LLM_BASE_URL=http://localhost:8000/v1
+OMP_LLM_MODEL=your-model
+# OMP_LLM_API_KEY can be omitted if your local server accepts unauthenticated requests.
+```
+
+Use `/admin/diagnostics` as an admin to verify the active LLM config. Click
+`Run LLM Probe` only when you want to send a short live test request to the
+configured model.
 
 ### Kubernetes
 
