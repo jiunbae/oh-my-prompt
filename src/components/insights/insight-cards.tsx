@@ -292,10 +292,10 @@ export function InsightCards() {
   const [loadingTypes, setLoadingTypes] = useState<Set<string>>(new Set());
   const [initialLoaded, setInitialLoaded] = useState(false);
 
-  const fetchInsights = useCallback(async (_locale: string) => {
+  const fetchInsights = useCallback(async (loc: string) => {
     try {
       const res = await fetch("/api/insights", {
-        headers: { "X-OMP-Locale": _locale },
+        headers: { "X-OMP-Locale": loc },
       });
       if (!res.ok) return;
       const data = await res.json();
