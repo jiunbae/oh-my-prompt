@@ -267,6 +267,16 @@ export const apiEndpoints: ApiEndpoint[] = [
   },
   {
     category: "Admin",
+    method: "GET",
+    path: "/api/admin/diagnostics",
+    description: "Get redacted deployment diagnostics for AI, i18n, sync, and services",
+    auth: true,
+    adminOnly: true,
+    query: { probe: "1 to run a live LLM probe" },
+    response: { overall: "string", checks: "DiagnosticCheck[]" },
+  },
+  {
+    category: "Admin",
     method: "POST",
     path: "/api/admin/purge-deleted",
     description: "Permanently delete soft-deleted prompts older than 30 days",

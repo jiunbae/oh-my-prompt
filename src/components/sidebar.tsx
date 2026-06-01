@@ -27,6 +27,7 @@ import {
   Users,
   Settings,
   Activity,
+  Gauge,
   UsersRound,
   ShieldCheck,
   Menu,
@@ -102,6 +103,7 @@ const workspaceItems: NavItem[] = [
 
 const adminNavItems: NavItem[] = [
   { href: "/admin/monitoring", labelKey: "monitoring", Icon: Activity, adminOnly: true },
+  { href: "/admin/diagnostics", labelKey: "diagnostics", Icon: Gauge, adminOnly: true },
   { href: "/admin/sessions", labelKey: "sessions", Icon: MessageSquare, adminOnly: true },
   { href: "/admin/analytics", labelKey: "aiInsights", Icon: BarChart3, adminOnly: true },
   { href: "/admin/users", labelKey: "users", Icon: UsersRound, adminOnly: true },
