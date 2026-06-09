@@ -11,12 +11,15 @@ interface LocaleSwitcherProps {
   className?: string;
   align?: "start" | "end";
   variant?: "default" | "compact";
+  /** Which way the menu opens. Use "up" when anchored at the bottom of a panel. */
+  direction?: "up" | "down";
 }
 
 export function LocaleSwitcher({
   className,
   align = "end",
   variant = "default",
+  direction = "down",
 }: LocaleSwitcherProps) {
   const router = useRouter();
   const currentLocale = useLocale() as Locale;
@@ -100,8 +103,9 @@ export function LocaleSwitcher({
         <div
           role="menu"
           className={cn(
-            "absolute z-50 mt-2 min-w-[10rem] rounded-md border border-border bg-card text-card-foreground shadow-md py-1",
-            align === "end" ? "right-0" : "left-0"
+            "absolute z-50 min-w-[10rem] rounded-md border border-border bg-card text-card-foreground shadow-md py-1",
+            align === "end" ? "right-0" : "left-0",
+            direction === "up" ? "bottom-full mb-2" : "mt-2"
           )}
         >
           {locales.map((locale) => {

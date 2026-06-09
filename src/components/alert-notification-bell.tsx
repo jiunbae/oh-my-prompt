@@ -95,7 +95,7 @@ export function AlertNotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50 w-80 rounded-lg border border-border bg-card shadow-lg">
+        <div className="absolute left-0 bottom-full mb-2 z-50 w-80 rounded-lg border border-border bg-card shadow-lg">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <p className="text-sm font-semibold text-foreground">Notifications</p>
             <Link

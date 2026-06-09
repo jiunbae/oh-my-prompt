@@ -202,7 +202,7 @@ function TeamSwitcher() {
   const personalLabel = tNav("personal");
 
   return (
-    <div className="px-3 pb-3">
+    <div className="shrink-0 px-3 pb-3">
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -307,30 +307,23 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
 
   return (
     <>
-      <div className="flex h-16 items-center justify-between border-b border-border px-4">
-        <Link href="/dashboard" className="block" onClick={onLinkClick}>
+      <div className="flex h-16 shrink-0 items-center border-b border-border px-4">
+        <Link
+          href="/dashboard"
+          className="flex items-center"
+          onClick={onLinkClick}
+        >
           <img
             src="/logo-dark.svg"
             alt="Oh My Prompt"
-            className="h-10 w-auto dark:invert-0 invert"
+            className="h-8 w-auto dark:invert-0 invert"
           />
         </Link>
-        <div className="flex items-center gap-2">
-          <AlertNotificationBell />
-          {isOffline && (
-            <span
-              className="inline-flex h-2 w-2 rounded-full bg-destructive"
-              title="Offline"
-            />
-          )}
-          <LocaleSwitcher variant="compact" />
-          <ThemeToggle />
-        </div>
       </div>
 
       {/* Offline banner */}
       {isOffline && (
-        <div className="px-3 py-2 bg-destructive/10 border-b border-destructive/20">
+        <div className="shrink-0 px-3 py-2 bg-destructive/10 border-b border-destructive/20">
           <p className="text-xs text-destructive flex items-center gap-1.5">
             <AlertCircle className="h-3 w-3" aria-hidden="true" />
             {tCommon("offline")}
@@ -338,7 +331,7 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
         </div>
       )}
 
-      <nav className="flex-1 space-y-5 px-3 py-4" aria-label="Main navigation">
+      <nav className="flex-1 min-h-0 overflow-y-auto space-y-5 px-3 py-4" aria-label="Main navigation">
         <SidebarGroup
           label={tNav("overview")}
           items={overviewItems}
@@ -423,8 +416,23 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
       {/* Team Switcher */}
       <TeamSwitcher />
 
+      {/* Utility controls: language, notifications, theme */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-3 py-2">
+        <LocaleSwitcher variant="compact" align="start" direction="up" />
+        <div className="flex items-center gap-0.5">
+          {isOffline && (
+            <span
+              className="inline-flex h-2 w-2 rounded-full bg-destructive"
+              title="Offline"
+            />
+          )}
+          <AlertNotificationBell />
+          <ThemeToggle />
+        </div>
+      </div>
+
       {/* User Info Section */}
-      <div className="border-t border-border p-4">
+      <div className="shrink-0 p-4">
         {loading ? (
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-full bg-skeleton animate-pulse" />

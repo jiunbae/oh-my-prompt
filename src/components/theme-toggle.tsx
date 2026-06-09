@@ -92,21 +92,18 @@ export function ThemeToggle() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center justify-center gap-1.5 h-8 rounded-md px-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors text-sm"
-        title="Change theme"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+        title={getThemeLabel(theme ?? "dark")}
+        aria-label={getThemeLabel(theme ?? "dark")}
         aria-expanded={open}
         aria-haspopup="listbox"
       >
         {getThemeIcon(theme ?? "dark")}
-        <span className="hidden sm:inline">{getThemeLabel(theme ?? "dark")}</span>
-        <svg className="h-3 w-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
       </button>
 
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-border bg-card p-1 shadow-lg"
+          className="absolute right-0 bottom-full mb-1 z-50 min-w-[180px] rounded-lg border border-border bg-card p-1 shadow-lg"
           role="listbox"
           aria-label="Theme options"
         >
