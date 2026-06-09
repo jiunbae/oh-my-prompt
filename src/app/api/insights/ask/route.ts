@@ -3,6 +3,7 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { rateLimiters } from "@/lib/rate-limit";
 import { callLLM, getLLMConfig, localeInstruction } from "@/extensions/llm";
+import { getCachedInsight, cacheInsight, hashData } from "@/extensions/insight-cache";
 import type { InsightResult } from "@/extensions/types";
 import { getRequestLocale } from "@/i18n/server-locale";
 import { db } from "@/db/client";
@@ -103,14 +104,6 @@ export async function POST(request: NextRequest) {
     const session = await requireAuth();
     const locale = await getRequestLocale(request.headers);
 
-    const rl = rateLimiters.llm(session.userId);
-    if (!rl.allowed) {
-      return NextResponse.json(
-        { error: "Too many requests" },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
-      );
-    }
-
     const body = await request.json();
     const question = typeof body.question === "string" ? body.question.trim() : "";
     if (!question) {
@@ -118,6 +111,25 @@ export async function POST(request: NextRequest) {
     }
     if (question.length > 500) {
       return NextResponse.json({ error: "Question too long (max 500 chars)" }, { status: 400 });
+    }
+
+    // Cache answers per (normalized question, locale). Re-asking the same
+    // question — e.g. tapping a recent-question chip — returns the stored
+    // answer instantly instead of re-running the LLM. Checked before the rate
+    // limiter so cache hits never consume the user's LLM budget.
+    const cacheKey = `ask:${hashData(question.toLowerCase().replace(/\s+/g, " "))}`;
+    const cached = await getCachedInsight(session.userId, cacheKey, locale);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
+    // Only real LLM generations are rate-limited.
+    const rl = rateLimiters.llm(session.userId);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests" },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
     }
 
     const llmConfig = getLLMConfig();
@@ -299,6 +311,15 @@ ${question}
     }
 
     const result = normalizeInsightResult(parsed);
+
+    // Persist so the next ask of this question is served from cache. Scoped
+    // per-locale, 24h TTL; the original question is kept for reference.
+    await cacheInsight(session.userId, cacheKey, result, {
+      parameters: { question },
+      dataHash: hashData(dataContext),
+      ttlHours: 24,
+      locale,
+    });
 
     return NextResponse.json(result);
   } catch (error) {

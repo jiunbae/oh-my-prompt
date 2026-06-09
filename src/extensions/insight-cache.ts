@@ -131,6 +131,9 @@ export async function getUserInsights(
       and(
         eq(schema.aiInsights.userId, userId),
         gt(schema.aiInsights.expiresAt, new Date()),
+        // Free-form "Ask Your Data" answers are recalled via the Ask panel's
+        // recent questions, not this list — keep them out of Recent Insights.
+        sql`${schema.aiInsights.insightType} NOT LIKE 'ask:%'`,
         ...(localeCond ? [localeCond] : []),
       ),
     )
