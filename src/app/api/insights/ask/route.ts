@@ -140,29 +140,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const last30Days = getLastNDaysRange(30);
+    const yearRange = getLastNDaysRange(365);
 
     const baseConditions = and(
       eq(schema.prompts.userId, session.userId),
-      gte(schema.prompts.timestamp, last30Days.from),
+      gte(schema.prompts.timestamp, yearRange.from),
       isNull(schema.prompts.deletedAt),
     );
 
-    // Gather aggregated stats in parallel
+    // Spans the user's entire history, for "all time" style questions.
+    const allTimeConditions = and(
+      eq(schema.prompts.userId, session.userId),
+      isNull(schema.prompts.deletedAt),
+    );
+
+    // Gather aggregated stats in parallel. The detailed window is the last 365
+    // days so day-level questions ("busiest day this year/month/week") can be
+    // answered; all-time totals and the full date range give broader scope.
     const [
       totalCountResult,
+      allTimeCountResult,
       projectsResult,
-      dailySummaryResult,
+      dailyActivityResult,
       dateRangeResult,
       recentSessionsResult,
     ] = await Promise.all([
-      // Total prompts in last 30 days
+      // Total prompts in the last 365 days
       db
         .select({ count: sql<number>`count(*)::int` })
         .from(schema.prompts)
         .where(baseConditions),
 
-      // Top projects with counts
+      // Total prompts all-time
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.prompts)
+        .where(allTimeConditions),
+
+      // Top projects with counts (last 365 days)
       db
         .select({
           name: schema.prompts.projectName,
@@ -175,7 +190,7 @@ export async function POST(request: NextRequest) {
         .orderBy(desc(sql`count(*)`))
         .limit(10),
 
-      // Daily summaries for last 7 days
+      // Daily activity for the last 365 days (day-level granularity)
       db.execute(sql`
         SELECT
           (${schema.prompts.timestamp} AT TIME ZONE ${APP_TIME_ZONE})::date::text as day,
@@ -184,25 +199,21 @@ export async function POST(request: NextRequest) {
           count(distinct ${schema.prompts.projectName})::int as project_count,
           sum(coalesce(${schema.prompts.tokenEstimate}, 0) + coalesce(${schema.prompts.tokenEstimateResponse}, 0))::int as total_tokens
         FROM ${schema.prompts}
-        WHERE ${and(
-          eq(schema.prompts.userId, session.userId),
-          gte(schema.prompts.timestamp, getLastNDaysRange(7).from),
-          isNull(schema.prompts.deletedAt),
-        )}
+        WHERE ${baseConditions}
         GROUP BY 1
         ORDER BY day DESC
       `),
 
-      // Date range
+      // Full data coverage (all-time min/max)
       db
         .select({
           minDate: sql<string>`min(${schema.prompts.timestamp})::text`,
           maxDate: sql<string>`max(${schema.prompts.timestamp})::text`,
         })
         .from(schema.prompts)
-        .where(baseConditions),
+        .where(allTimeConditions),
 
-      // Recent sessions
+      // 10 most recent sessions
       db.execute(sql`
         SELECT
           ${schema.prompts.sessionId} as session_id,
@@ -222,22 +233,26 @@ export async function POST(request: NextRequest) {
     ]);
 
     const totalCount = totalCountResult[0]?.count ?? 0;
+    const allTimeCount = allTimeCountResult[0]?.count ?? 0;
 
-    const dailyRows = extractRows(dailySummaryResult);
+    const dailyRows = extractRows(dailyActivityResult);
     const sessionRows = extractRows(recentSessionsResult);
 
     const dataContext = {
-      total_prompts_30d: totalCount,
-      date_range: {
-        from: dateRangeResult[0]?.minDate || "N/A",
-        to: dateRangeResult[0]?.maxDate || "N/A",
+      // Full span of stored history. The day-level detail below only covers the
+      // last 365 days — anything earlier than that window has no daily breakdown.
+      data_range: {
+        earliest: dateRangeResult[0]?.minDate || "N/A",
+        latest: dateRangeResult[0]?.maxDate || "N/A",
       },
-      top_projects: projectsResult.map((p) => ({
+      total_prompts_all_time: allTimeCount,
+      total_prompts_last_365d: totalCount,
+      top_projects_last_365d: projectsResult.map((p) => ({
         name: p.name,
         prompt_count: p.count,
         total_tokens: p.tokens,
       })),
-      daily_summaries_7d: dailyRows.map((d) => ({
+      daily_activity_last_365d: dailyRows.map((d) => ({
         date: d.day,
         prompts: d.prompt_count,
         sessions: d.session_count,
@@ -277,6 +292,9 @@ You MUST return ONLY valid JSON in this exact format:
 
 Guidelines:
 - Answer the question directly and specifically
+- Honor the time range in the question. "this year"/"올해", "this month", "last week", "all time" each map to a different window — pick the matching data. For day-level questions (e.g. the busiest day), scan daily_activity_last_365d over the range the question implies, NOT just the most recent days
+- Always state the exact date range your answer covers in the summary
+- daily_activity_last_365d only has day-level detail for the last 365 days. If the question needs older data (compare against data_range), say that detail isn't available for that period and lower confidence
 - Use the provided data to back up your answer with numbers
 - Highlights should show 3-6 key data points relevant to the question
 - Trends are optional, include only if the question is about changes over time
@@ -288,7 +306,7 @@ Guidelines:
         },
         {
           role: "user",
-          content: `Here is the user's prompt history data (last 30 days):
+          content: `Here is the user's prompt history data. Each field name states the time window it covers (all-time, last 365 days, recent):
 
 ${JSON.stringify(dataContext, null, 2)}
 
