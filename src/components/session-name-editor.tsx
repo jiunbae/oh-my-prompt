@@ -72,7 +72,7 @@ export function SessionNameEditor({
   const currentName = savedName || fallbackName;
 
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 flex-1 space-y-3">
       {isEditing ? (
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row">

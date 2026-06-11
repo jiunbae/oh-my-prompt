@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { MarkdownContent } from "@/components/markdown-content";
+import { CollapsibleMessageContent } from "@/components/collapsible-message-content";
 
 interface SharedPromptData {
   id: string;
@@ -131,7 +131,7 @@ export function SharedSessionView({
       {/* Branded header with gradient */}
       <header className="border-b border-border bg-gradient-to-r from-[var(--accent-gradient-from,#3b82f6)]/10 to-[var(--accent-gradient-to,#8b5cf6)]/10">
         <div className="container mx-auto max-w-4xl px-6 py-5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-3">
             <Link href="/" className="flex items-center gap-2 text-foreground hover:text-foreground/80 transition-colors">
               <svg className="h-6 w-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
@@ -145,7 +145,7 @@ export function SharedSessionView({
               Shared Session
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setSortAsc(!sortAsc)}
               className="inline-flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors"
@@ -270,7 +270,7 @@ export function SharedSessionView({
                   {/* Message bubble */}
                   <div className="rounded-lg border border-user-message/30 bg-user-message/10 overflow-hidden">
                     <div className="p-4">
-                      <div className="flex items-center gap-2 mb-3">
+                      <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
                         <span className="font-medium text-user-message-foreground">You</span>
                         <span className="text-xs text-muted-foreground">{formatDate(prompt.timestamp)}</span>
                         {prompt.tokenEstimate && (
@@ -278,16 +278,14 @@ export function SharedSessionView({
                             {formatTokenCount(prompt.tokenEstimate)} tokens
                           </span>
                         )}
-                        <span className="ml-auto flex items-center gap-1">
+                        <span className="ml-auto flex shrink-0 items-center gap-1">
                           <CopyButton text={prompt.promptText} />
                           <span className="text-xs text-muted-foreground font-mono">
                             #{originalIndex + 1}
                           </span>
                         </span>
                       </div>
-                      <div className="prose prose-invert max-w-none">
-                        <MarkdownContent content={prompt.promptText} />
-                      </div>
+                      <CollapsibleMessageContent content={prompt.promptText} />
                     </div>
                   </div>
                 </div>
@@ -305,20 +303,18 @@ export function SharedSessionView({
                     {/* Message bubble */}
                     <div className="rounded-lg border border-assistant-message/30 bg-assistant-message/10 overflow-hidden">
                       <div className="p-4">
-                        <div className="flex items-center gap-2 mb-3">
+                        <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
                           <span className="font-medium text-assistant-message-foreground">Assistant</span>
                           {prompt.tokenEstimateResponse && (
                             <span className="text-xs text-muted-foreground">
                               {formatTokenCount(prompt.tokenEstimateResponse)} tokens
                             </span>
                           )}
-                          <div className="ml-auto">
+                          <div className="ml-auto shrink-0">
                             <CopyButton text={prompt.responseText} />
                           </div>
                         </div>
-                        <div className="prose prose-invert max-w-none">
-                          <MarkdownContent content={prompt.responseText} />
-                        </div>
+                        <CollapsibleMessageContent content={prompt.responseText} />
                       </div>
                     </div>
                   </div>

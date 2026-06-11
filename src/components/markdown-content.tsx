@@ -14,6 +14,7 @@ import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
 import jsx from "react-syntax-highlighter/dist/esm/languages/prism/jsx";
 import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
+import { cn } from "@/lib/utils";
 
 SyntaxHighlighter.registerLanguage("typescript", typescript);
 SyntaxHighlighter.registerLanguage("ts", typescript);
@@ -35,11 +36,18 @@ SyntaxHighlighter.registerLanguage("tsx", tsx);
 
 interface MarkdownContentProps {
   content: string;
+  className?: string;
 }
 
-export function MarkdownContent({ content }: MarkdownContentProps) {
+export function MarkdownContent({ content, className }: MarkdownContentProps) {
   return (
-    <div className="prose prose-invert max-w-none prose-pre:p-0 prose-pre:bg-transparent">
+    <div
+      className={cn(
+        "prose prose-invert max-w-none min-w-0 break-words prose-pre:p-0 prose-pre:bg-transparent",
+        "[&_a]:break-words [&_code]:break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto",
+        className,
+      )}
+    >
       <ReactMarkdown
         components={{
           pre(props) {
@@ -56,7 +64,7 @@ export function MarkdownContent({ content }: MarkdownContentProps) {
                   style={vscDarkPlus}
                   language={match[1]}
                   PreTag="div"
-                  className="rounded-md border border-border my-4"
+                  className="rounded-md border border-border my-4 max-w-full overflow-x-auto"
                 >
                   {String(children).replace(/\n$/, "")}
                 </SyntaxHighlighter>

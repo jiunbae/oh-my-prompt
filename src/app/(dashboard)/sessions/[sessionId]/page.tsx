@@ -161,7 +161,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         <div className="h-1 bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)]" />
         <CardContent className="p-6">
           {/* Header row: name + actions */}
-          <div className="flex items-start justify-between gap-4 mb-2">
+          <div className="mb-2 flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <SessionNameEditor
               key={`${sessionId}:${displayName?.displayName ?? ""}`}
               sessionId={sessionId}
@@ -169,31 +169,32 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
               fallbackName={fallbackName}
               editable={canRename}
             />
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
               <ShareSessionButton sessionId={sessionId} />
-              <SessionStoryButton sessionId={sessionId} />
             </div>
           </div>
 
           {/* First prompt preview */}
-          <div className="text-sm text-muted-foreground line-clamp-2 whitespace-pre-line mb-4">
+          <div className="mb-4 line-clamp-2 break-words whitespace-pre-line text-sm text-muted-foreground">
             {first.promptText || "Empty prompt"}
           </div>
 
           {/* Time + badges row */}
           <div className="flex flex-wrap items-center gap-4 text-sm mb-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              {formatDate(first.timestamp)} — {formatDuration(first.timestamp, last.timestamp)}
+              <span className="min-w-0 break-words">
+                {formatDate(first.timestamp)} — {formatDuration(first.timestamp, last.timestamp)}
+              </span>
             </div>
             {first.projectName && (
-              <Badge variant="secondary">{first.projectName}</Badge>
+              <Badge variant="secondary" className="max-w-full truncate">{first.projectName}</Badge>
             )}
             {first.source && (
-              <Badge variant="outline">{first.source}</Badge>
+              <Badge variant="outline" className="max-w-full truncate">{first.source}</Badge>
             )}
           </div>
 
@@ -266,6 +267,8 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         </CardContent>
       </Card>
 
+      <SessionStoryButton sessionId={sessionId} />
+
       {/* Conversation thread */}
       <SessionThread
         prompts={prompts.map((p) => ({
@@ -280,7 +283,6 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
           })),
         }))}
         responseCount={responseCount}
-        hasNote={!!noteRow}
         selectable
       />
 

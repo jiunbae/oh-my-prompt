@@ -43,24 +43,24 @@ function SessionRow({ session }: { session: SessionSummary }) {
   const [showStory, setShowStory] = useState(false);
 
   return (
-    <div className="rounded-lg border border-border p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="min-w-0 rounded-lg border border-border p-4 space-y-3 overflow-hidden">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Link
               href={`/sessions/${session.sessionId}`}
-              className="text-sm font-medium text-foreground hover:text-primary transition-colors truncate"
+              className="min-w-0 max-w-full truncate text-sm font-medium text-foreground transition-colors hover:text-primary"
             >
               {session.displayName || session.projectName || session.sessionId.slice(0, 12) + "..."}
             </Link>
             {session.source && (
-              <Badge variant="outline" className="text-xs">{session.source}</Badge>
+              <Badge variant="outline" className="max-w-full truncate text-xs">{session.source}</Badge>
             )}
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+          <p className="mt-0.5 line-clamp-2 break-words text-xs text-muted-foreground sm:line-clamp-1">
             {session.firstPrompt}
           </p>
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>{new Date(session.startedAt).toLocaleDateString(locale)}</span>
             <span>{formatDuration(session.startedAt, session.endedAt, t)}</span>
             <span>{t("sessionStories.promptsSuffix", { count: session.promptCount })}</span>
@@ -69,14 +69,14 @@ function SessionRow({ session }: { session: SessionSummary }) {
         </div>
         <button
           onClick={() => setShowStory(!showStory)}
-          className="shrink-0 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="h-8 shrink-0 self-start rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           {showStory ? t("sessionStories.hide") : t("sessionStories.generateStory")}
         </button>
       </div>
 
       {showStory && (
-        <div className="border-t border-border pt-3">
+        <div className="min-w-0 border-t border-border pt-3">
           <SessionStoryButton sessionId={session.sessionId} />
         </div>
       )}
@@ -112,14 +112,14 @@ export function SessionStories() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <CardTitle>{t("sessionStories.title")}</CardTitle>
-            <CardDescription>{t("sessionStories.description")}</CardDescription>
+            <CardDescription className="break-words">{t("sessionStories.description")}</CardDescription>
           </div>
           <Link
             href="/sessions"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             {t("sessionStories.viewAll")}
           </Link>
@@ -156,7 +156,7 @@ export function SessionStories() {
         )}
 
         {!loading && !error && sessions.length > 0 && (
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-3">
             {sessions.map((session) => (
               <SessionRow key={session.sessionId} session={session} />
             ))}

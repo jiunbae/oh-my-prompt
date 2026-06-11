@@ -85,7 +85,7 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
   }, [locale, sessionId, t]);
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {!result && (
         <Button
           onClick={generateStory}
@@ -119,7 +119,7 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
       )}
 
       {loading && (
-        <Card>
+        <Card className="min-w-0 overflow-hidden">
           <CardContent className="p-4 space-y-3">
             <div className="h-5 w-48 animate-pulse rounded bg-skeleton" />
             <div className="h-3 w-full animate-pulse rounded bg-skeleton" />
@@ -129,12 +129,12 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
       )}
 
       {result && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h3 className="text-base font-semibold text-foreground">{result.title}</h3>
-                <p className="text-sm text-muted-foreground mt-1">{result.summary}</p>
+        <Card className="min-w-0 overflow-hidden">
+          <CardContent className="min-w-0 p-4 space-y-4">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <h3 className="break-words text-base font-semibold text-foreground">{result.title}</h3>
+                <p className="mt-1 whitespace-pre-line break-words text-sm text-muted-foreground">{result.summary}</p>
               </div>
               <Button
                 onClick={generateStory}
@@ -150,14 +150,14 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
             </div>
 
             {result.highlights && result.highlights.length > 0 && (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {result.highlights.map((h, i) => (
                   <div
                     key={i}
-                    className="rounded-lg border border-border bg-card p-2"
+                    className="min-w-0 rounded-lg border border-border bg-card p-2"
                   >
-                    <p className="text-xs text-muted-foreground">{h.label}</p>
-                    <p className="text-sm font-medium text-foreground">{h.value}</p>
+                    <p className="break-words text-xs text-muted-foreground">{h.label}</p>
+                    <p className="break-words text-sm font-medium text-foreground">{h.value}</p>
                   </div>
                 ))}
               </div>
@@ -166,10 +166,12 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
             {result.trends && result.trends.length > 0 && (
               <div className="space-y-1">
                 {result.trends.map((t, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    <TrendArrow direction={t.direction} />
-                    <span className="font-medium text-foreground">{t.metric}</span>
-                    <span className="text-muted-foreground">{t.explanation}</span>
+                  <div key={i} className="flex min-w-0 items-start gap-2 text-sm">
+                    <div className="mt-0.5 shrink-0">
+                      <TrendArrow direction={t.direction} />
+                    </div>
+                    <span className="min-w-0 break-words font-medium text-foreground">{t.metric}</span>
+                    <span className="min-w-0 break-words text-muted-foreground">{t.explanation}</span>
                   </div>
                 ))}
               </div>
@@ -178,21 +180,21 @@ export function SessionStoryButton({ sessionId }: { sessionId: string }) {
             {result.recommendations && result.recommendations.length > 0 && (
               <ul className="space-y-1">
                 {result.recommendations.map((r, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <li key={i} className="flex min-w-0 items-start gap-2 text-sm text-muted-foreground">
                     <svg className="h-4 w-4 mt-0.5 shrink-0 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                     </svg>
-                    {r}
+                    <span className="min-w-0 break-words">{r}</span>
                   </li>
                 ))}
               </ul>
             )}
 
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="outline">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline" className="shrink-0">
                 {t("common.confidence", { value: Math.round(result.confidence * 100) })}
               </Badge>
-              <span>
+              <span className="min-w-0 break-words">
                 {t("common.generated", { time: new Date(result.generatedAt).toLocaleString(locale) })}
               </span>
             </div>

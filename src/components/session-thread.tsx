@@ -4,12 +4,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { MarkdownContent } from "@/components/markdown-content";
 import { CheckboxRow } from "@/components/checkbox-row";
 import { BulkOperationsBar } from "@/components/bulk-operations-bar";
 import { PromptVersionTimeline } from "@/components/prompt-version-timeline";
 import { SimilarPrompts } from "@/components/similar-prompts";
 import { PromptSuggestDialog } from "@/components/prompt-suggest-dialog";
+import { CollapsibleMessageContent } from "@/components/collapsible-message-content";
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -40,7 +40,6 @@ interface PromptData {
 interface SessionThreadProps {
   prompts: PromptData[];
   responseCount: number;
-  hasNote?: boolean;
   selectable?: boolean;
 }
 
@@ -82,7 +81,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function SessionThread({ prompts, responseCount, hasNote = false, selectable = false }: SessionThreadProps) {
+export function SessionThread({ prompts, responseCount, selectable = false }: SessionThreadProps) {
   const router = useRouter();
   const [showResponses, setShowResponses] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
@@ -156,7 +155,7 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {selectable && (
           <label className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-border bg-card text-secondary-foreground hover:bg-surface transition-colors cursor-pointer select-none">
             <CheckboxRow
@@ -227,7 +226,7 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                 >
                   <div className="p-4">
                     {/* Header */}
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
                       {selectable && (
                         <CheckboxRow
                           checked={isSelected}
@@ -243,7 +242,7 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                         </span>
                       )}
                       <span className="text-xs text-muted-foreground font-mono">#{promptNumber}</span>
-                      <div className="ml-auto flex items-center gap-1">
+                      <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
                         <CopyButton text={prompt.promptText} />
                         <button
                           onClick={() => setActiveSimilarId(activeSimilarId === prompt.id ? null : prompt.id)}
@@ -267,9 +266,7 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                         </Link>
                       </div>
                     </div>
-                    <div className="prose prose-invert max-w-none">
-                      <MarkdownContent content={prompt.promptText} />
-                    </div>
+                    <CollapsibleMessageContent content={prompt.promptText} />
                     {prompt.promptTags.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-3">
                         {prompt.promptTags.map((pt) => (
@@ -289,7 +286,7 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                     {/* Similar prompts panel */}
                     {activeSimilarId === prompt.id && (
                       <div className="mt-3 rounded-lg border border-border bg-surface overflow-hidden">
-                        <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-surface-sunken">
+                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-sunken px-4 py-2">
                           <span className="text-xs font-medium text-secondary-foreground">Similar Prompts</span>
                           <button
                             onClick={() => setActiveSimilarId(null)}
@@ -318,20 +315,18 @@ export function SessionThread({ prompts, responseCount, hasNote = false, selecta
                   {/* Message bubble */}
                   <div className="rounded-lg border border-assistant-message/30 bg-assistant-message/10 overflow-hidden">
                     <div className="p-4">
-                      <div className="flex items-center gap-2 mb-3">
+                      <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
                         <span className="font-medium text-assistant-message-foreground">Assistant</span>
                         {prompt.tokenEstimateResponse && (
                           <span className="text-xs text-muted-foreground">
                             {formatTokens(prompt.tokenEstimateResponse)} tokens
                           </span>
                         )}
-                        <div className="ml-auto">
+                        <div className="ml-auto shrink-0">
                           <CopyButton text={prompt.responseText} />
                         </div>
                       </div>
-                      <div className="prose prose-invert max-w-none">
-                        <MarkdownContent content={prompt.responseText} />
-                      </div>
+                      <CollapsibleMessageContent content={prompt.responseText} />
                     </div>
                   </div>
                 </div>
