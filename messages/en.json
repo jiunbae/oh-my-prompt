@@ -317,7 +317,16 @@
     "story": {
       "generate": "Generate Session Story",
       "generating": "Generating Story…",
-      "error": "Failed to generate story"
+      "error": "Failed to generate story",
+      "title": "Session Story",
+      "showDetails": "Show details",
+      "hideDetails": "Hide details",
+      "cached": "Cached",
+      "fresh": "Fresh",
+      "regenerate": "Regenerate",
+      "useAsName": "Use as session name",
+      "nameApplied": "Name applied",
+      "nameError": "Failed to update session name"
     }
   },
   "locale": {

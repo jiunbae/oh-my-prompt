@@ -317,7 +317,16 @@
     "story": {
       "generate": "세션 스토리 생성",
       "generating": "스토리 생성 중…",
-      "error": "스토리를 생성하지 못했어요"
+      "error": "스토리를 생성하지 못했어요",
+      "title": "세션 스토리",
+      "showDetails": "상세 보기",
+      "hideDetails": "상세 숨기기",
+      "cached": "캐시됨",
+      "fresh": "새로 생성",
+      "regenerate": "다시 생성",
+      "useAsName": "세션 이름으로 사용",
+      "nameApplied": "이름 적용됨",
+      "nameError": "세션 이름을 업데이트하지 못했어요"
     }
   },
   "locale": {

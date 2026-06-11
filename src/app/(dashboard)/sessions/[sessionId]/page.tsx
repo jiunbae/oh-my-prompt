@@ -267,10 +267,11 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         </CardContent>
       </Card>
 
-      <SessionStoryButton sessionId={sessionId} />
+      <SessionStoryButton sessionId={sessionId} allowUseAsSessionName={canRename} />
 
       {/* Conversation thread */}
       <SessionThread
+        sessionId={sessionId}
         prompts={prompts.map((p) => ({
           id: p.id,
           timestamp: p.timestamp.toISOString(),

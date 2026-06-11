@@ -33,12 +33,15 @@ export async function GET(
     if (!sessionId) {
       return NextResponse.json({ error: "Session ID is required" }, { status: 400 });
     }
+    const refresh = request.nextUrl.searchParams.get("refresh") === "1";
 
     // Check cache first (scoped to the user's locale)
     const cacheKey = `session-story:${sessionId}`;
-    const cached = await getCachedInsight(session.userId, cacheKey, locale);
-    if (cached) {
-      return NextResponse.json(cached);
+    if (!refresh) {
+      const cached = await getCachedInsight(session.userId, cacheKey, locale);
+      if (cached) {
+        return NextResponse.json({ ...cached, cached: true });
+      }
     }
 
     // Generate fresh session story
@@ -62,7 +65,7 @@ export async function GET(
       locale,
     });
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, cached: false });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: 401 });

@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { CollapsibleMessageContent } from "@/components/collapsible-message-content";
+import { usePersistentExpandedMessages } from "@/hooks/use-persistent-expanded-messages";
+import {
+  getAllSessionMessageIds,
+  sessionMessageDomId,
+  sessionMessageId,
+} from "@/lib/session-ui";
 
 interface SharedPromptData {
   id: string;
@@ -97,10 +103,38 @@ export function SharedSessionView({
   const [sortAsc, setSortAsc] = useState(true);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const messageStorageKey = `omp:shared-session-thread:expanded:${startedAt}:${endedAt}:${promptCount}`;
+  const allMessageIds = useMemo(() => getAllSessionMessageIds(prompts), [prompts]);
+  const {
+    expandedIds,
+    setMessageExpanded,
+    expandMessages,
+    collapseMessages,
+  } = usePersistentExpandedMessages(messageStorageKey);
+  const allMessagesExpanded = allMessageIds.length > 0 && allMessageIds.every((id) => expandedIds.has(id));
+  const anyMessageExpanded = allMessageIds.some((id) => expandedIds.has(id));
 
   useEffect(() => {
     return () => clearTimeout(copyTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    if (!hash) return;
+
+    for (const prompt of prompts) {
+      const promptDomId = sessionMessageDomId(prompt.id, "prompt");
+      const responseDomId = sessionMessageDomId(prompt.id, "response");
+      if (hash === promptDomId) {
+        setMessageExpanded(sessionMessageId(prompt.id, "prompt"), true);
+        return;
+      }
+      if (hash === responseDomId) {
+        setMessageExpanded(sessionMessageId(prompt.id, "response"), true);
+        return;
+      }
+    }
+  }, [prompts, setMessageExpanded]);
 
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? 0), 0);
   const totalOutputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimateResponse ?? 0), 0);
@@ -195,6 +229,24 @@ export function SharedSessionView({
                 </>
               )}
             </button>
+            {allMessageIds.length > 1 && (
+              <>
+                <button
+                  onClick={() => expandMessages(allMessageIds)}
+                  disabled={allMessagesExpanded}
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                >
+                  Expand all
+                </button>
+                <button
+                  onClick={() => collapseMessages(allMessageIds)}
+                  disabled={!anyMessageExpanded}
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+                >
+                  Collapse all
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -256,10 +308,12 @@ export function SharedSessionView({
 
           {(sortAsc ? prompts : [...prompts].reverse()).map((prompt) => {
             const originalIndex = prompts.indexOf(prompt);
+            const promptMessageId = sessionMessageId(prompt.id, "prompt");
+            const responseMessageId = sessionMessageId(prompt.id, "response");
             return (
               <div key={prompt.id} className="relative pb-6 last:pb-0">
                 {/* User message */}
-                <div className="relative pl-14 group">
+                <div id={sessionMessageDomId(prompt.id, "prompt")} className="relative pl-14 group">
                   {/* Avatar */}
                   <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-user-message flex items-center justify-center z-10">
                     <svg className="h-3.5 w-3.5 text-user-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -285,14 +339,18 @@ export function SharedSessionView({
                           </span>
                         </span>
                       </div>
-                      <CollapsibleMessageContent content={prompt.promptText} />
+                      <CollapsibleMessageContent
+                        content={prompt.promptText}
+                        expanded={expandedIds.has(promptMessageId)}
+                        onExpandedChange={(expanded) => setMessageExpanded(promptMessageId, expanded)}
+                      />
                     </div>
                   </div>
                 </div>
 
                 {/* Assistant response */}
                 {showResponses && prompt.responseText && (
-                  <div className="relative pl-14 mt-3 group">
+                  <div id={sessionMessageDomId(prompt.id, "response")} className="relative pl-14 mt-3 group">
                     {/* Avatar */}
                     <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-assistant-message flex items-center justify-center z-10">
                       <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -314,7 +372,11 @@ export function SharedSessionView({
                             <CopyButton text={prompt.responseText} />
                           </div>
                         </div>
-                        <CollapsibleMessageContent content={prompt.responseText} />
+                        <CollapsibleMessageContent
+                          content={prompt.responseText}
+                          expanded={expandedIds.has(responseMessageId)}
+                          onExpandedChange={(expanded) => setMessageExpanded(responseMessageId, expanded)}
+                        />
                       </div>
                     </div>
                   </div>

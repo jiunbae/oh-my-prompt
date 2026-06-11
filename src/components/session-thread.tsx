@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,12 @@ import { PromptVersionTimeline } from "@/components/prompt-version-timeline";
 import { SimilarPrompts } from "@/components/similar-prompts";
 import { PromptSuggestDialog } from "@/components/prompt-suggest-dialog";
 import { CollapsibleMessageContent } from "@/components/collapsible-message-content";
+import { usePersistentExpandedMessages } from "@/hooks/use-persistent-expanded-messages";
+import {
+  getAllSessionMessageIds,
+  sessionMessageDomId,
+  sessionMessageId,
+} from "@/lib/session-ui";
 
 function formatDate(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -38,6 +44,7 @@ interface PromptData {
 }
 
 interface SessionThreadProps {
+  sessionId: string;
   prompts: PromptData[];
   responseCount: number;
   selectable?: boolean;
@@ -81,7 +88,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function SessionThread({ prompts, responseCount, selectable = false }: SessionThreadProps) {
+export function SessionThread({ sessionId, prompts, responseCount, selectable = false }: SessionThreadProps) {
   const router = useRouter();
   const [showResponses, setShowResponses] = useState(true);
   const [sortAsc, setSortAsc] = useState(true);
@@ -90,6 +97,34 @@ export function SessionThread({ prompts, responseCount, selectable = false }: Se
   const [suggestPrompt, setSuggestPrompt] = useState<{ id: string; text: string } | null>(null);
 
   const sortedPrompts = sortAsc ? [...prompts].reverse() : prompts;
+  const messageStorageKey = `omp:session-thread:expanded:${sessionId}`;
+  const allMessageIds = useMemo(() => getAllSessionMessageIds(prompts), [prompts]);
+  const {
+    expandedIds,
+    setMessageExpanded,
+    expandMessages,
+    collapseMessages,
+  } = usePersistentExpandedMessages(messageStorageKey);
+  const allMessagesExpanded = allMessageIds.length > 0 && allMessageIds.every((id) => expandedIds.has(id));
+  const anyMessageExpanded = allMessageIds.some((id) => expandedIds.has(id));
+
+  useEffect(() => {
+    const hash = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+    if (!hash) return;
+
+    for (const prompt of prompts) {
+      const promptDomId = sessionMessageDomId(prompt.id, "prompt");
+      const responseDomId = sessionMessageDomId(prompt.id, "response");
+      if (hash === promptDomId) {
+        setMessageExpanded(sessionMessageId(prompt.id, "prompt"), true);
+        return;
+      }
+      if (hash === responseDomId) {
+        setMessageExpanded(sessionMessageId(prompt.id, "response"), true);
+        return;
+      }
+    }
+  }, [prompts, setMessageExpanded]);
 
   const promptIds = prompts.map((p) => p.id);
   const allSelected = promptIds.length > 0 && promptIds.every((id) => selectedIds.has(id));
@@ -195,6 +230,24 @@ export function SessionThread({ prompts, responseCount, selectable = false }: Se
             {showResponses ? "Hide" : "Show"} Responses ({responseCount})
           </button>
         )}
+        {allMessageIds.length > 1 && (
+          <>
+            <button
+              onClick={() => expandMessages(allMessageIds)}
+              disabled={allMessagesExpanded}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-surface disabled:pointer-events-none disabled:opacity-50"
+            >
+              Expand all
+            </button>
+            <button
+              onClick={() => collapseMessages(allMessageIds)}
+              disabled={!anyMessageExpanded}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-secondary-foreground transition-colors hover:bg-surface disabled:pointer-events-none disabled:opacity-50"
+            >
+              Collapse all
+            </button>
+          </>
+        )}
       </div>
 
       {/* Thread with timeline */}
@@ -205,10 +258,12 @@ export function SessionThread({ prompts, responseCount, selectable = false }: Se
         {sortedPrompts.map((prompt, index) => {
           const promptNumber = sortAsc ? index + 1 : prompts.length - index;
           const isSelected = selectedIds.has(prompt.id);
+          const promptMessageId = sessionMessageId(prompt.id, "prompt");
+          const responseMessageId = sessionMessageId(prompt.id, "response");
           return (
             <div key={prompt.id} className="relative pb-6 last:pb-0">
               {/* User message */}
-              <div className="relative pl-14 group">
+              <div id={sessionMessageDomId(prompt.id, "prompt")} className="relative pl-14 group">
                 {/* Avatar */}
                 <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-user-message flex items-center justify-center z-10">
                   <svg className="h-3.5 w-3.5 text-user-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -266,7 +321,11 @@ export function SessionThread({ prompts, responseCount, selectable = false }: Se
                         </Link>
                       </div>
                     </div>
-                    <CollapsibleMessageContent content={prompt.promptText} />
+                    <CollapsibleMessageContent
+                      content={prompt.promptText}
+                      expanded={expandedIds.has(promptMessageId)}
+                      onExpandedChange={(expanded) => setMessageExpanded(promptMessageId, expanded)}
+                    />
                     {prompt.promptTags.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-3">
                         {prompt.promptTags.map((pt) => (
@@ -304,7 +363,7 @@ export function SessionThread({ prompts, responseCount, selectable = false }: Se
 
               {/* Assistant response */}
               {showResponses && prompt.responseText && (
-                <div className="relative pl-14 mt-3 group">
+                <div id={sessionMessageDomId(prompt.id, "response")} className="relative pl-14 mt-3 group">
                   {/* Avatar */}
                   <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-assistant-message flex items-center justify-center z-10">
                     <svg className="h-3.5 w-3.5 text-assistant-message-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -326,7 +385,11 @@ export function SessionThread({ prompts, responseCount, selectable = false }: Se
                           <CopyButton text={prompt.responseText} />
                         </div>
                       </div>
-                      <CollapsibleMessageContent content={prompt.responseText} />
+                      <CollapsibleMessageContent
+                        content={prompt.responseText}
+                        expanded={expandedIds.has(responseMessageId)}
+                        onExpandedChange={(expanded) => setMessageExpanded(responseMessageId, expanded)}
+                      />
                     </div>
                   </div>
                 </div>
