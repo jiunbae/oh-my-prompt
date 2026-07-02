@@ -32,7 +32,7 @@ export async function POST(
     const session = await requireAuth();
     const userId = session.userId;
 
-    const rateCheck = rateLimiters.llm(userId);
+    const rateCheck = await rateLimiters.llm(userId);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded" },

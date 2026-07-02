@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     const session = await requireAuth();
 
     // Rate limit
-    const rl = rateLimiters.api(session.userId);
+    const rl = await rateLimiters.api(session.userId);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Too many requests" },

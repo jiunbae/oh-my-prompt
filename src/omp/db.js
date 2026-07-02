@@ -215,6 +215,20 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 8,
+    run: (db) => {
+      // Per-turn discriminator. Without it, two identical prompts in the same
+      // session (e.g. "continue", "y") collapse to one row on the content-hash
+      // dedup path, silently dropping the second turn (and its distinct
+      // response). Producers that know turn ordering (backfill, watch) set it;
+      // when null, dedup keeps its original cross-source behaviour.
+      addColumnIfMissing(db, "prompts", "turn_index", "INTEGER");
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_prompts_dedup_turn ON prompts(session_id, role, content_hash, turn_index)"
+      );
+    },
+  },
 ];
 
 /**

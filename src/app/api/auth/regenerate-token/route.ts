@@ -18,7 +18,7 @@ export async function POST() {
   try {
     const session = await requireAuth();
 
-    const rateLimit = rateLimiters.auth(session.userId);
+    const rateLimit = await rateLimiters.auth(session.userId);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         { error: "Too many requests. Please try again later." },

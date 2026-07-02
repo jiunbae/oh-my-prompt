@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import {
   getCachedInsight,
@@ -33,8 +34,12 @@ export const insightsRouter = createTRPCRouter({
         type: z.string(),
         dateRange: z
           .object({
-            from: z.string(),
-            to: z.string(),
+            from: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format"),
+            to: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format"),
           })
           .optional(),
       }),
@@ -42,7 +47,10 @@ export const insightsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const ext = getExtension(input.type);
       if (!ext?.processor) {
-        throw new Error(`Extension "${input.type}" not found or has no processor`);
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Extension "${input.type}" not found or has no processor`,
+        });
       }
 
       const locale = await getRequestLocale(ctx.headers);

@@ -12,7 +12,8 @@ import { env } from "@/env";
 import { dispatchWebhook } from "@/services/webhook";
 import { generateEmbedding } from "@/lib/embedding";
 import { notifySlack } from "@/lib/slack";
-import { triggerEvent } from "@/lib/integration-triggers";
+import { triggerEventBatch } from "@/lib/integration-triggers";
+import { dateKeyInTimeZone, startOfDateKeyInTimeZone } from "@/lib/date-utils";
 import crypto from "crypto";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
@@ -58,7 +59,7 @@ export async function processUpload(
 
   // ── Phase 1: Validate & prepare all records in memory ──────────
 
-  const prepared: PreparedRecord[] = [];
+  const preparedRaw: PreparedRecord[] = [];
 
   for (const record of records) {
     if (!record.event_id || !record.created_at) {
@@ -85,7 +86,10 @@ export async function processUpload(
     });
 
     const eventKey = buildEventKey(userToken, createdAt, record.event_id);
-    const dateStr = createdAt.toISOString().split("T")[0];
+    // Key affected days by APP_TIME_ZONE calendar day (not UTC) so the daily
+    // analytics recompute in phase 7 covers the same local-day groups that
+    // analytics-cache aggregates by `AT TIME ZONE APP_TIME_ZONE`.
+    const dateStr = dateKeyInTimeZone(createdAt);
 
     const promptType = processed.promptText.includes("<task-notification>")
       ? "task_notification"
@@ -93,8 +97,21 @@ export async function processUpload(
         ? "system"
         : "user_input";
 
-    prepared.push({ eventKey, dateStr, createdAt, record, processed, promptType });
+    preparedRaw.push({ eventKey, dateStr, createdAt, record, processed, promptType });
   }
+
+  // De-duplicate records that share an event_id within THIS payload (they map to
+  // the same eventKey). Without this, two same-key rows would both be routed to
+  // the insert path; onConflictDoNothing would silently drop the second, but we
+  // would still count it as accepted and try to attach its tool invocations to a
+  // prompt id that was never inserted (FK-dangling). Keep the last occurrence so
+  // the freshest response/tool data wins; count the earlier ones as duplicates.
+  const dedupMap = new Map<string, PreparedRecord>();
+  for (const item of preparedRaw) {
+    if (dedupMap.has(item.eventKey)) duplicates++;
+    dedupMap.set(item.eventKey, item);
+  }
+  const prepared: PreparedRecord[] = [...dedupMap.values()];
 
   if (prepared.length === 0) {
     return {
@@ -256,26 +273,33 @@ export async function processUpload(
       };
     });
 
-    // Insert in chunks to avoid overly large statements
+    // Track which rows were ACTUALLY inserted (eventKey -> new prompt id) via
+    // RETURNING. onConflictDoNothing skips existing eventKeys, so the returned
+    // rows are exactly the newly-created prompts — the only rows we should count
+    // as accepted and the only rows we may safely parent tool invocations to.
+    const insertedById = new Map<string, string>(); // eventKey -> prompt id
+
     const INSERT_CHUNK = 200;
     for (let i = 0; i < insertValues.length; i += INSERT_CHUNK) {
       const chunk = insertValues.slice(i, i + INSERT_CHUNK);
       try {
-        await db
+        const returned = await db
           .insert(schema.prompts)
           .values(chunk)
-          .onConflictDoNothing({ target: schema.prompts.eventKey });
-        accepted += chunk.length;
+          .onConflictDoNothing({ target: schema.prompts.eventKey })
+          .returning({ id: schema.prompts.id, eventKey: schema.prompts.eventKey });
+        for (const row of returned) insertedById.set(row.eventKey, row.id);
       } catch (error) {
         // If batch insert fails, fall back to individual inserts for this chunk
         // so we can pinpoint the failing records
         for (let j = 0; j < chunk.length; j++) {
           try {
-            await db
+            const returned = await db
               .insert(schema.prompts)
               .values(chunk[j])
-              .onConflictDoNothing({ target: schema.prompts.eventKey });
-            accepted++;
+              .onConflictDoNothing({ target: schema.prompts.eventKey })
+              .returning({ id: schema.prompts.id, eventKey: schema.prompts.eventKey });
+            if (returned[0]) insertedById.set(returned[0].eventKey, returned[0].id);
           } catch (innerError) {
             const item = toInsert[i + j];
             rejected++;
@@ -287,27 +311,45 @@ export async function processUpload(
       }
     }
 
-    for (const item of toInsert) {
+    // Only count and post-process rows that were genuinely inserted.
+    accepted += insertedById.size;
+
+    const insertedItems = toInsert.filter((item) => insertedById.has(item.eventKey));
+
+    for (const item of insertedItems) {
       affectedDates.add(item.dateStr);
     }
 
     // ── Phase 5a: Insert tool_invocations parented to newly-inserted prompts.
-    // Pairing relies on toInsert[i] aligning with insertValues[i] since
-    // insertValues is built by mapping toInsert in order.
+    // We pair each inserted item with the id RETURNED for its eventKey, so tool
+    // rows never reference a prompt that was skipped by onConflictDoNothing.
     await persistToolInvocations(
-      toInsert.map((item, i) => ({ record: item.record, promptId: insertValues[i].id, createdAt: item.createdAt })),
+      insertedItems.map((item) => ({
+        record: item.record,
+        promptId: insertedById.get(item.eventKey)!,
+        createdAt: item.createdAt,
+      })),
       userId,
       teamId,
     );
 
     // ── Phase 5b: Trigger outgoing integrations for new prompts ────
-    for (const iv of insertValues) {
-      triggerEvent("prompt.created", {
-        promptId: iv.id,
-        promptText: iv.promptText,
-        projectName: iv.projectName,
-        sessionId: iv.sessionId,
-      }, userId).catch((err) => {
+    // Batched: one integration query + one delivery loop (was N+1), and teamId
+    // is threaded through so team-scoped integrations are reachable.
+    if (insertedItems.length > 0) {
+      triggerEventBatch(
+        "prompt.created",
+        insertedItems.map((item) => ({
+          promptId: insertedById.get(item.eventKey)!,
+          promptText: item.processed.promptText,
+          projectName:
+            item.record.project ||
+            (item.record.cwd ? item.record.cwd.split("/").pop() || null : null),
+          sessionId: item.record.session_id ?? null,
+        })),
+        userId,
+        teamId,
+      ).catch((err) => {
         logger.error({ err }, "Non-blocking integration trigger failed for prompt.created");
       });
     }
@@ -324,8 +366,12 @@ export async function processUpload(
 
   if (affectedDates.size > 0) {
     try {
-      const earliest = [...affectedDates].sort()[0];
-      await refreshDailyAggregations(userId, new Date(earliest));
+      // affectedDates holds APP_TIME_ZONE day-keys (YYYY-MM-DD). Recompute from
+      // the START of the earliest local day so the aggregation covers the whole
+      // day, matching analytics-cache's `AT TIME ZONE APP_TIME_ZONE` grouping.
+      const earliestKey = [...affectedDates].sort()[0];
+      const rangeFrom = startOfDateKeyInTimeZone(earliestKey) ?? new Date(earliestKey);
+      await refreshDailyAggregations(userId, rangeFrom);
     } catch (error) {
       logger.error({ err: error }, "Failed to refresh daily analytics aggregations");
     }

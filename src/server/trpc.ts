@@ -20,14 +20,52 @@ async function resolveIsAdmin(userId: string): Promise<boolean> {
 }
 
 /**
+ * Whether a session (identified by userId + issued-at) predates the user's last
+ * password change and must therefore be rejected. Mirrors the check in
+ * src/lib/with-auth.ts so tRPC does not trust sessions that REST routes reject.
+ * Fails closed on any error / missing user.
+ */
+async function isSessionInvalidatedByPasswordChange(
+  userId: string,
+  iat: number,
+): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select({ passwordChangedAt: schema.users.passwordChangedAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (!row) return true; // User not found — treat as invalid
+    if (!row.passwordChangedAt) return false; // Never changed password
+    return row.passwordChangedAt.getTime() > iat;
+  } catch {
+    return true; // Fail closed
+  }
+}
+
+/**
  * Context creation for tRPC
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
   const userId = opts.headers.get("x-user-id");
   const email = opts.headers.get("x-user-email");
+  const iatHeader = opts.headers.get("x-session-iat");
 
   if (!userId) {
     return { headers: opts.headers, user: null };
+  }
+
+  // Reject sessions issued before the user's last password change. The iat is
+  // injected by middleware (src/middleware.ts) alongside the trusted x-user-id.
+  // When present, it MUST validate; a present-but-invalid iat fails closed.
+  if (iatHeader !== null) {
+    const iat = Number(iatHeader);
+    if (
+      !Number.isFinite(iat) ||
+      (await isSessionInvalidatedByPasswordChange(userId, iat))
+    ) {
+      return { headers: opts.headers, user: null };
+    }
   }
 
   let cachedIsAdmin: boolean | undefined;

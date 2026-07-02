@@ -4,7 +4,7 @@ import { apiEndpoints } from "@/lib/api-docs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const paths: Record<string, any> = {};
+  const paths: Record<string, Record<string, unknown>> = {};
 
   for (const ep of apiEndpoints) {
     const openApiPath = ep.path.replace(/:([^/]+)/g, "{$1}");

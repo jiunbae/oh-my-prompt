@@ -6,13 +6,13 @@ import {
   findUserByEmail,
   createUser,
 } from "@/lib/auth";
-import { rateLimiters } from "@/lib/rate-limit";
+import { rateLimiters, getClientIp } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
     // Rate limit by IP (auth endpoints are unauthenticated)
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-    const rateCheck = rateLimiters.auth(ip);
+    const ip = getClientIp(request);
+    const rateCheck = await rateLimiters.auth(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Too many registration attempts. Please try again later." },

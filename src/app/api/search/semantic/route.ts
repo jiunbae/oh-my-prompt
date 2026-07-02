@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
   try {
     const userId = await resolveUserId(request);
 
-    const rateCheck = rateLimiters.search(userId);
+    const rateCheck = await rateLimiters.search(userId);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded" },

@@ -2,22 +2,31 @@ import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
 
-let _instance: PostgresJsDatabase<typeof schema> | null = null;
+// Cache the postgres.js pool + drizzle instance on globalThis so Next.js dev
+// HMR (which re-evaluates modules on every edit) reuses one connection pool
+// instead of leaking a new pool of up to `max` connections per reload.
+const globalForDb = globalThis as unknown as {
+  __ompDbClient?: ReturnType<typeof postgres>;
+  __ompDb?: PostgresJsDatabase<typeof schema>;
+};
 
 function getInstance(): PostgresJsDatabase<typeof schema> {
-  if (!_instance) {
+  if (!globalForDb.__ompDb) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
       throw new Error("DATABASE_URL environment variable is not set");
     }
-    const client = postgres(connectionString, {
-      max: 20,
-      idle_timeout: 30,
-      connect_timeout: 10,
-    });
-    _instance = drizzle(client, { schema });
+    const client =
+      globalForDb.__ompDbClient ??
+      postgres(connectionString, {
+        max: 20,
+        idle_timeout: 30,
+        connect_timeout: 10,
+      });
+    globalForDb.__ompDbClient = client;
+    globalForDb.__ompDb = drizzle(client, { schema });
   }
-  return _instance;
+  return globalForDb.__ompDb;
 }
 
 /**

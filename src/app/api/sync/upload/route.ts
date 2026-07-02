@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rl = rateLimiters.api(userToken);
+    const rl = await rateLimiters.api(userToken);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Too many requests" },

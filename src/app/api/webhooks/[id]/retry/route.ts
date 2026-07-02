@@ -24,7 +24,7 @@ export async function POST(
     const session = await requireAuth();
 
     // Rate limit manual retry requests
-    const rateLimit = rateLimiters.webhookTest(session.userId);
+    const rateLimit = await rateLimiters.webhookTest(session.userId);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         { error: "Too many requests. Please try again later." },

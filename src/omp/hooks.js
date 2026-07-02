@@ -512,8 +512,13 @@ function ensureClaudeSettingsHook(eventName, scriptPath) {
   if (fs.existsSync(settingsPath)) {
     try {
       settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-    } catch {
-      settings = {};
+    } catch (error) {
+      // Do NOT reset to {} and write it back — that would destroy the user's
+      // existing settings. Abort so they can fix the malformed file first.
+      throw new Error(
+        `Claude settings at ${settingsPath} is not valid JSON (${error.message}); ` +
+          `refusing to overwrite. Fix or remove the file, then re-run.`
+      );
     }
   }
 
@@ -750,8 +755,13 @@ function ensureGeminiSettingsHook(scriptPath) {
   if (fs.existsSync(settingsPath)) {
     try {
       settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-    } catch {
-      settings = {};
+    } catch (error) {
+      // Do NOT reset to {} and write it back — that would destroy the user's
+      // existing settings. Abort so they can fix the malformed file first.
+      throw new Error(
+        `Gemini settings at ${settingsPath} is not valid JSON (${error.message}); ` +
+          `refusing to overwrite. Fix or remove the file, then re-run.`
+      );
     }
   }
 

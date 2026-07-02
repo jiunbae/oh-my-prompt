@@ -1,38 +1,35 @@
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { openDb } = require("./db");
 const { ingestPayload } = require("./ingest");
-const { getConfigDir, ensureDir } = require("./paths");
+const { getConfigDir } = require("./paths");
+const { parseTranscript } = require("./transcript-parser");
 
 const PID_FILE = path.join(getConfigDir(), "watch.pid");
 const DEBOUNCE_MS = 500;
 
-// Watch targets: [dir, parserFn]
-function getWatchTargets(config) {
-  const home = require("os").homedir();
+// -----------------------------------------------------------------------------
+// Watch targets
+//
+// Real Claude Code transcripts live at ~/.claude/projects/**/*.jsonl (JSONL, one
+// entry per line — NOT ~/.claude/transcripts with a { messages: [...] } blob,
+// which never existed). We reuse the shared transcript-parser (the same code
+// path as `omp backfill --claude-only`) so parsing stays consistent.
+//
+// Codex / Gemini / OpenCode use bespoke per-session rollout formats that the
+// Claude transcript-parser cannot read, and they are already captured live via
+// their notify/plugin hooks. Watching them here would require re-implementing
+// each format's turn extraction — out of scope for a safe fix — so watch is
+// intentionally Claude-only. Use `omp hooks install` + auto-sync for the others.
+// -----------------------------------------------------------------------------
+function getWatchTargets() {
+  const home = os.homedir();
   const targets = [];
 
-  const claudeDir = path.join(home, ".claude", "transcripts");
-  if (fs.existsSync(claudeDir)) {
-    targets.push({ dir: claudeDir, source: "claude" });
-  }
-
-  const codexDir = path.join(home, ".codex");
-  if (fs.existsSync(codexDir)) {
-    targets.push({ dir: codexDir, source: "codex" });
-  }
-
-  const geminiDir = path.join(home, ".gemini");
-  if (fs.existsSync(geminiDir)) {
-    targets.push({ dir: geminiDir, source: "gemini" });
-  }
-
-  const opencodeDir = path.join(
-    process.env.XDG_CONFIG_HOME || path.join(home, ".config"),
-    "opencode"
-  );
-  if (fs.existsSync(opencodeDir)) {
-    targets.push({ dir: opencodeDir, source: "opencode" });
+  const claudeProjects = path.join(home, ".claude", "projects");
+  if (fs.existsSync(claudeProjects)) {
+    targets.push({ dir: claudeProjects, source: "claude" });
   }
 
   return targets;
@@ -70,80 +67,84 @@ function markProcessed(db, filePath, fileHash) {
   ).run(filePath, fileHash, new Date().toISOString());
 }
 
-function parseTranscript(filePath, source) {
+// Turn a Claude transcript .jsonl file into ingest payloads. session_id is the
+// file's basename (Claude names each session file with its UUID), which keeps
+// the derived event_id stable across re-scans as the file grows.
+function transcriptPayloads(filePath) {
+  let content;
   try {
-    const content = fs.readFileSync(filePath, "utf8");
-    const data = JSON.parse(content);
-
-    // Claude transcript format
-    if (source === "claude" && data.messages) {
-      const userMessages = data.messages.filter((m) => m.role === "user");
-      const assistantMessages = data.messages.filter((m) => m.role === "assistant");
-      return userMessages.map((msg, i) => ({
-        prompt_text: msg.content,
-        response_text: assistantMessages[i]?.content || null,
-        source: "claude-code",
-        session_id: data.session_id || data.id,
-        project: data.project_name || data.cwd,
-        cwd: data.cwd,
-        model: data.model,
-      }));
-    }
-
-    // Generic JSON array of prompt/response pairs
-    if (Array.isArray(data)) {
-      return data
-        .filter((item) => item.prompt_text || item.prompt)
-        .map((item) => ({
-          prompt_text: item.prompt_text || item.prompt,
-          response_text: item.response_text || item.response || null,
-          source: item.source || source,
-          session_id: item.session_id || null,
-          project: item.project || item.cwd,
-          cwd: item.cwd || null,
-          model: item.model || null,
-        }));
-    }
-
-    // Single object
-    if (data.prompt_text || data.prompt) {
-      return [{
-        prompt_text: data.prompt_text || data.prompt,
-        response_text: data.response_text || data.response || null,
-        source: data.source || source,
-        session_id: data.session_id || null,
-        project: data.project || data.cwd,
-        cwd: data.cwd || null,
-        model: data.model || null,
-      }];
-    }
+    content = fs.readFileSync(filePath, "utf8");
   } catch {
-    // ignore parse errors
+    return [];
   }
-  return [];
+  const lines = content.split("\n").filter(Boolean);
+  const turns = parseTranscript(lines);
+  const sessionId = path.basename(filePath, ".jsonl");
+
+  return turns.map((turn, index) => ({
+    timestamp: turn.timestamp || undefined,
+    source: "claude-code",
+    cli_name: "claude",
+    session_id: sessionId,
+    role: "user",
+    text: turn.userText,
+    response_text: turn.responseText || null,
+    capture_response: true,
+    cwd: turn.cwd || null,
+    project: turn.cwd ? path.basename(turn.cwd) : null,
+    // turn_index disambiguates repeated identical prompts (e.g. "continue")
+    // so the ingest content-hash dedup keeps each distinct turn.
+    turn_index: index,
+    event_id: `claude-watch:${sessionId}:${index}`,
+  }));
 }
 
-function processFile(db, filePath, source) {
+async function processFile(db, config, filePath) {
   const hash = hashFile(filePath);
   if (!hash || isAlreadyProcessed(db, filePath, hash)) {
     return 0;
   }
 
-  const payloads = parseTranscript(filePath, source);
+  const payloads = transcriptPayloads(filePath);
   let count = 0;
   for (const payload of payloads) {
+    if (!payload.text && !payload.response_text) continue;
     try {
-      ingestPayload(payload);
-      count++;
+      // Reuse the open watcher db handle so we don't reopen/save the whole
+      // sql.js file per turn, and so ingest applies the same config (redaction,
+      // capture settings) as the hook path.
+      const result = await ingestPayload(payload, config, { db });
+      if (result.ok) count++;
     } catch {
       // skip individual failures
     }
   }
 
-  if (count > 0) {
-    markProcessed(db, filePath, hash);
-  }
+  // Always record the hash so an unchanged file short-circuits next time, even
+  // when it produced no new rows (e.g. all turns already ingested).
+  markProcessed(db, filePath, hash);
   return count;
+}
+
+function collectJsonlFiles(dir) {
+  const out = [];
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { recursive: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry);
+    try {
+      if (fs.statSync(fullPath).isFile() && fullPath.endsWith(".jsonl")) {
+        out.push(fullPath);
+      }
+    } catch {
+      // skip
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,52 +154,39 @@ function processFile(db, filePath, source) {
 let watchers = [];
 let dbRef = null;
 
-function startWatch(config) {
+async function startWatch(config) {
   if (watchers.length > 0) {
     return { started: false, error: "Already watching", dirs: [] };
   }
 
-  const targets = getWatchTargets(config);
+  const targets = getWatchTargets();
   if (targets.length === 0) {
-    return { started: false, error: "No transcript directories found", dirs: [] };
+    return { started: false, error: "No Claude transcript directory found (~/.claude/projects)", dirs: [] };
   }
 
-  const db = openDb(config.storage.sqlite.path);
+  const db = await openDb(config.storage.sqlite.path);
   dbRef = db;
   ensureWatchedFilesTable(db);
 
-  // Initial scan: process existing files
+  // Initial scan: process existing files.
   let initialCount = 0;
-  for (const { dir, source } of targets) {
-    try {
-      const entries = fs.readdirSync(dir, { recursive: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry);
-        try {
-          if (fs.statSync(fullPath).isFile() && fullPath.endsWith(".json")) {
-            initialCount += processFile(db, fullPath, source);
-          }
-        } catch {
-          // skip
-        }
-      }
-    } catch {
-      // skip
+  for (const { dir } of targets) {
+    for (const fullPath of collectJsonlFiles(dir)) {
+      initialCount += await processFile(db, config, fullPath);
     }
   }
 
-  // Set up watchers
-  for (const { dir, source } of targets) {
+  // Set up watchers. fs.watch callbacks are synchronous, so we kick the async
+  // processing off without awaiting and swallow errors (best-effort tailing).
+  for (const { dir } of targets) {
     try {
       const watcher = fs.watch(dir, { recursive: true }, (eventType, filename) => {
-        if (!filename || !filename.endsWith(".json")) return;
+        if (!filename || !filename.endsWith(".jsonl")) return;
         const fullPath = path.join(dir, filename);
-
-        // Debounce
         setTimeout(() => {
           try {
             if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-              processFile(db, fullPath, source);
+              processFile(db, config, fullPath).catch(() => {});
             }
           } catch {
             // skip
@@ -206,12 +194,11 @@ function startWatch(config) {
         }, DEBOUNCE_MS);
       });
       watchers.push(watcher);
-    } catch (err) {
+    } catch {
       // skip unwatchable dirs
     }
   }
 
-  // Write PID file
   try {
     fs.writeFileSync(PID_FILE, process.pid.toString(), "utf8");
   } catch {
@@ -259,12 +246,12 @@ function isWatching() {
   return watchers.length > 0;
 }
 
-function getStatus(config) {
-  const targets = getWatchTargets(config);
+async function getStatus(config) {
+  const targets = getWatchTargets();
   let processedCount = 0;
 
   try {
-    const db = openDb(config.storage.sqlite.path);
+    const db = await openDb(config.storage.sqlite.path);
     ensureWatchedFilesTable(db);
     const row = db.prepare("SELECT COUNT(*) as count FROM watched_files").get();
     processedCount = row?.count || 0;
@@ -280,9 +267,9 @@ function getStatus(config) {
   };
 }
 
-function getRecentFiles(config, limit = 20) {
+async function getRecentFiles(config, limit = 20) {
   try {
-    const db = openDb(config.storage.sqlite.path);
+    const db = await openDb(config.storage.sqlite.path);
     ensureWatchedFilesTable(db);
     const rows = db
       .prepare("SELECT path, processed_at FROM watched_files ORDER BY processed_at DESC LIMIT ?")

@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Only real LLM generations are rate-limited.
-    const rl = rateLimiters.llm(session.userId);
+    const rl = await rateLimiters.llm(session.userId);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Too many requests" },

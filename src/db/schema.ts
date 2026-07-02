@@ -91,8 +91,8 @@ export const prompts = pgTable(
     sessionId: varchar("session_id", { length: 255 }),
     deviceName: varchar("device_name", { length: 255 }),
 
-    userId: uuid("user_id").references(() => users.id),
-    teamId: uuid("team_id").references(() => teams.id),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id").references(() => teams.id, { onDelete: "set null" }),
     tokenEstimate: integer("token_estimate"),
     wordCount: integer("word_count"),
     tokenEstimateResponse: integer("token_estimate_response"),
@@ -259,7 +259,7 @@ export const aiInsights = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     insightType: varchar("insight_type", { length: 100 }).notNull(),
     parameters: jsonb("parameters").notNull().default({}),
     dataHash: varchar("data_hash", { length: 64 }).notNull(),
@@ -401,7 +401,7 @@ export const sharedSessions = pgTable(
 // Daily aggregations table
 export const analyticsDaily = pgTable("analytics_daily", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid("user_id").notNull().references(() => users.id),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   date: date("date").notNull(),
   promptCount: integer("prompt_count").default(0),
   totalChars: integer("total_chars").default(0),

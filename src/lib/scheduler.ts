@@ -1,26 +1,78 @@
 import { extensions } from "@/extensions/registry";
 import type { ExtensionProcessor } from "@/extensions/types";
 import { logger } from "@/lib/logger";
+import { db } from "@/db/client";
+import * as schema from "@/db/schema";
+import { isNull } from "drizzle-orm";
 import { dateTimePartsInTimeZone, getLastNDaysRange } from "@/lib/date-utils";
+
+/**
+ * Extension NAMES whose processors operate on a single user's data. Scheduled
+ * runs for these must fan out over every real user; on-demand/manual runs may
+ * target a specific user. Everything else (email-digest, slack-daily,
+ * alert-evaluator, ...) is a global processor invoked exactly once.
+ */
+const PER_USER_EXTENSION_NAMES = new Set<string>([
+  "daily-summary",
+  "weekly-trends",
+  "prompt-quality",
+  "session-story",
+]);
 
 /**
  * Minimal cron expression parser supporting the standard 5-field format:
  *   minute hour day-of-month month day-of-week
  *
- * Only supports exact values (e.g. "0", "9") and wildcards ("*").
- * Does NOT support ranges, lists, steps, or names.
+ * Supports exact values ("0", "9"), wildcards ("*"), step values ("*\/6",
+ * "10-30/5"), comma lists ("1,15,30"), and ranges ("1-5"). Returns null on a
+ * genuinely unparseable field so callers can warn and skip.
  */
-function parseCronField(field: string, max: number): Set<number> {
+function parseCronField(field: string, min: number, max: number): Set<number> | null {
   const result = new Set<number>();
-  if (field === "*") {
-    for (let i = 0; i <= max; i++) result.add(i);
-    return result;
+
+  // Comma-separated list — each part parsed independently and unioned.
+  for (const part of field.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed === "") return null;
+
+    // Split off an optional step: "<range>/<step>"
+    const [rangePart, stepPart, ...rest] = trimmed.split("/");
+    if (rest.length > 0) return null;
+
+    let step = 1;
+    if (stepPart !== undefined) {
+      step = parseInt(stepPart, 10);
+      if (Number.isNaN(step) || step <= 0) return null;
+    }
+
+    let rangeStart: number;
+    let rangeEnd: number;
+
+    if (rangePart === "*") {
+      rangeStart = min;
+      rangeEnd = max;
+    } else if (rangePart.includes("-")) {
+      const [a, b, ...extra] = rangePart.split("-");
+      if (extra.length > 0) return null;
+      rangeStart = parseInt(a, 10);
+      rangeEnd = parseInt(b, 10);
+      if (Number.isNaN(rangeStart) || Number.isNaN(rangeEnd)) return null;
+    } else {
+      const n = parseInt(rangePart, 10);
+      if (Number.isNaN(n)) return null;
+      // A bare number with a step (e.g. "5/2") means "from 5 to max".
+      rangeStart = n;
+      rangeEnd = stepPart !== undefined ? max : n;
+    }
+
+    if (rangeStart < min || rangeEnd > max || rangeStart > rangeEnd) return null;
+
+    for (let i = rangeStart; i <= rangeEnd; i += step) {
+      result.add(i);
+    }
   }
-  const n = parseInt(field, 10);
-  if (!Number.isNaN(n) && n >= 0 && n <= max) {
-    result.add(n);
-  }
-  return result;
+
+  return result.size > 0 ? result : null;
 }
 
 interface CronExpr {
@@ -34,13 +86,18 @@ interface CronExpr {
 function parseCron(expr: string): CronExpr | null {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return null;
-  return {
-    minutes: parseCronField(parts[0], 59),
-    hours: parseCronField(parts[1], 23),
-    daysOfMonth: parseCronField(parts[2], 31),
-    months: parseCronField(parts[3], 12),
-    daysOfWeek: parseCronField(parts[4], 6), // 0 = Sunday
-  };
+
+  const minutes = parseCronField(parts[0], 0, 59);
+  const hours = parseCronField(parts[1], 0, 23);
+  const daysOfMonth = parseCronField(parts[2], 1, 31);
+  const months = parseCronField(parts[3], 1, 12);
+  const daysOfWeek = parseCronField(parts[4], 0, 6); // 0 = Sunday
+
+  if (!minutes || !hours || !daysOfMonth || !months || !daysOfWeek) {
+    return null;
+  }
+
+  return { minutes, hours, daysOfMonth, months, daysOfWeek };
 }
 
 /**
@@ -71,7 +128,27 @@ export interface ScheduledJobResult {
 }
 
 /**
+ * Query the distinct set of real user IDs that have prompt data. Used to fan a
+ * per-user scheduled processor out across the whole user base.
+ */
+async function getDistinctUserIds(): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ userId: schema.prompts.userId })
+    .from(schema.prompts)
+    .where(isNull(schema.prompts.deletedAt));
+  return rows
+    .map((r) => r.userId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+/**
  * Run a single scheduled extension processor by job name.
+ *
+ * For per-user processors (daily-summary, weekly-trends, prompt-quality,
+ * session-story) with no explicit userId, this fans out over every real user
+ * and runs the processor once per user. When an explicit userId is supplied
+ * (manual trigger), only that user is processed. Global processors
+ * (email-digest, slack-daily, alert-evaluator) are invoked exactly once.
  */
 export async function runScheduledJob(
   jobName: string,
@@ -84,21 +161,43 @@ export async function runScheduledJob(
 
   const processor = ext.processor as ExtensionProcessor;
 
-  // Default date range: last 7 app-timezone days
-  const defaultRange = getLastNDaysRange(7);
-
-  const processorInput = {
-    userId: input?.userId || "system",
-    dateRange: input?.dateRange || {
-      from: defaultRange.fromKey,
-      to: defaultRange.toKey,
-    },
-    parameters: {},
+  // Default date range: last N app-timezone days (processor-specific default).
+  const defaultRange = getLastNDaysRange(processor.defaultRangeDays ?? 7);
+  const dateRange = input?.dateRange || {
+    from: defaultRange.fromKey,
+    to: defaultRange.toKey,
   };
 
+  const isPerUser = PER_USER_EXTENSION_NAMES.has(ext.name);
+
   try {
-    await processor.handler(processorInput);
-    logger.info({ jobName }, "Scheduled job completed");
+    if (isPerUser && !input?.userId) {
+      // Fan out over all real users.
+      const userIds = await getDistinctUserIds();
+      let ok = 0;
+      let failed = 0;
+      for (const userId of userIds) {
+        try {
+          await processor.handler({ userId, dateRange, parameters: {} });
+          ok++;
+        } catch (error) {
+          failed++;
+          logger.error({ err: error, jobName, userId }, "Per-user scheduled job failed for user");
+        }
+      }
+      logger.info({ jobName, users: userIds.length, ok, failed }, "Per-user scheduled job completed");
+      return { jobName, ran: true };
+    }
+
+    // Single invocation: either a per-user processor targeting one user, or a
+    // global processor. Global processors ignore userId; pass an empty string
+    // rather than a fake "system" id that would break uuid queries.
+    await processor.handler({
+      userId: input?.userId ?? "",
+      dateRange,
+      parameters: {},
+    });
+    logger.info({ jobName, userId: input?.userId }, "Scheduled job completed");
     return { jobName, ran: true };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";

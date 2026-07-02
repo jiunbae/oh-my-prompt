@@ -8,8 +8,14 @@ export const analyticsRouter = createTRPCRouter({
   getDailyStats: protectedProcedure
     .input(
       z.object({
-        from: z.string().optional(),
-        to: z.string().optional(),
+        from: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format")
+          .optional(),
+        to: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD format")
+          .optional(),
       })
     )
     .query(async ({ input, ctx }) => {

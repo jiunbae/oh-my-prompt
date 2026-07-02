@@ -27,28 +27,38 @@ export interface MetricResult {
 // Comparison period helpers
 // ---------------------------------------------------------------------------
 
-function getPeriodDates(period: string): { from: Date; to: Date } {
-  const now = new Date();
-  const from = new Date(now);
-
+/** Duration of a comparison period in milliseconds. */
+function getPeriodMs(period: string): number {
+  const DAY = 24 * 60 * 60 * 1000;
   switch (period) {
     case "1_hour":
-      from.setHours(now.getHours() - 1);
-      break;
+      return 60 * 60 * 1000;
     case "1_day":
-      from.setDate(now.getDate() - 1);
-      break;
+      return DAY;
     case "7_days":
-      from.setDate(now.getDate() - 7);
-      break;
+      return 7 * DAY;
     case "30_days":
-      from.setDate(now.getDate() - 30);
-      break;
+      return 30 * DAY;
     default:
-      from.setDate(now.getDate() - 1);
+      return DAY;
   }
+}
 
-  return { from, to: now };
+/**
+ * Current rolling window [from, to). Rolling millisecond windows are absolute
+ * (timezone-independent) and DST-safe, so no APP_TIME_ZONE calendar helper is
+ * needed here — the comparison is anchored to `now`.
+ */
+function getPeriodDates(period: string): { from: Date; to: Date } {
+  const to = new Date();
+  const from = new Date(to.getTime() - getPeriodMs(period));
+  return { from, to };
+}
+
+/** The period immediately preceding [from, to) of equal length. */
+function getPreviousPeriodDates(from: Date, to: Date): { from: Date; to: Date } {
+  const durationMs = to.getTime() - from.getTime();
+  return { from: new Date(from.getTime() - durationMs), to: from };
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +69,22 @@ async function queryMetric(
   rule: schema.AlertRule
 ): Promise<MetricResult | null> {
   const { from, to } = getPeriodDates(rule.comparisonPeriod ?? "1_day");
+  return queryMetricForRange(rule, from, to);
+}
 
+/**
+ * Query a rule's metric over an explicit [from, to) window.
+ *
+ * Returns null when the metric has NO meaningful data for the window (e.g.
+ * avg_quality with zero scored prompts) so callers skip evaluation instead of
+ * treating a missing average as 0 (which produces false "below" alarms).
+ * Count-based metrics legitimately return 0.
+ */
+async function queryMetricForRange(
+  rule: schema.AlertRule,
+  from: Date,
+  to: Date
+): Promise<MetricResult | null> {
   const baseWhere = rule.teamId
     ? and(
         eq(schema.prompts.teamId, rule.teamId),
@@ -85,9 +110,16 @@ async function queryMetric(
 
     case "avg_quality": {
       const [row] = await db
-        .select({ avg: sql<number>`coalesce(avg(quality_score), 0)` })
+        .select({
+          avg: sql<number>`coalesce(avg(quality_score), 0)`,
+          scored: sql<number>`count(quality_score)`,
+        })
         .from(schema.prompts)
         .where(and(baseWhere, sql`quality_score IS NOT NULL`));
+      // No scored prompts in this window — skip rather than report avg 0.
+      if (Number(row?.scored ?? 0) === 0) {
+        return null;
+      }
       return { value: Math.round(Number(row?.avg ?? 0)), label: "Average quality score" };
     }
 
@@ -130,7 +162,8 @@ async function queryMetric(
 function evaluateCondition(
   condition: AlertCondition,
   value: number,
-  threshold: number
+  threshold: number,
+  previousValue?: number | null
 ): boolean {
   switch (condition) {
     case "above":
@@ -139,12 +172,13 @@ function evaluateCondition(
       return value < threshold;
     case "equals":
       return value === threshold;
-    case "changes_by":
-      // changes_by is a special case that compares against previous period
-      // For simplicity, we treat it as "above" since the metric query
-      // already returns the current value; a full changes_by would need
-      // historical comparison which is handled separately
-      return Math.abs(value) >= threshold;
+    case "changes_by": {
+      // Real previous-vs-current delta: trigger when the absolute change
+      // between the previous period and the current period meets the
+      // threshold. Requires a comparable previous-period value.
+      if (previousValue == null) return false;
+      return Math.abs(value - previousValue) >= threshold;
+    }
     default:
       return false;
   }
@@ -262,15 +296,29 @@ function isCooldownElapsed(rule: schema.AlertRule): boolean {
 export async function evaluateAlertRule(
   rule: schema.AlertRule
 ): Promise<{ triggered: boolean; channelsSent: string[] }> {
-  const metricResult = await queryMetric(rule);
+  const { from, to } = getPeriodDates(rule.comparisonPeriod ?? "1_day");
+  const metricResult = await queryMetricForRange(rule, from, to);
   if (!metricResult) {
     return { triggered: false, channelsSent: [] };
+  }
+
+  // For changes_by, fetch the immediately-preceding period to compare against.
+  let previousValue: number | null = null;
+  if (rule.condition === "changes_by") {
+    const prev = getPreviousPeriodDates(from, to);
+    const prevResult = await queryMetricForRange(rule, prev.from, prev.to);
+    if (!prevResult) {
+      // No comparable baseline — cannot compute a delta, so do not trigger.
+      return { triggered: false, channelsSent: [] };
+    }
+    previousValue = prevResult.value;
   }
 
   const triggered = evaluateCondition(
     rule.condition as AlertCondition,
     metricResult.value,
-    Number(rule.threshold)
+    Number(rule.threshold),
+    previousValue
   );
 
   if (!triggered || !isCooldownElapsed(rule)) {

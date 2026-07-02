@@ -67,15 +67,19 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function ConfettiAnimation() {
-  const particles = Array.from({ length: 20 }, (_, i) => ({
-    id: i,
-    left: `${Math.random() * 100}%`,
-    delay: `${Math.random() * 0.5}s`,
-    duration: `${1 + Math.random() * 1.5}s`,
-    color: ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5", "bg-primary"][
-      Math.floor(Math.random() * 6)
-    ],
-  }));
+  // Generate randomized particles once, in a lazy state initializer, so
+  // Math.random() is not called during render (react-hooks/purity).
+  const [particles] = useState(() =>
+    Array.from({ length: 20 }, (_, i) => ({
+      id: i,
+      left: `${Math.random() * 100}%`,
+      delay: `${Math.random() * 0.5}s`,
+      duration: `${1 + Math.random() * 1.5}s`,
+      color: ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5", "bg-primary"][
+        Math.floor(Math.random() * 6)
+      ],
+    }))
+  );
 
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">

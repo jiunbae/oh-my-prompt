@@ -176,6 +176,13 @@
       "when": 1778198400000,
       "tag": "0028_add_tool_invocations",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1778284800000,
+      "tag": "0029_add_fk_on_delete",
+      "breakpoints": true
     }
   ]
 }

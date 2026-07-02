@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await requireAuth();
 
-    const rateCheck = rateLimiters.search(session.userId);
+    const rateCheck = await rateLimiters.search(session.userId);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded" },

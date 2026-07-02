@@ -3,8 +3,8 @@ const path = require("path");
 const os = require("os");
 const { getConfigDir, ensureDir } = require("./paths");
 
-function getLockPath() {
-  return path.join(getConfigDir(), "sync.lock");
+function getLockPath(name) {
+  return path.join(getConfigDir(), name || "sync.lock");
 }
 
 function readLock(lockPath) {
@@ -67,7 +67,9 @@ function tryCreateLock(lockPath) {
 }
 
 function acquireSyncLock(options = {}) {
-  const lockPath = getLockPath();
+  // A distinct `name` yields an independent advisory lock (e.g. "ingest.lock"),
+  // so unrelated subsystems don't contend on the same file.
+  const lockPath = getLockPath(options.name);
   ensureDir(path.dirname(lockPath));
   const ttlMs = options.ttlMs || 15 * 60 * 1000;
 

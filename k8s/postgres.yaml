@@ -7,6 +7,10 @@ metadata:
     app: prompt-db
 spec:
   replicas: 1
+  strategy:
+    # RWO PVC can only be mounted by one pod at a time, so a rolling update
+    # would deadlock (new pod pending on the volume held by the old pod).
+    type: Recreate
   selector:
     matchLabels:
       app: prompt-db
@@ -16,12 +20,15 @@ spec:
         app: prompt-db
     spec:
       securityContext:
+        # pgvector/pgvector:pg16 is Debian-based; its "postgres" user is uid 999.
         runAsNonRoot: true
         runAsUser: 999
         fsGroup: 999
       containers:
         - name: postgres
-          image: postgres:16-alpine
+          # Must match docker-compose (pgvector/pgvector:pg16): migration 0016
+          # runs `CREATE EXTENSION vector`, unavailable in plain postgres:16-alpine.
+          image: pgvector/pgvector:pg16
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -39,9 +46,37 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: "prompts"
+            # Debian postgres image defaults PGDATA to the mount root; keep data
+            # in a subdirectory so the volume's lost+found doesn't block initdb.
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - prompt
+                - -d
+                - prompts
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - prompt
+                - -d
+                - prompts
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests:
               memory: "256Mi"

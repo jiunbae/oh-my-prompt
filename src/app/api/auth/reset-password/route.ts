@@ -5,7 +5,7 @@ import { hashPassword } from "@/lib/auth";
 import { db } from "@/db/client";
 import { users, passwordResetTokens } from "@/db/schema";
 import { eq, and, isNull, gt } from "drizzle-orm";
-import { rateLimiters } from "@/lib/rate-limit";
+import { rateLimiters, getClientIp } from "@/lib/rate-limit";
 import { sql } from "drizzle-orm";
 
 /**
@@ -16,11 +16,8 @@ import { sql } from "drizzle-orm";
 export async function POST(request: NextRequest) {
   try {
     // Rate limit by IP
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "unknown";
-    const rateCheck = rateLimiters.auth(ip);
+    const ip = getClientIp(request);
+    const rateCheck = await rateLimiters.auth(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Too many attempts. Please try again later." },
@@ -85,12 +82,16 @@ export async function POST(request: NextRequest) {
     // Hash the new password
     const passwordHash = await hashPassword(password);
 
-    // Update password and regenerate API token (invalidates all sessions)
+    // Update password and regenerate API token (invalidates all sessions).
+    // passwordChangedAt is bumped so any session issued before the reset is
+    // rejected by the passwordChangedAt-vs-session-iat check in with-auth /
+    // the tRPC context.
     await db
       .update(users)
       .set({
         passwordHash,
         token: sql`gen_random_uuid()`,
+        passwordChangedAt: new Date(),
       })
       .where(eq(users.id, resetToken.userId));
 

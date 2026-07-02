@@ -9,9 +9,21 @@ const DEFAULT_PATTERNS = [
     regex: /(authorization\s*[:=]\s*bearer\s+)[A-Za-z0-9._-]{10,}/gi,
     replace: "$1[REDACTED]",
   },
-  { name: "openai", regex: /sk-[A-Za-z0-9]{20,}/g, replace: "[REDACTED]" },
+  {
+    // Standalone "Bearer <token>" not preceded by an Authorization header.
+    // 16+ token chars keeps this from eating ordinary prose like "Bearer of news".
+    name: "bearer_token",
+    regex: /(bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi,
+    replace: "$1[REDACTED]",
+  },
+  // OpenAI keys: legacy `sk-…`, project `sk-proj-…`, and Anthropic `sk-ant-api03-…`.
+  // The dash/underscore class lets the match span the `-`/`_` separators in the
+  // newer dashed formats (the old /sk-[A-Za-z0-9]{20,}/ stopped at the first `-`).
+  { name: "openai", regex: /sk-[A-Za-z0-9_-]{20,}/g, replace: "[REDACTED]" },
   { name: "github", regex: /gh[pousr]_[A-Za-z0-9]{20,}/g, replace: "[REDACTED]" },
   { name: "github_pat", regex: /github_pat_[A-Za-z0-9_]{20,}/g, replace: "[REDACTED]" },
+  { name: "gitlab", regex: /glpat-[A-Za-z0-9_-]{20,}/g, replace: "[REDACTED]" },
+  { name: "npm", regex: /npm_[A-Za-z0-9]{30,}/g, replace: "[REDACTED]" },
   { name: "slack", regex: /xox[baprs]-[A-Za-z0-9-]{10,}/g, replace: "[REDACTED]" },
   { name: "aws_access", regex: /AKIA[0-9A-Z]{16}/g, replace: "[REDACTED]" },
   {
@@ -65,6 +77,25 @@ function redactText(text, options = {}) {
   return { text: output, count };
 }
 
+/**
+ * Recursively redact every string inside a JSON-like value (object/array/scalar).
+ * Used to scrub tool-invocation inputs (Bash commands, Edit file contents,
+ * WebFetch bodies, …) before they are stored or uploaded.
+ */
+function redactValue(value, options = {}) {
+  if (typeof value === "string") return redactText(value, options).text;
+  if (Array.isArray(value)) return value.map((v) => redactValue(v, options));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value)) {
+      out[key] = redactValue(value[key], options);
+    }
+    return out;
+  }
+  return value;
+}
+
 module.exports = {
   redactText,
+  redactValue,
 };

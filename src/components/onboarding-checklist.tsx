@@ -124,27 +124,29 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function firstIncompleteStepId(state: OnboardingState): number | null {
+  const step = STEPS.find((s) => !state.completedSteps.includes(s.id));
+  return step ? step.id : null;
+}
+
 export function OnboardingChecklist({ hasAnySessions }: OnboardingChecklistProps) {
-  const [state, setState] = useState<OnboardingState>({ completedSteps: [] });
-  const [dismissed, setDismissed] = useState(true);
-  const [expandedStep, setExpandedStep] = useState<number | null>(null);
+  // Initialise from persisted state during render via lazy initialisers instead
+  // of syncing through effects — this avoids setState-in-effect cascades. The
+  // `mounted` guard below still defers the first content paint so the SSR and
+  // client markup match (localStorage is client-only).
+  const [state, setState] = useState<OnboardingState>(getStoredState);
+  const [dismissed, setDismissed] = useState<boolean>(isDismissed);
+  const [expandedStep, setExpandedStep] = useState<number | null>(() =>
+    firstIncompleteStepId(getStoredState())
+  );
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    // One-shot mount guard: nothing is rendered until this flips, which keeps
+    // SSR/CSR output identical. Not a cascade.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
-    setState(getStoredState());
-    setDismissed(isDismissed());
   }, []);
-
-  useEffect(() => {
-    // Auto-expand the first incomplete step
-    if (mounted && !dismissed) {
-      const firstIncomplete = STEPS.find((s) => !state.completedSteps.includes(s.id));
-      if (firstIncomplete) {
-        setExpandedStep(firstIncomplete.id);
-      }
-    }
-  }, [mounted, dismissed, state.completedSteps]);
 
   const toggleStep = useCallback((stepId: number) => {
     setState((prev) => {

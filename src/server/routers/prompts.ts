@@ -1,5 +1,6 @@
 import { z } from "zod";
 import crypto from "crypto";
+import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
@@ -29,8 +30,8 @@ export const promptsRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
       z.object({
-        limit: z.number().min(1).max(100).default(20),
-        offset: z.number().default(0),
+        limit: z.number().int().min(1).max(100).default(20),
+        offset: z.number().int().min(0).default(0),
         projectName: z.string().optional(),
         promptType: z.enum(["user_input", "task_notification", "system"]).optional(),
         search: z.string().optional(),
@@ -268,7 +269,7 @@ export const promptsRouter = createTRPCRouter({
         .limit(1);
 
       if (!prompt) {
-        throw new Error("Prompt not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Prompt not found" });
       }
 
       // Check ownership or team admin
@@ -290,7 +291,7 @@ export const promptsRouter = createTRPCRouter({
       }
 
       if (!canShare) {
-        throw new Error("Access denied");
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
       }
 
       const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -390,7 +391,7 @@ export const promptsRouter = createTRPCRouter({
         .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
         .limit(1);
 
-      if (!prompt) throw new Error("Prompt not found");
+      if (!prompt) throw new TRPCError({ code: "NOT_FOUND", message: "Prompt not found" });
 
       let canRevoke = prompt.userId === ctx.user.id;
       if (!canRevoke && prompt.teamId) {
@@ -409,7 +410,7 @@ export const promptsRouter = createTRPCRouter({
         }
       }
 
-      if (!canRevoke) throw new Error("Access denied");
+      if (!canRevoke) throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
 
       const [share] = await db
         .select({ id: schema.promptShares.id })
@@ -417,7 +418,7 @@ export const promptsRouter = createTRPCRouter({
         .where(and(eq(schema.promptShares.id, shareId), eq(schema.promptShares.promptId, promptId)))
         .limit(1);
 
-      if (!share) throw new Error("Share not found");
+      if (!share) throw new TRPCError({ code: "NOT_FOUND", message: "Share not found" });
 
       await db.delete(schema.promptShares).where(eq(schema.promptShares.id, shareId));
 

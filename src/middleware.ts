@@ -102,16 +102,24 @@ const publicRoutes = [
 // Routes that accept alternative authentication (X-User-Token header)
 const tokenAuthRoutes = ["/api/sync"];
 
+/**
+ * Prefix match that respects path segment boundaries so that, e.g., `/login`
+ * does not match `/loginanything` and `/share` does not match `/share-admin`.
+ */
+function matchesRoute(pathname: string, route: string): boolean {
+  return pathname === route || pathname.startsWith(route + "/");
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public routes
-  if (publicRoutes.some((route) => pathname.startsWith(route))) {
+  if (publicRoutes.some((route) => matchesRoute(pathname, route))) {
     return NextResponse.next();
   }
 
   // Allow token-auth routes if X-User-Token header is present
-  if (tokenAuthRoutes.some((route) => pathname.startsWith(route))) {
+  if (tokenAuthRoutes.some((route) => matchesRoute(pathname, route))) {
     const userToken = request.headers.get("X-User-Token");
     if (userToken) {
       // Token will be validated by the route handler
@@ -159,9 +167,13 @@ export async function middleware(request: NextRequest) {
   // Strip any client-supplied values before injecting authenticated ones
   requestHeaders.delete("x-user-id");
   requestHeaders.delete("x-user-email");
+  requestHeaders.delete("x-session-iat");
   // Used by tRPC context (src/server/trpc.ts)
   requestHeaders.set("x-user-id", session.userId);
   requestHeaders.set("x-user-email", session.email);
+  // Session issued-at, used by the tRPC context to reject sessions invalidated
+  // by a password change (mirrors requireAuth in src/lib/with-auth.ts).
+  requestHeaders.set("x-session-iat", String(session.iat));
 
   return NextResponse.next({
     request: {

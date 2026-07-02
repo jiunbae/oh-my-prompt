@@ -786,6 +786,27 @@ function handleConfig(options, positional) {
   process.exitCode = 2;
 }
 
+// Imported rows carry historical created_at values that sit BELOW the sync
+// watermark (created_at > lastSyncedAt), so `omp sync` would never pick them up.
+// Mirror what `backfill` does: lower the sync cursor to before the earliest
+// local record so the freshly imported rows fall inside the sync window.
+async function resetSyncCursorAfterImport(config, importedCount, options = {}) {
+  if (options.dryRun || !importedCount) return;
+  const { getSyncState, updateSyncState } = require("./sync-log");
+  const { openDb } = require("./db");
+  const state = await getSyncState(config);
+  if (!state.lastSyncedAt) return; // nothing synced yet; imports are already in-window
+  const db = await openDb(config.storage.sqlite.path);
+  const earliest = db.prepare("SELECT MIN(created_at) as earliest FROM prompts").get();
+  db.close();
+  if (earliest && earliest.earliest && earliest.earliest < state.lastSyncedAt) {
+    await updateSyncState(config, earliest.earliest, null);
+    if (!options.json) {
+      console.log(`Sync cursor reset — run ${c.cyan("omp sync")} to upload imported records.`);
+    }
+  }
+}
+
 async function handleImport(options, positional) {
   const config = loadConfig();
   const source = positional[0];
@@ -795,6 +816,10 @@ async function handleImport(options, positional) {
     const result = await importCodexHistory(config, {
       path: options.path,
       dryRun: !!options["dry-run"],
+    });
+    await resetSyncCursorAfterImport(config, result.imported, {
+      dryRun: !!options["dry-run"],
+      json: !!options.json,
     });
     if (options.json) {
       printJson(result);
@@ -816,6 +841,10 @@ async function handleImport(options, positional) {
       path: filePath,
       dryRun: !!options["dry-run"],
       since: options.since,
+      json: !!options.json,
+    });
+    await resetSyncCursorAfterImport(config, result.imported, {
+      dryRun: !!options["dry-run"],
       json: !!options.json,
     });
     if (options.json) {

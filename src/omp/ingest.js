@@ -4,8 +4,31 @@ const crypto = require("crypto");
 const { openDb, nowIso, hashContent } = require("./db");
 const { enqueuePayload, getQueueStats } = require("./queue");
 const { updateState } = require("./state");
-const { redactText } = require("./redact");
+const { redactText, redactValue } = require("./redact");
 const { touchTrigger } = require("./auto-sync");
+const { acquireSyncLock, releaseSyncLock } = require("./sync-lock");
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// sql.js persists by rewriting the whole DB file on every save. Two `omp ingest`
+// processes (hooks fire one per turn) can therefore clobber each other's writes:
+// both read the same file, mutate in memory, and the slower writer wins,
+// dropping the faster writer's rows. Serialize the read-modify-write with an
+// advisory file lock. A dedicated name ("ingest.lock") means ingest never waits
+// on sync's "sync.lock" (or vice-versa), so the two can't deadlock.
+const INGEST_LOCK = { name: "ingest.lock", ttlMs: 60 * 1000 };
+
+async function acquireIngestLock() {
+  const deadline = Date.now() + 10 * 1000;
+  for (;;) {
+    const lock = acquireSyncLock({ name: INGEST_LOCK.name, ttlMs: INGEST_LOCK.ttlMs });
+    if (lock.ok) return lock;
+    if (Date.now() >= deadline) return lock; // give up waiting; proceed best-effort
+    await sleep(40 + Math.floor(Math.random() * 60));
+  }
+}
 
 function parsePayload(raw) {
   if (!raw) return null;
@@ -31,8 +54,22 @@ function estimateTokens(text) {
   return Math.ceil(text.length / TOKEN_CHAR_RATIO);
 }
 
+function safeTimestamp(value) {
+  // `new Date("garbage").toISOString()` throws RangeError. Guard it so an
+  // unparseable timestamp falls back to now() instead of crashing ingest
+  // (which used to throw before the queue safety-net could catch it).
+  if (!value) return nowIso();
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return nowIso();
+  return d.toISOString();
+}
+
 function normalizePayload(payload, config) {
-  const timestamp = payload.timestamp ? new Date(payload.timestamp).toISOString() : nowIso();
+  const timestamp = safeTimestamp(payload.timestamp);
+  const turnIndex =
+    payload.turn_index != null && Number.isFinite(Number(payload.turn_index))
+      ? Number(payload.turn_index)
+      : null;
   const promptText = payload.text || payload.prompt_text || payload.prompt || "";
   const responseText = payload.response_text || null;
   const captureResponse =
@@ -95,6 +132,7 @@ function normalizePayload(payload, config) {
         : null,
     capture_response: captureResponse ? 1 : 0,
     content_hash: payload.content_hash || hashContent(rawPromptText),
+    turn_index: turnIndex,
     extra_json: meta ? JSON.stringify(meta) : null,
   };
 
@@ -107,6 +145,11 @@ function normalizePayload(payload, config) {
           role: baseRecord.role,
           prompt_text: rawPromptText,
           response_text: rawResponseText || "",
+          // Fold turn_index into the derived event_id so two identical prompts
+          // in the same session get distinct identities instead of colliding
+          // on ON CONFLICT(event_id). Omitted when null to keep event_ids
+          // stable for producers that don't supply a turn index.
+          ...(turnIndex != null ? { turn_index: turnIndex } : {}),
         })
       );
 
@@ -137,7 +180,7 @@ function deriveProgram(toolName, input) {
   return base.toLowerCase().slice(0, 100);
 }
 
-function insertToolInvocations(db, tools, promptId, record) {
+function insertToolInvocations(db, tools, promptId, record, redactOptions) {
   if (!Array.isArray(tools) || tools.length === 0) return;
   if (!record.session_id) return;
   const stmt = db.prepare(`
@@ -158,6 +201,12 @@ function insertToolInvocations(db, tools, promptId, record) {
   for (const t of tools) {
     if (!t || !t.tool_use_id || !t.tool_name) continue;
     const input = t.input != null ? t.input : null;
+    // Redact secrets inside tool inputs (Bash commands, Edit contents, WebFetch
+    // bodies, …) before storing when capture redaction is enabled. Program is
+    // derived from the original input — the command name itself is not secret
+    // and redaction could otherwise obscure it.
+    const storedInput =
+      redactOptions && input != null ? redactValue(input, redactOptions) : input;
     stmt.run({
       id: crypto.randomUUID(),
       prompt_id: promptId || null,
@@ -166,7 +215,7 @@ function insertToolInvocations(db, tools, promptId, record) {
       source: record.source || null,
       tool_name: String(t.tool_name).slice(0, 100),
       tool_use_id: String(t.tool_use_id).slice(0, 255),
-      input_json: input != null ? JSON.stringify(input) : null,
+      input_json: storedInput != null ? JSON.stringify(storedInput) : null,
       program: deriveProgram(t.tool_name, input),
       cwd: t.cwd || record.cwd || null,
       created_at: record.created_at || nowIso(),
@@ -201,14 +250,14 @@ function insertPrompt(db, record) {
       prompt_text, response_text, prompt_length, response_length,
       project, cwd, model, cli_name, cli_version, hook_version,
       token_estimate, token_estimate_response, word_count, word_count_response,
-      capture_response, content_hash, extra_json
+      capture_response, content_hash, turn_index, extra_json
     ) VALUES (
       @event_id,
       @id, @created_at, @updated_at, @source, @session_id, @role,
       @prompt_text, @response_text, @prompt_length, @response_length,
       @project, @cwd, @model, @cli_name, @cli_version, @hook_version,
       @token_estimate, @token_estimate_response, @word_count, @word_count_response,
-      @capture_response, @content_hash, @extra_json
+      @capture_response, @content_hash, @turn_index, @extra_json
     )
     ON CONFLICT(event_id) DO NOTHING
   `);
@@ -243,11 +292,18 @@ async function ingestPayload(rawPayload, config, options = {}) {
     return { ok: false, error: "Invalid JSON payload" };
   }
 
-  const record = normalizePayload(payload, config);
+  // Redaction options for tool inputs when capture redaction is enabled.
+  const toolRedact = config.capture?.redact?.enabled ? config.capture.redact : null;
+
   const externalDb = options.db;
+  // Serialize concurrent ingest processes around the whole read-modify-write.
+  // The caller owns the lifecycle when it passes its own db handle, so skip
+  // locking (and DB open/close) in that case.
+  const lock = externalDb ? null : await acquireIngestLock();
   const db = externalDb || await openDb(config.storage.sqlite.path);
 
   try {
+    const record = normalizePayload(payload, config);
     if (record.role === "assistant" && record.session_id) {
       let row = null;
 
@@ -287,7 +343,7 @@ async function ingestPayload(rawPayload, config, options = {}) {
           );
         }
         if (hasTools) {
-          insertToolInvocations(db, payload.tools, row.id, record);
+          insertToolInvocations(db, payload.tools, row.id, record, toolRedact);
         }
         if (record.prompt_text || hasTools) {
           if (record.prompt_text) updateState({ lastCapture: record.created_at });
@@ -298,17 +354,25 @@ async function ingestPayload(rawPayload, config, options = {}) {
     }
 
     // Content-based dedup: catch duplicates from different sources (hooks vs backfill)
-    // that have different event_ids but identical content within the same session
+    // that have different event_ids but identical content within the same session.
+    //
+    // turn_index makes this per-turn precise: two rows are treated as the same
+    // only when their turn indices match, OR when either side has no turn index
+    // (null). That keeps cross-source dedup working (a hook row with null
+    // turn_index still dedups against a backfill row that carries one) while
+    // preserving genuinely distinct turns with identical text (e.g. repeated
+    // "continue"), which carry different non-null turn indices.
     if (record.session_id && record.content_hash) {
       const contentDup = db
         .prepare(
           `SELECT id, response_text FROM prompts
            WHERE session_id = ? AND role = ? AND content_hash = ?
+             AND (turn_index IS ? OR turn_index IS NULL OR ? IS NULL)
            LIMIT 1`
         )
-        .get(record.session_id, record.role, record.content_hash);
+        .get(record.session_id, record.role, record.content_hash, record.turn_index, record.turn_index);
       if (contentDup) {
-        insertToolInvocations(db, payload.tools, contentDup.id, record);
+        insertToolInvocations(db, payload.tools, contentDup.id, record, toolRedact);
         if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
           updatePromptWithResponse(
             db,
@@ -332,7 +396,7 @@ async function ingestPayload(rawPayload, config, options = {}) {
       // FK is ON DELETE CASCADE; pass null prompt_id if we have no real row to point at,
       // otherwise we'd hit a foreign-key violation under PRAGMA foreign_keys=ON.
       const existingId = existing?.id || record.id;
-      insertToolInvocations(db, payload.tools, existing?.id || null, record);
+      insertToolInvocations(db, payload.tools, existing?.id || null, record, toolRedact);
       // Update response_text on existing record if it's missing and the new payload has it
       if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
         updatePromptWithResponse(
@@ -347,7 +411,7 @@ async function ingestPayload(rawPayload, config, options = {}) {
       }
       return { ok: true, id: existingId, updated: false, deduped: true };
     }
-    insertToolInvocations(db, payload.tools, record.id, record);
+    insertToolInvocations(db, payload.tools, record.id, record, toolRedact);
     updateState({ lastCapture: record.created_at });
     touchTrigger();
     return { ok: true, id: record.id, updated: false };
@@ -357,7 +421,12 @@ async function ingestPayload(rawPayload, config, options = {}) {
     updateState({ lastError: error.message || "Failed to ingest" });
     return { ok: false, error: error.message || "Failed to ingest" };
   } finally {
-    if (!externalDb) db.close();
+    if (!externalDb) {
+      // Close (which saves) before releasing the lock so the next waiter reads
+      // the fully-written file.
+      db.close();
+      if (lock && lock.ok) releaseSyncLock(lock.lockPath);
+    }
   }
 }
 

@@ -4,7 +4,9 @@ import {
   computeWeeklyMetrics,
   computeWeeklyMetricsBatch,
   getImprovementSuggestions,
+  weekStartKeyForDate,
 } from "@/lib/learning-metrics";
+import { addDaysToDateKey } from "@/lib/date-utils";
 
 export const learningRouter = createTRPCRouter({
   weeklyReport: protectedProcedure
@@ -29,22 +31,17 @@ export const learningRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
-      const now = new Date();
-      // Start from the most recent Monday
-      const day = now.getDay();
-      const diff = day === 0 ? 6 : day - 1; // Monday = 0 offset
-      const currentMonday = new Date(now);
-      currentMonday.setDate(now.getDate() - diff);
-      currentMonday.setHours(0, 0, 0, 0);
+      // Compute week-start keys with the SAME APP_TIME_ZONE-aware Monday
+      // convention used to bucket prompts inside computeWeeklyMetricsBatch, so
+      // request keys and bucket keys always align (even off UTC).
+      const currentWeekKey = weekStartKeyForDate(new Date());
 
-      const weekStarts = [];
+      const weekStartKeys: string[] = [];
       for (let i = input.weeks - 1; i >= 0; i--) {
-        const weekStart = new Date(currentMonday);
-        weekStart.setDate(currentMonday.getDate() - i * 7);
-        weekStarts.push(weekStart);
+        weekStartKeys.push(addDaysToDateKey(currentWeekKey, -i * 7));
       }
 
       // Single batch query instead of N+1 loop
-      return computeWeeklyMetricsBatch(ctx.user.id, weekStarts);
+      return computeWeeklyMetricsBatch(ctx.user.id, weekStartKeys);
     }),
 });

@@ -55,97 +55,187 @@ export async function triggerEvent(
     data: payload,
   };
 
-  const bodyString = JSON.stringify(deliveryPayload);
-
   // Fire-and-forget: don't block the main flow
   await Promise.allSettled(
-    integrations.map(async (integration) => {
-      const startTime = Date.now();
-      let responseStatus: number | null = null;
-      let responseBody: string | null = null;
-      let errorMessage: string | null = null;
+    integrations.map((integration) =>
+      deliverToIntegration(integration, eventType, deliveryPayload),
+    ),
+  );
+}
 
-      // SSRF check
+type OutgoingIntegration = typeof schema.outgoingIntegrations.$inferSelect;
+
+/**
+ * Batched variant of {@link triggerEvent}. Runs ONE query to load the matching
+ * integrations (for the user AND, when provided, the team) and then delivers
+ * every payload to each integration — avoiding the N+1 SELECT storm you get
+ * from calling triggerEvent once per row. SSRF validation happens once per
+ * integration rather than once per delivery.
+ */
+export async function triggerEventBatch(
+  eventType: IntegrationEvent,
+  payloads: Array<Record<string, unknown>>,
+  userId: string,
+  teamId?: string | null,
+): Promise<void> {
+  if (payloads.length === 0) return;
+
+  // Reach both the user's personal integrations and (if this is a team-scoped
+  // event) the team's integrations. The single-event path historically only
+  // matched one or the other, leaving team integrations unreachable on upload.
+  const scope = teamId
+    ? sql`(${schema.outgoingIntegrations.userId} = ${userId} OR ${schema.outgoingIntegrations.teamId} = ${teamId})`
+    : eq(schema.outgoingIntegrations.userId, userId);
+
+  const integrations = await db
+    .select()
+    .from(schema.outgoingIntegrations)
+    .where(
+      and(
+        eq(schema.outgoingIntegrations.isActive, true),
+        sql`${eventType} = ANY(${schema.outgoingIntegrations.events})`,
+        scope,
+      ),
+    );
+
+  if (integrations.length === 0) return;
+
+  const nowIso = new Date().toISOString();
+
+  await Promise.allSettled(
+    integrations.map(async (integration) => {
+      // Validate the webhook URL once per integration, then reuse the result
+      // for every payload delivered to it.
       const urlCheck = await validateWebhookUrl(integration.webhookUrl);
       if (!urlCheck.valid) {
-        errorMessage = `SSRF blocked: ${urlCheck.error}`;
-        await logDelivery(integration.id, eventType, deliveryPayload, null, null, errorMessage);
+        const errorMessage = `SSRF blocked: ${urlCheck.error}`;
         logger.warn(
           { integrationId: integration.id, url: integration.webhookUrl, error: errorMessage },
-          "Outgoing integration blocked by SSRF check"
+          "Outgoing integration blocked by SSRF check",
         );
+        for (const payload of payloads) {
+          await logDelivery(
+            integration.id,
+            eventType,
+            { event: eventType, timestamp: nowIso, data: payload },
+            null,
+            null,
+            errorMessage,
+          );
+        }
         return;
       }
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "User-Agent": "oh-my-prompt/integrations",
-        "X-Integration-Event": eventType,
-        "X-Integration-Id": integration.id,
-      };
-
-      if (integration.secret) {
-        const signature = crypto
-          .createHmac("sha256", integration.secret)
-          .update(bodyString)
-          .digest("hex");
-        headers["X-Hub-Signature"] = `sha256=${signature}`;
-      }
-
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), INTEGRATION_TIMEOUT_MS);
-
-        const response = await fetch(integration.webhookUrl, {
-          method: "POST",
-          headers,
-          body: bodyString,
-          signal: controller.signal,
-          redirect: "error",
+      for (const payload of payloads) {
+        await postToIntegration(integration, eventType, {
+          event: eventType,
+          timestamp: new Date().toISOString(),
+          data: payload,
         });
-
-        clearTimeout(timeoutId);
-
-        responseStatus = response.status;
-        responseBody = await response.text().catch(() => null);
-
-        if (responseBody && responseBody.length > 4096) {
-          responseBody = responseBody.slice(0, 4096) + "...(truncated)";
-        }
-
-        await logDelivery(
-          integration.id,
-          eventType,
-          deliveryPayload,
-          responseStatus,
-          responseBody,
-          null,
-        );
-
-        // Update lastTriggeredAt on success
-        if (responseStatus >= 200 && responseStatus < 300) {
-          await db
-            .update(schema.outgoingIntegrations)
-            .set({ lastTriggeredAt: new Date() })
-            .where(eq(schema.outgoingIntegrations.id, integration.id));
-        }
-      } catch (error) {
-        errorMessage = error instanceof Error ? error.message : "Unknown error";
-        await logDelivery(
-          integration.id,
-          eventType,
-          deliveryPayload,
-          null,
-          null,
-          errorMessage,
-        );
-        logger.error(
-          { err: error, integrationId: integration.id, eventType },
-          "Outgoing integration delivery failed"
-        );
       }
-    })
+    }),
   );
+}
+
+/**
+ * Deliver a single payload to one integration, running the SSRF check first.
+ */
+async function deliverToIntegration(
+  integration: OutgoingIntegration,
+  eventType: IntegrationEvent,
+  deliveryPayload: { event: string; timestamp: string; data: Record<string, unknown> },
+): Promise<void> {
+  const urlCheck = await validateWebhookUrl(integration.webhookUrl);
+  if (!urlCheck.valid) {
+    const errorMessage = `SSRF blocked: ${urlCheck.error}`;
+    await logDelivery(integration.id, eventType, deliveryPayload, null, null, errorMessage);
+    logger.warn(
+      { integrationId: integration.id, url: integration.webhookUrl, error: errorMessage },
+      "Outgoing integration blocked by SSRF check",
+    );
+    return;
+  }
+  await postToIntegration(integration, eventType, deliveryPayload);
+}
+
+/**
+ * POST a delivery payload to an already-SSRF-validated integration URL, log the
+ * result, and bump lastTriggeredAt on success.
+ */
+async function postToIntegration(
+  integration: OutgoingIntegration,
+  eventType: IntegrationEvent,
+  deliveryPayload: { event: string; timestamp: string; data: Record<string, unknown> },
+): Promise<void> {
+  const bodyString = JSON.stringify(deliveryPayload);
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "User-Agent": "oh-my-prompt/integrations",
+    "X-Integration-Event": eventType,
+    "X-Integration-Id": integration.id,
+  };
+
+  if (integration.secret) {
+    const signature = crypto
+      .createHmac("sha256", integration.secret)
+      .update(bodyString)
+      .digest("hex");
+    headers["X-Hub-Signature"] = `sha256=${signature}`;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), INTEGRATION_TIMEOUT_MS);
+
+    const response = await fetch(integration.webhookUrl, {
+      method: "POST",
+      headers,
+      body: bodyString,
+      signal: controller.signal,
+      redirect: "error",
+    });
+
+    clearTimeout(timeoutId);
+
+    const responseStatus = response.status;
+    let responseBody = await response.text().catch(() => null);
+
+    if (responseBody && responseBody.length > 4096) {
+      responseBody = responseBody.slice(0, 4096) + "...(truncated)";
+    }
+
+    await logDelivery(
+      integration.id,
+      eventType,
+      deliveryPayload,
+      responseStatus,
+      responseBody,
+      null,
+    );
+
+    // Update lastTriggeredAt on success
+    if (responseStatus >= 200 && responseStatus < 300) {
+      await db
+        .update(schema.outgoingIntegrations)
+        .set({ lastTriggeredAt: new Date() })
+        .where(eq(schema.outgoingIntegrations.id, integration.id));
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    await logDelivery(
+      integration.id,
+      eventType,
+      deliveryPayload,
+      null,
+      null,
+      errorMessage,
+    );
+    logger.error(
+      { err: error, integrationId: integration.id, eventType },
+      "Outgoing integration delivery failed",
+    );
+  }
 }
 
 async function logDelivery(

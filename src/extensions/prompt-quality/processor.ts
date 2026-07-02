@@ -309,7 +309,11 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
           for (const score of scores) {
             const promptData = batchPromptMap.get(score.id);
             const dims = promptData ? scorePrompt(promptData.promptText) : null;
-            const overallScore = dims?.overall ?? score.quality_score;
+            // Prefer the LLM's holistic quality_score when available; the local
+            // heuristic dimensions are still persisted for the sub-dimension
+            // breakdown but must not override the LLM's overall score.
+            const hasLlmScore = Number.isFinite(score.quality_score);
+            const overallScore = hasLlmScore ? score.quality_score : (dims?.overall ?? 0);
             pendingUpdates.push({
               id: score.id,
               qualityScore: overallScore,
@@ -318,7 +322,13 @@ export async function handler(input: ProcessorInput): Promise<InsightResult> {
               qualityContext: dims?.context ?? null,
               qualityConstraints: dims?.constraints ?? null,
               qualityStructure: dims?.structure ?? null,
-              qualityDetails: dims ? { method: "llm+heuristic-v1", llmScore: score.quality_score, ...dims } : null,
+              qualityDetails: {
+                method: dims ? "llm+heuristic-v1" : "llm-v1",
+                llmScore: score.quality_score,
+                heuristicScore: dims?.overall ?? null,
+                reasoning: score.reasoning,
+                ...(dims ?? {}),
+              },
               topicTags: score.topic_tags,
               enrichedAt: new Date(),
             });

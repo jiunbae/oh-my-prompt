@@ -5,6 +5,12 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
+import {
+  APP_TIME_ZONE,
+  addDaysToDateKey,
+  dateTimePartsInTimeZone,
+  startOfDateKeyInTimeZone,
+} from "@/lib/date-utils";
 
 export interface WeeklyMetrics {
   weekStart: string; // ISO date string (YYYY-MM-DD)
@@ -35,6 +41,26 @@ function endOfWeek(weekStart: Date): Date {
   const end = new Date(weekStart);
   end.setDate(end.getDate() + 7);
   return end;
+}
+
+/**
+ * Shared week-boundary convention used by BOTH the trend request keys and the
+ * batch bucket keys. Returns the YYYY-MM-DD date-key of the Monday that starts
+ * the week containing `date`, computed in APP_TIME_ZONE (not the server's local
+ * time, and not UTC). Unifying request/bucket key spaces here is what keeps the
+ * weekly trend from returning all-zeros on non-UTC servers.
+ */
+export function weekStartKeyForDate(
+  date: Date,
+  timeZone = APP_TIME_ZONE,
+): string {
+  const parts = dateTimePartsInTimeZone(date, timeZone);
+  // parts.weekday: 0 = Sunday .. 6 = Saturday (for the local calendar date)
+  const daysSinceMonday = parts.weekday === 0 ? 6 : parts.weekday - 1;
+  const dayKey = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(
+    parts.day,
+  ).padStart(2, "0")}`;
+  return addDaysToDateKey(dayKey, -daysSinceMonday);
 }
 
 const STRUCTURE_RE = /[-*]\s+|^\d+\.\s+|^#{1,6}\s+|```/m;
@@ -175,19 +201,23 @@ export async function computeWeeklyMetrics(
 
 export async function computeWeeklyMetricsBatch(
   userId: string,
-  weekStarts: Date[],
+  weekStartKeys: string[],
 ): Promise<WeeklyMetrics[]> {
-  if (weekStarts.length === 0) return [];
+  if (weekStartKeys.length === 0) return [];
 
-  // Include one extra week before the earliest for trend calculation
-  const earliest = new Date(
-    Math.min(...weekStarts.map((d) => d.getTime())),
-  );
-  const batchStart = startOfPreviousWeek(earliest);
-  const latest = new Date(
-    Math.max(...weekStarts.map((d) => d.getTime())),
-  );
-  const batchEnd = endOfWeek(latest);
+  // Week-start keys are APP_TIME_ZONE Monday date-keys (YYYY-MM-DD), produced by
+  // the SAME weekStartKeyForDate() used to bucket prompts below. This shared
+  // convention is what keeps the trend from returning all-zeros off UTC.
+  const sortedKeys = [...weekStartKeys].sort();
+  const earliestKey = sortedKeys[0];
+  const latestKey = sortedKeys[sortedKeys.length - 1];
+
+  // Include one extra week before the earliest for trend calculation, and go to
+  // the end (exclusive) of the latest week.
+  const batchStartKey = addDaysToDateKey(earliestKey, -7);
+  const batchEndKey = addDaysToDateKey(latestKey, 7); // start of week after latest = end-exclusive
+  const batchStart = startOfDateKeyInTimeZone(batchStartKey)!;
+  const batchEnd = startOfDateKeyInTimeZone(batchEndKey)!;
 
   // ONE query for all prompts in the full range
   // Truncate promptText to 500 chars — vocabulary/structure analysis doesn't need full text
@@ -205,22 +235,13 @@ export async function computeWeeklyMetricsBatch(
         eq(schema.prompts.promptType, "user_input"),
         gte(schema.prompts.timestamp, batchStart),
         lt(schema.prompts.timestamp, batchEnd),
+        isNull(schema.prompts.deletedAt),
       ),
     );
 
-  // Group prompts by week-start key
-  function weekKeyForDate(d: Date): string {
-    // Find the Monday at or before d (UTC-based to match DB timestamps)
-    const day = d.getUTCDay();
-    const diff = day === 0 ? 6 : day - 1;
-    const monday = new Date(d);
-    monday.setUTCDate(d.getUTCDate() - diff);
-    return monday.toISOString().split("T")[0];
-  }
-
   const byWeek = new Map<string, typeof allPrompts>();
   for (const p of allPrompts) {
-    const key = weekKeyForDate(new Date(p.timestamp));
+    const key = weekStartKeyForDate(new Date(p.timestamp));
     let bucket = byWeek.get(key);
     if (!bucket) {
       bucket = [];
@@ -230,8 +251,7 @@ export async function computeWeeklyMetricsBatch(
   }
 
   // Compute metrics for each requested week
-  return weekStarts.map((ws) => {
-    const key = ws.toISOString().split("T")[0];
+  return weekStartKeys.map((key) => {
     const currentPrompts = byWeek.get(key) ?? [];
 
     const totalPrompts = currentPrompts.length;
@@ -252,7 +272,7 @@ export async function computeWeeklyMetricsBatch(
         : 0;
 
     // Previous week aggregates for trend
-    const prevKey = startOfPreviousWeek(ws).toISOString().split("T")[0];
+    const prevKey = addDaysToDateKey(key, -7);
     const prevPrompts = byWeek.get(prevKey) ?? [];
     const prevScored = prevPrompts.filter((p) => p.qualityScore != null);
     const prevAvgScore =

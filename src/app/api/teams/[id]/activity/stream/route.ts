@@ -31,7 +31,7 @@ export async function GET(
     const { id } = await params;
 
     // Rate limit: max 5 concurrent SSE connections per user
-    const rateLimit = rateLimiters.teamActivity(session.userId);
+    const rateLimit = await rateLimiters.teamActivity(session.userId);
     if (!rateLimit.allowed) {
       return new Response("Rate limit exceeded", { status: 429 });
     }

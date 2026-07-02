@@ -21,7 +21,7 @@ export async function GET(
     const session = await requireAuth();
     const userId = session.userId;
 
-    const rateCheck = rateLimiters.search(userId);
+    const rateCheck = await rateLimiters.search(userId);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded" },

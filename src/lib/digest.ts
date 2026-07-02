@@ -185,9 +185,13 @@ export async function generateWeeklyDigest(userId: string): Promise<WeekDigestDa
     return null;
   }
 
+  // Report the most recently COMPLETED week (previous full Mon–Sun) rather than
+  // the in-progress current week. Comparing a partial current week against a
+  // full previous week always produces misleading negative deltas.
   const now = new Date();
-  const currentWeekStart = startOfWeek(now);
-  const currentWeekEnd = addDays(currentWeekStart, 7);
+  const thisWeekStart = startOfWeek(now);
+  const currentWeekStart = addDays(thisWeekStart, -7); // last full week's Monday
+  const currentWeekEnd = thisWeekStart; // exclusive end == this week's Monday
   const previousWeekStart = addDays(currentWeekStart, -7);
   const previousWeekEnd = currentWeekStart;
 

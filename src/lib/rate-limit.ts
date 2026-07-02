@@ -3,10 +3,9 @@
  * Falls back to in-memory implementation if Redis is unavailable.
  *
  * Uses a Lua script (ZADD + ZREMRANGEBYSCORE + ZCARD + PEXPIRE) executed
- * atomically in Redis. Because ioredis is async but the exported API is sync,
- * we cache the last known count per key and fire the Lua script eagerly.
- * Each call returns the result from the *previous* pipeline (eventual consistency),
- * which is an acceptable trade-off for rate limiting.
+ * atomically in Redis. The limiter is async and awaits the Lua result so that
+ * concurrent requests observe an authoritative, up-to-date count (this closes a
+ * burst-bypass hole where a stale cached count let concurrent requests all pass).
  */
 
 import { redis } from "@/lib/redis";
@@ -21,6 +20,9 @@ export interface RateLimitResult {
   retryAfterMs: number;
 }
 
+/** A rate limiter resolves asynchronously with the authoritative decision. */
+export type RateLimiter = (key: string) => Promise<RateLimitResult>;
+
 // ---------------------------------------------------------------------------
 // Redis Lua script — runs atomically per key
 // KEYS[1] = the sorted-set key
@@ -28,7 +30,7 @@ export interface RateLimitResult {
 // ARGV[2] = window start (ms)
 // ARGV[3] = unique member suffix (avoids collisions within the same ms)
 // ARGV[4] = TTL in ms
-// Returns: current count in the window
+// Returns: current count in the window (including the just-added member)
 // ---------------------------------------------------------------------------
 const SLIDING_WINDOW_LUA = `
 local key       = KEYS[1]
@@ -50,18 +52,16 @@ redis.defineCommand("slidingWindowRateLimit", {
   lua: SLIDING_WINDOW_LUA,
 });
 
-/** Last-known count per Redis key, populated from resolved pipeline results. */
-const lastKnownCount = new Map<string, number>();
-
-/** Timestamp of the last cache-prune pass. */
-let cacheCleanupTime = Date.now();
-
-function pruneCountCache() {
-  const now = Date.now();
-  if (now - cacheCleanupTime < CLEANUP_INTERVAL_MS) return;
-  cacheCleanupTime = now;
-  lastKnownCount.clear();
-}
+// Typed view of the custom command ioredis attaches at runtime via defineCommand.
+type RedisWithRateLimit = typeof redis & {
+  slidingWindowRateLimit(
+    key: string,
+    now: number,
+    windowStart: number,
+    member: string,
+    ttl: number,
+  ): Promise<number>;
+};
 
 function isRedisReady(): boolean {
   try {
@@ -72,35 +72,83 @@ function isRedisReady(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Client IP extraction (spoofing-resistant)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_TRUSTED_PROXY_HOPS = 1;
+const UNKNOWN_IP = "unknown";
+
+type HeaderCarrier = { headers: { get(name: string): string | null } };
+
+/**
+ * Resolve the real client IP from proxy headers in a spoofing-resistant way.
+ *
+ * `X-Forwarded-For` is a comma-separated list where each proxy *appends* the
+ * address it received the connection from. The left-most entries are fully
+ * client-controlled and must NOT be trusted. Given a known number of trusted
+ * reverse-proxy hops in front of the app, the real client is the entry that is
+ * `trustedHops` positions from the right.
+ *
+ * @param request       Anything exposing `.headers.get()` (NextRequest / Request).
+ * @param trustedHops   Number of trusted proxies between the app and the client.
+ *                      Defaults to `TRUSTED_PROXY_HOPS` env or 1.
+ */
+export function getClientIp(
+  request: HeaderCarrier,
+  trustedHops?: number,
+): string {
+  const envHops = Number(process.env.TRUSTED_PROXY_HOPS);
+  const resolvedHops =
+    trustedHops ??
+    (Number.isFinite(envHops) && envHops > 0 ? envHops : DEFAULT_TRUSTED_PROXY_HOPS);
+  const hops = Math.max(1, resolvedHops);
+
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 0) {
+      // Take the entry `hops` positions from the right (clamped to the list).
+      const idx = Math.max(0, parts.length - hops);
+      const ip = parts[idx];
+      if (ip) return ip;
+    }
+  }
+
+  const realIp = request.headers.get("x-real-ip");
+  if (realIp) return realIp.trim();
+
+  return UNKNOWN_IP;
+}
+
+// ---------------------------------------------------------------------------
 // Redis-backed limiter
 // ---------------------------------------------------------------------------
 function createRedisRateLimiter(
   maxRequests: number,
   windowMs: number,
-): (key: string) => RateLimitResult {
+): RateLimiter {
   const prefix = `${REDIS_KEY_PREFIX}${maxRequests}:${windowMs}:`;
 
-  return (key: string): RateLimitResult => {
+  return async (key: string): Promise<RateLimitResult> => {
     const redisKey = `${prefix}${key}`;
     const now = Date.now();
     const windowStart = now - windowMs;
     const member = `${now}:${Math.random()}`;
 
-    // Fire the Lua script asynchronously. The result updates the cache for
-    // the *next* invocation of this key, giving us eventual consistency.
-    (redis as any)
-      .slidingWindowRateLimit(redisKey, now, windowStart, member, windowMs)
-      .then((count: number) => {
-        lastKnownCount.set(redisKey, count);
-      })
-      .catch(() => {
-        // Swallow — isRedisReady() will switch us to the fallback limiter.
-      });
+    // Await the authoritative count from Redis. `count` includes the member we
+    // just added, so it equals the number of requests in the current window.
+    const count: number = await (redis as RedisWithRateLimit).slidingWindowRateLimit(
+      redisKey,
+      now,
+      windowStart,
+      member,
+      windowMs,
+    );
 
-    // Return based on the last-known count (0 on first call — optimistic allow).
-    const count = lastKnownCount.get(redisKey) ?? 0;
-
-    if (count >= maxRequests) {
+    if (count > maxRequests) {
       return {
         allowed: false,
         remaining: 0,
@@ -110,7 +158,7 @@ function createRedisRateLimiter(
 
     return {
       allowed: true,
-      remaining: Math.max(0, maxRequests - count - 1),
+      remaining: Math.max(0, maxRequests - count),
       retryAfterMs: 0,
     };
   };
@@ -122,7 +170,7 @@ function createRedisRateLimiter(
 function createMemoryRateLimiter(
   maxRequests: number,
   windowMs: number,
-): (key: string) => RateLimitResult {
+): RateLimiter {
   const store = new Map<string, number[]>();
   let lastCleanup = Date.now();
 
@@ -142,7 +190,7 @@ function createMemoryRateLimiter(
     }
   }
 
-  return (key: string): RateLimitResult => {
+  return async (key: string): Promise<RateLimitResult> => {
     const now = Date.now();
     cleanup();
 
@@ -183,24 +231,30 @@ function createMemoryRateLimiter(
  * Create a rate limiter backed by Redis (sorted-set sliding window).
  * Automatically falls back to an in-memory limiter if Redis is unavailable.
  *
+ * The returned limiter is async: callers MUST await it so the decision reflects
+ * the authoritative count (preventing concurrent-burst bypass).
+ *
  * Each limiter has independent tracking so auth limits don't affect search limits.
  */
 export function createRateLimiter(
   maxRequests: number,
   windowMs: number,
-): (key: string) => RateLimitResult {
+): RateLimiter {
   const memoryLimiter = createMemoryRateLimiter(maxRequests, windowMs);
   const redisLimiter = createRedisRateLimiter(maxRequests, windowMs);
 
-  return (key: string): RateLimitResult => {
+  return async (key: string): Promise<RateLimitResult> => {
     if (isRedisReady()) {
-      pruneCountCache();
-      return redisLimiter(key);
+      try {
+        return await redisLimiter(key);
+      } catch (err) {
+        logger.warn(
+          { err, maxRequests, windowMs },
+          "Redis rate limiter failed, falling back to in-memory limiter",
+        );
+        return memoryLimiter(key);
+      }
     }
-    logger.warn(
-      { maxRequests, windowMs },
-      "Redis unavailable, falling back to in-memory rate limiter",
-    );
     return memoryLimiter(key);
   };
 }

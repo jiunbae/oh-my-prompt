@@ -9,15 +9,19 @@ import {
   AUTH_COOKIE_NAME,
   AUTH_COOKIE_OPTIONS,
 } from "@/lib/auth";
-import { rateLimiters } from "@/lib/rate-limit";
+import { rateLimiters, getClientIp } from "@/lib/rate-limit";
+
+// Fixed dummy bcrypt hash used to equalize timing when a user is not found,
+// closing the login timing oracle (found vs. not-found paths take similar time).
+// bcrypt hash of an arbitrary string at cost 12.
+const DUMMY_PASSWORD_HASH =
+  "$2a$12$5A8Ku3ljuaO5JFJzdF7Hs.foJD.71J4lVkrYjTdQSw5WZJaXmVNge";
 
 export async function POST(request: NextRequest) {
   try {
     // Rate limit by IP (auth endpoints are unauthenticated)
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
-      || request.headers.get("x-real-ip")
-      || "unknown";
-    const rateCheck = rateLimiters.auth(ip);
+    const ip = getClientIp(request);
+    const rateCheck = await rateLimiters.auth(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Too many login attempts. Please try again later." },
@@ -43,6 +47,10 @@ export async function POST(request: NextRequest) {
     // Find user by email
     const user = await findUserByEmail(email);
     if (!user) {
+      // Perform a dummy bcrypt comparison so the not-found path takes roughly
+      // the same time as the found path, closing the user-enumeration timing
+      // oracle.
+      await verifyPassword(password, DUMMY_PASSWORD_HASH);
       return NextResponse.json(
         { error: "Invalid email or password" },
         { status: 401 }

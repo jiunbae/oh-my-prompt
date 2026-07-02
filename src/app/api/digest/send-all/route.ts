@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     const session = await requireAdmin();
 
     // Rate limiting
-    const limit = sendAllLimiter(session.userId);
+    const limit = await sendAllLimiter(session.userId);
     if (!limit.allowed) {
       return NextResponse.json(
         {

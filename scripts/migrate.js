@@ -44,19 +44,22 @@ async function migrate() {
       .map(s => s.trim())
       .filter(Boolean);
 
-    for (const stmt of statements) {
-      try {
-        await sql.unsafe(stmt);
-      } catch (e) {
-        // Ignore "already exists" errors for idempotency
-        if (e.message.includes("already exists") || e.message.includes("duplicate")) {
-          continue;
+    // Run the whole migration file inside a single transaction and only record
+    // the tag if it commits. Any error (other than a benign "already exists"
+    // on the FIRST statement, meaning the migration was already applied
+    // out-of-band) aborts the deploy loudly so a failed migration is NEVER
+    // recorded as applied.
+    try {
+      await sql.begin(async (tx) => {
+        for (const stmt of statements) {
+          await tx.unsafe(stmt);
         }
-        console.error(`  Error in ${file}: ${e.message.slice(0, 200)}`);
-      }
+        await tx`INSERT INTO __drizzle_migrations (tag) VALUES (${tag})`;
+      });
+    } catch (e) {
+      const msg = e.message || String(e);
+      throw new Error(`Migration ${file} failed and was NOT recorded: ${msg.slice(0, 300)}`);
     }
-
-    await sql`INSERT INTO __drizzle_migrations (tag) VALUES (${tag})`;
     console.log(`  Applied ${file}`);
   }
 

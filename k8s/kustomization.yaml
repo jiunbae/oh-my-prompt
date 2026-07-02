@@ -14,8 +14,13 @@ resources:
   - ingress.yaml
   - cronjob.yaml
 
-# Image tag is managed by GitOps CI pipeline
-# CI builds image -> pushes to registry -> updates newTag -> ArgoCD syncs
+# Image tag is managed by the GitOps CI pipeline:
+#   CI builds image -> pushes to registry -> runs
+#   `kustomize edit set image registry.jiun.dev/oh-my-prompt=...:<git-sha>`
+#   -> commits the updated newTag -> ArgoCD detects the change and syncs.
+# The placeholder below MUST be overridden by CI with an immutable tag (e.g. the
+# git SHA). Never deploy `latest`: ArgoCD cannot detect new images or roll back
+# when the tag is mutable.
 images:
   - name: registry.jiun.dev/oh-my-prompt
-    newTag: latest
+    newTag: PLACEHOLDER_OVERRIDDEN_BY_CI

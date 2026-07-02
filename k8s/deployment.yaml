@@ -33,6 +33,14 @@ spec:
                 - ALL
           ports:
             - containerPort: 3000
+          volumeMounts:
+            # readOnlyRootFilesystem is true, but Next standalone writes runtime
+            # cache and temp files. Provide writable emptyDir mounts so caching
+            # doesn't fail with EROFS.
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
           envFrom:
             - configMapRef:
                 name: oh-my-prompt-config
@@ -57,3 +65,8 @@ spec:
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: next-cache
+          emptyDir: {}

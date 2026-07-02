@@ -47,7 +47,7 @@ export default function FavoritePromptsPage() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Favorite Prompts</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Prompts you've bookmarked for quick access.
+          Prompts you&apos;ve bookmarked for quick access.
         </p>
       </div>
 

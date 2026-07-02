@@ -8,6 +8,35 @@ import { logger } from "@/lib/logger";
 
 const VALID_PROVIDERS = new Set(["anthropic", "openai", "azure", "gemini", "ollama", "custom"]);
 
+/** Per-request LLM timeout in ms (default 60s), overridable via OMP_LLM_TIMEOUT_MS. */
+function getLLMTimeoutMs(): number {
+  const raw = parseInt(process.env.OMP_LLM_TIMEOUT_MS || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+}
+
+/**
+ * fetch() with an AbortController-based timeout so a hung provider cannot stall
+ * scheduled/batch jobs indefinitely.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const timeoutMs = getLLMTimeoutMs();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`LLM request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Models that use reasoning tokens and require max_completion_tokens instead of max_tokens */
 const REASONING_MODEL_PATTERNS = [
   /^o[1-9]/, // OpenAI o1, o3, o4-mini, etc.
@@ -148,7 +177,7 @@ async function callAnthropic(
     body.system = systemMsg.content;
   }
 
-  const res = await fetch(cfg.baseUrl || "https://api.anthropic.com/v1/messages", {
+  const res = await fetchWithTimeout(cfg.baseUrl || "https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -216,7 +245,7 @@ async function callOpenAICompatible(
 ): Promise<LLMResponse> {
   const baseUrl = cfg.baseUrl || "https://api.openai.com/v1";
 
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+  const res = await fetchWithTimeout(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -255,7 +284,7 @@ async function callAzureOpenAI(
   const body = buildOpenAIBody(messages, cfg);
   delete body.model; // Azure uses deployment name in URL, not body
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -309,7 +338,7 @@ async function callGemini(
 
   const url = `${baseUrl.replace(/\/$/, "")}/models/${model}:generateContent?key=${cfg.apiKey}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

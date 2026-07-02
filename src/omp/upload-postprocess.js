@@ -1,4 +1,4 @@
-const { redactText } = require("./redact");
+const { redactText, redactValue } = require("./redact");
 
 function countWords(text) {
   if (!text) return 0;
@@ -25,7 +25,20 @@ function redactSecrets(record, ctx) {
       ? redactText(record.response_text, options).text
       : record.response_text;
 
-  return { ...record, prompt_text: prompt, response_text: response };
+  const next = { ...record, prompt_text: prompt, response_text: response };
+
+  // Tool inputs (Bash commands, Edit file contents, WebFetch bodies, …) can
+  // carry secrets too. Scrub them before upload so redaction covers the full
+  // record, not just prompt_text/response_text.
+  if (Array.isArray(record.tools) && record.tools.length > 0) {
+    next.tools = record.tools.map((tool) =>
+      tool && tool.input != null
+        ? { ...tool, input: redactValue(tool.input, options) }
+        : tool
+    );
+  }
+
+  return next;
 }
 
 function recomputeStats(record) {
