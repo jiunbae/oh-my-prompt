@@ -44,6 +44,30 @@ services:
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET must be set — generate with openssl rand -hex 32}"
       NODE_ENV: production
+      # Enqueue scheduled work / webhook retries to BullMQ (run by the worker).
+      QUEUE_ENABLED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # BullMQ worker: runs scheduled extension jobs and webhook retries off the
+  # web request thread. Same image as `app`, different entrypoint. Self-schedules
+  # via BullMQ repeatables, so no external cron is needed.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: prompt-worker
+    restart: unless-stopped
+    entrypoint: ["node", "dist/worker.cjs"]
+    environment:
+      DATABASE_URL: postgresql://prompt:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/prompts
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET must be set — generate with openssl rand -hex 32}"
+      NODE_ENV: production
+      QUEUE_ENABLED: "true"
     depends_on:
       db:
         condition: service_healthy

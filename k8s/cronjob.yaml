@@ -42,49 +42,8 @@ spec:
                 memory: "64Mi"
                 cpu: "50m"
           restartPolicy: Never
----
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: oh-my-prompt-scheduler
-  namespace: oh-my-prompt
-spec:
-  # Triggers due scheduled jobs. Runs frequently; the endpoint is a cheap no-op
-  # when nothing is due.
-  schedule: "*/5 * * * *"
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
-  jobTemplate:
-    spec:
-      backoffLimit: 1
-      template:
-        spec:
-          containers:
-          - name: scheduler
-            image: curlimages/curl:8.11.0
-            env:
-            - name: SCHEDULER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: oh-my-prompt-secrets
-                  key: SCHEDULER_TOKEN
-            command:
-            - /bin/sh
-            - -c
-            - |
-              curl -X POST \
-                "http://oh-my-prompt-service.oh-my-prompt.svc.cluster.local/api/admin/scheduled-jobs/run" \
-                -H "Content-Type: application/json" \
-                -H "Authorization: Bearer ${SCHEDULER_TOKEN}" \
-                --fail \
-                --silent \
-                --show-error
-            resources:
-              requests:
-                memory: "32Mi"
-                cpu: "10m"
-              limits:
-                memory: "64Mi"
-                cpu: "50m"
-          restartPolicy: Never
+# NOTE: The scheduled-jobs poke CronJob was removed — the worker Deployment
+# (k8s/worker.yaml) self-schedules extension jobs via BullMQ repeatables, so no
+# external per-minute trigger is needed. The manual trigger endpoint
+# (POST /api/admin/scheduled-jobs/run, SCHEDULER_TOKEN) still exists for ad-hoc
+# runs.

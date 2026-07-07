@@ -10,6 +10,7 @@ resources:
   - redis.yaml
   - postgres.yaml
   - deployment.yaml
+  - worker.yaml
   - service.yaml
   - ingress.yaml
   - cronjob.yaml

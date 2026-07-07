@@ -19,6 +19,9 @@ COPY . .
 ENV SKIP_ENV_VALIDATION=true
 RUN pnpm build
 
+# Bundle the BullMQ worker into a single self-contained file (dist/worker.cjs).
+RUN pnpm build:worker
+
 # Production stage
 FROM registry.jiun.dev/library/node:22-alpine AS runner
 
@@ -39,6 +42,11 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/scripts/migrate.js ./migrate.js
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./docker-entrypoint.sh
+
+# Copy the self-contained worker bundle. The same image runs either the web
+# server (default entrypoint) or the worker (entrypoint overridden to
+# `node dist/worker.cjs` in compose / k8s).
+COPY --from=builder /app/dist ./dist
 
 # Copy postgres driver from builder (needed for migration script)
 COPY --from=builder /app/node_modules/.pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres

@@ -127,11 +127,45 @@ export interface ScheduledJobResult {
   error?: string;
 }
 
+/** True when the extension for `jobName` operates on a single user's data. */
+export function isPerUserJob(jobName: string): boolean {
+  const ext = extensions.find((e) => e.processor?.jobName === jobName);
+  return !!ext && PER_USER_EXTENSION_NAMES.has(ext.name);
+}
+
+/**
+ * Run exactly one processor invocation (no fan-out) — the unit of work the
+ * BullMQ `run` job executes, and the single-invocation branch of the inline
+ * scheduler. For a per-user processor `userId` targets that user; for a global
+ * processor `userId` is ignored (pass "").
+ */
+export async function runSingleProcessor(
+  jobName: string,
+  input?: { userId?: string; dateRange?: { from: string; to: string } },
+): Promise<ScheduledJobResult> {
+  const ext = extensions.find((e) => e.processor?.jobName === jobName);
+  if (!ext || !ext.processor) {
+    return { jobName, ran: false, error: "Extension or processor not found" };
+  }
+  const processor = ext.processor as ExtensionProcessor;
+  const defaultRange = getLastNDaysRange(processor.defaultRangeDays ?? 7);
+  const dateRange = input?.dateRange || {
+    from: defaultRange.fromKey,
+    to: defaultRange.toKey,
+  };
+  await processor.handler({
+    userId: input?.userId ?? "",
+    dateRange,
+    parameters: {},
+  });
+  return { jobName, ran: true };
+}
+
 /**
  * Query the distinct set of real user IDs that have prompt data. Used to fan a
  * per-user scheduled processor out across the whole user base.
  */
-async function getDistinctUserIds(): Promise<string[]> {
+export async function getDistinctUserIds(): Promise<string[]> {
   const rows = await db
     .selectDistinct({ userId: schema.prompts.userId })
     .from(schema.prompts)

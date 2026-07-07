@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { requireAdmin, AuthError } from "@/lib/with-auth";
 import { runDueScheduledJobs, runScheduledJob } from "@/lib/scheduler";
+import { QUEUE_ENABLED, enqueueDispatch, enqueueRun, firingBucket } from "@/lib/queue";
+import { env } from "@/env";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
 
@@ -26,7 +28,7 @@ function safeEqual(a: string, b: string): boolean {
  * Throws AuthError if neither path succeeds.
  */
 async function authorizeTrigger(request: NextRequest): Promise<void> {
-  const expected = process.env.SCHEDULER_TOKEN;
+  const expected = env.SCHEDULER_TOKEN;
   if (expected) {
     const authHeader = request.headers.get("authorization");
     const bearer = authHeader?.toLowerCase().startsWith("bearer ")
@@ -82,6 +84,17 @@ export async function POST(request: NextRequest) {
       const { jobName, userId } = parseResult.data;
       logger.info({ jobName, userId }, "Manually triggering scheduled job");
 
+      // With a worker running, enqueue instead of executing inline so the work
+      // runs off the request thread with idempotency and retries.
+      if (QUEUE_ENABLED) {
+        if (userId) {
+          await enqueueRun({ jobName, userId }, firingBucket());
+        } else {
+          await enqueueDispatch(jobName);
+        }
+        return NextResponse.json({ success: true, enqueued: true, jobName });
+      }
+
       const result = await runScheduledJob(jobName, userId ? { userId } : undefined);
 
       if (result.ran) {
@@ -94,7 +107,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Mode 2: Run all due jobs based on current time
+    // Mode 2: Run all due jobs based on current time. When a worker is running
+    // it self-schedules via BullMQ repeatables, so this manual sweep is only
+    // used in the inline (no-worker) fallback.
+    if (QUEUE_ENABLED) {
+      return NextResponse.json({
+        success: true,
+        enqueued: false,
+        message: "Worker is enabled; scheduled jobs run via BullMQ repeatables.",
+      });
+    }
+
     const results = await runDueScheduledJobs();
 
     return NextResponse.json({

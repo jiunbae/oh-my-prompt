@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { env } from "@/env";
+import { QUEUE_ENABLED, enqueueWebhookDelivery } from "@/lib/queue";
 
 /**
  * Exponential backoff intervals for webhook retries (in milliseconds).
@@ -211,6 +212,23 @@ export async function scheduleRetry(
     return null;
   }
 
+  const delayMs = getBackoffDelayMs(nextAttempt);
+
+  // Durable path: enqueue a delayed BullMQ job so the retry survives restarts
+  // and runs in the worker instead of an in-memory timer.
+  if (QUEUE_ENABLED) {
+    await enqueueWebhookDelivery(
+      { webhookId, event, payload, attempt: nextAttempt, retryOfLogId },
+      delayMs,
+    );
+    logger.info(
+      { webhookId, attempt: nextAttempt, delayMs, retryOfLogId },
+      "Webhook retry enqueued",
+    );
+    return nextAttempt;
+  }
+
+  // Fallback path (no worker): in-memory setTimeout, lost on restart.
   const key = retryKey(webhookId, retryOfLogId, nextAttempt);
 
   // Don't schedule duplicate retries
@@ -218,45 +236,11 @@ export async function scheduleRetry(
     return nextAttempt;
   }
 
-  const delayMs = getBackoffDelayMs(nextAttempt);
   const now = Date.now();
 
-  const timerId = setTimeout(async () => {
+  const timerId = setTimeout(() => {
     retryQueue.delete(key);
-
-    // Re-check webhook is still active at execution time
-    const [w] = await db
-      .select({ isActive: schema.webhooks.isActive, url: schema.webhooks.url, secret: schema.webhooks.secret })
-      .from(schema.webhooks)
-      .where(eq(schema.webhooks.id, webhookId))
-      .limit(1);
-
-    if (!w || !w.isActive) {
-      logger.info({ webhookId, attempt: nextAttempt }, "Webhook inactive at retry time, aborting");
-      return;
-    }
-
-    logger.info(
-      { webhookId, attempt: nextAttempt, retryOfLogId },
-      "Executing webhook retry"
-    );
-
-    const result = await executeWebhookDelivery({
-      webhookId,
-      url: w.url,
-      secret: w.secret,
-      event,
-      payload,
-      attempt: nextAttempt,
-      retryOfLogId,
-    });
-
-    if (!result.success) {
-      // Schedule next retry, pointing to the original log entry for traceability
-      await scheduleRetry(webhookId, w.url, w.secret, event, payload, nextAttempt, retryOfLogId);
-    } else {
-      logger.info({ webhookId, attempt: nextAttempt }, "Webhook retry succeeded");
-    }
+    void runWebhookRetryAttempt({ webhookId, event, payload, attempt: nextAttempt, retryOfLogId });
   }, delayMs);
 
   retryQueue.set(key, {
@@ -276,6 +260,51 @@ export async function scheduleRetry(
   );
 
   return nextAttempt;
+}
+
+/**
+ * Execute one scheduled retry attempt: re-check the webhook is still active,
+ * deliver, and on failure schedule the next attempt. Called by the in-memory
+ * timer (fallback) and by the BullMQ webhook worker (durable path).
+ */
+export async function runWebhookRetryAttempt(params: {
+  webhookId: string;
+  event: string;
+  payload: Record<string, unknown>;
+  attempt: number;
+  retryOfLogId: string;
+}): Promise<void> {
+  const { webhookId, event, payload, attempt, retryOfLogId } = params;
+
+  const [w] = await db
+    .select({ isActive: schema.webhooks.isActive, url: schema.webhooks.url, secret: schema.webhooks.secret })
+    .from(schema.webhooks)
+    .where(eq(schema.webhooks.id, webhookId))
+    .limit(1);
+
+  if (!w || !w.isActive) {
+    logger.info({ webhookId, attempt }, "Webhook inactive at retry time, aborting");
+    return;
+  }
+
+  logger.info({ webhookId, attempt, retryOfLogId }, "Executing webhook retry");
+
+  const result = await executeWebhookDelivery({
+    webhookId,
+    url: w.url,
+    secret: w.secret,
+    event,
+    payload,
+    attempt,
+    retryOfLogId,
+  });
+
+  if (!result.success) {
+    // Schedule next retry, pointing to the original log entry for traceability.
+    await scheduleRetry(webhookId, w.url, w.secret, event, payload, attempt, retryOfLogId);
+  } else {
+    logger.info({ webhookId, attempt }, "Webhook retry succeeded");
+  }
 }
 
 /**

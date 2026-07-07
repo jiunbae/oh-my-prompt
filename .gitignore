@@ -56,3 +56,6 @@ docker-compose.override.yml
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# worker bundle
+/dist

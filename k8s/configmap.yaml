@@ -7,3 +7,6 @@ data:
   REDIS_URL: "redis://redis:6379"
   NEXT_PUBLIC_APP_URL: "https://prompt.jiun.dev"
   NODE_ENV: "production"
+  # Enqueue scheduled work / webhook retries to BullMQ (consumed by the worker
+  # Deployment). The web pods enqueue; the worker executes.
+  QUEUE_ENABLED: "true"

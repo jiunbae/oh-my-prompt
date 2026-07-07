@@ -17,6 +17,11 @@ export const env = createEnv({
     REDIS_URL: z.string().url().default("redis://localhost:6379"),
     SESSION_SECRET: z.string().min(16, "SESSION_SECRET must be at least 16 characters"),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    // Background jobs: when "true", scheduled work and webhook retries are
+    // enqueued to BullMQ and executed by the worker process instead of inline.
+    QUEUE_ENABLED: z.enum(["true", "false"]).default("false"),
+    // Token that lets a system cron / k8s CronJob trigger scheduled jobs.
+    SCHEDULER_TOKEN: z.string().optional(),
     // Upload redaction
     OMP_UPLOAD_REDACT_ENABLED: z.string().default("true"),
     OMP_UPLOAD_REDACT_MASK: z.string().default("[REDACTED]"),
@@ -56,6 +61,8 @@ export const env = createEnv({
     REDIS_URL: process.env.REDIS_URL,
     SESSION_SECRET: process.env.SESSION_SECRET ?? testDefaults.SESSION_SECRET,
     NODE_ENV: process.env.NODE_ENV,
+    QUEUE_ENABLED: process.env.QUEUE_ENABLED,
+    SCHEDULER_TOKEN: process.env.SCHEDULER_TOKEN,
     OMP_UPLOAD_REDACT_ENABLED: process.env.OMP_UPLOAD_REDACT_ENABLED,
     OMP_UPLOAD_REDACT_MASK: process.env.OMP_UPLOAD_REDACT_MASK,
     OMP_MAX_BODY_SIZE_MB: process.env.OMP_MAX_BODY_SIZE_MB,

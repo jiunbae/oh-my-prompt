@@ -36,3 +36,6 @@ jobs:
         run: pnpm build
         env:
           SKIP_ENV_VALIDATION: "true"
+
+      - name: Build worker bundle
+        run: pnpm build:worker

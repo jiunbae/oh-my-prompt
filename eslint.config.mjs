@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Generated / vendored CLI bundle output.
     "packages/omp-cli/lib/**",
+    // Generated worker bundle.
+    "dist/**",
   ]),
   // The CLI (src/omp), build/maintenance scripts, and the published CLI package
   // are plain CommonJS Node code that legitimately uses `require`. Treat them as
