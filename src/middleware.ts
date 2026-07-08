@@ -96,11 +96,12 @@ const publicRoutes = [
   "/reset-password",
   "/share",
   "/api/share",
+  "/api/health",
   "/api/locale", // language switcher must work on /login (pre-auth)
 ];
 
 // Routes that accept alternative authentication (X-User-Token header)
-const tokenAuthRoutes = ["/api/sync"];
+const tokenAuthRoutes = ["/api/sync", "/api/auth/me"];
 
 /**
  * Prefix match that respects path segment boundaries so that, e.g., `/login`
