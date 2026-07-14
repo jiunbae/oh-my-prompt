@@ -880,8 +880,13 @@ function hasOpenCodePlugin(pluginEntries, scriptPath) {
 }
 
 function buildNotifyLine(cmdArray) {
-  // Codex config.toml expects notify as a string command
-  return `"${cmdArray.join(" ")}"`;
+  // Codex config.toml expects `notify` as an array of argv tokens — the program
+  // plus each argument, e.g. notify = ["node", "/path/notify.js"]. Codex spawns
+  // that program with the event JSON appended as the final argument (which the
+  // notify script reads from process.argv[2]). A quoted string is rejected by
+  // Codex's config parser, so a string-valued notify never fires the hook.
+  const arr = Array.isArray(cmdArray) ? cmdArray : [cmdArray];
+  return `[${arr.map((token) => JSON.stringify(String(token))).join(", ")}]`;
 }
 
 function opencodePluginScript() {

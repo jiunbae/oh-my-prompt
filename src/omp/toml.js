@@ -73,11 +73,20 @@ function setTomlLine(content, key, valueLine, marker) {
     next.splice(info.index, info.endIndex - info.index + 1, `${key} = ${valueLine}`);
     return next.join("\n");
   }
-  const trimmed = content.trimEnd();
+  // Key absent: a bare top-level key must appear before the first TOML table
+  // header ([section] or [[array.of.tables]]). Appending at EOF would nest it
+  // under the last table, so it would no longer be a top-level key. Insert it
+  // just before the first header; fall back to EOF only when there is none.
   const markerLine = marker ? `${marker}\n` : "";
-  return trimmed
-    ? `${trimmed}\n\n${markerLine}${key} = ${valueLine}\n`
-    : `${key} = ${valueLine}\n`;
+  const entry = `${markerLine}${key} = ${valueLine}`;
+  const headerIndex = lines.findIndex((line) => /^\s*\[/.test(line.split("#")[0]));
+  if (headerIndex === -1) {
+    const trimmed = content.trimEnd();
+    return trimmed ? `${trimmed}\n\n${entry}\n` : `${entry}\n`;
+  }
+  const next = [...lines];
+  next.splice(headerIndex, 0, entry, "");
+  return next.join("\n");
 }
 
 function removeTomlLine(content, key) {
