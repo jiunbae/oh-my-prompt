@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.715.1] - 2026-07-15
+
+### Performance
+- Parallelize transcript parsing with a worker pool for faster ingest/backfill on large histories
+- Push stats aggregations down into SQL instead of computing them in JS
+- Index the dedup hot path and restore FTS4 word-level search
+
+### Fixed
+- Atomic SQLite writes and fail-fast on legacy FTS5 databases to prevent corruption
+- Capture Codex activity via array-form top-level `notify` hook
+- Harden security, background-job, capture, and DB audit paths
+
 ## [2026.514.1] - 2026-05-14
 
 ### Added
