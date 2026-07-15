@@ -5,6 +5,7 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { rateLimiters } from "@/lib/rate-limit";
 import { logger } from "@/lib/logger";
 import { eq, and, isNull, gte, desc } from "drizzle-orm";
+import { teamPromptViewConditionForMember } from "@/lib/team-access";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,7 @@ export async function GET(
       .where(
         and(
           eq(prompts.teamId, id),
+          teamPromptViewConditionForMember(session.userId),
           isNull(prompts.deletedAt)
         )
       )
@@ -137,6 +139,7 @@ export async function GET(
               .where(
                 and(
                   eq(prompts.teamId, id),
+                  teamPromptViewConditionForMember(session.userId),
                   isNull(prompts.deletedAt),
                   gte(prompts.timestamp, new Date(lastSentAt.getTime() + 1)) // avoid re-sending exact same
                 )

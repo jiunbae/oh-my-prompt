@@ -3,10 +3,11 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { validateWebhookUrl } from "@/services/webhook";
 import { VALID_INTEGRATION_EVENTS } from "./shared";
+import { canManageTeam } from "@/lib/team-access";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +33,18 @@ export async function GET(request: NextRequest) {
 
     let conditions;
     if (teamId) {
-      conditions = and(
-        eq(schema.outgoingIntegrations.teamId, teamId),
-        eq(schema.outgoingIntegrations.userId, session.userId)
-      );
+      if (!z.string().uuid().safeParse(teamId).success) {
+        return NextResponse.json({ error: "Invalid teamId" }, { status: 400 });
+      }
+      if (!(await canManageTeam(session.userId, teamId))) {
+        return NextResponse.json({ error: "Team management access required" }, { status: 403 });
+      }
+      conditions = eq(schema.outgoingIntegrations.teamId, teamId);
     } else {
-      conditions = eq(schema.outgoingIntegrations.userId, session.userId);
+      conditions = and(
+        eq(schema.outgoingIntegrations.userId, session.userId),
+        isNull(schema.outgoingIntegrations.teamId)
+      );
     }
 
     const integrations = await db
@@ -98,6 +105,16 @@ export async function POST(request: NextRequest) {
 
     const { name, provider, webhookUrl, secret, events, teamId } = parseResult.data;
 
+    // Team integrations can export team metadata, so only current team
+    // owner/admin users may configure them. Check before resolving the supplied
+    // webhook URL so unauthorized members cannot use validation as a probe.
+    if (teamId && !(await canManageTeam(session.userId, teamId))) {
+      return NextResponse.json(
+        { error: "Team management access required" },
+        { status: 403 }
+      );
+    }
+
     // Validate webhook URL is HTTPS
     const urlCheck = await validateWebhookUrl(webhookUrl);
     if (!urlCheck.valid) {
@@ -112,27 +129,6 @@ export async function POST(request: NextRequest) {
         { error: "Webhook URL must use HTTPS" },
         { status: 400 }
       );
-    }
-
-    // If teamId is provided, verify user is a member
-    if (teamId) {
-      const [membership] = await db
-        .select({ role: schema.teamMembers.role })
-        .from(schema.teamMembers)
-        .where(
-          and(
-            eq(schema.teamMembers.teamId, teamId),
-            eq(schema.teamMembers.userId, session.userId)
-          )
-        )
-        .limit(1);
-
-      if (!membership) {
-        return NextResponse.json(
-          { error: "Not a member of this team" },
-          { status: 403 }
-        );
-      }
     }
 
     const [integration] = await db

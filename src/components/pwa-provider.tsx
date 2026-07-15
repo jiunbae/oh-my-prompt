@@ -21,7 +21,6 @@ interface PwaContextValue {
   isInstalled: boolean;
   installPrompt: () => Promise<void>;
   swRegistration: ServiceWorkerRegistration | null;
-  syncComplete: boolean;
 }
 
 const PwaContext = createContext<PwaContextValue>({
@@ -30,7 +29,6 @@ const PwaContext = createContext<PwaContextValue>({
   isInstalled: false,
   installPrompt: async () => {},
   swRegistration: null,
-  syncComplete: false,
 });
 
 export function usePwaContext() {
@@ -43,11 +41,22 @@ export function PwaProvider({ children }: { children: ReactNode }) {
   const [isInstalled, setIsInstalled] = useState(false);
   const [swRegistration, setSwRegistration] =
     useState<ServiceWorkerRegistration | null>(null);
-  const [syncComplete, setSyncComplete] = useState(false);
   const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    let active = true;
+
+    // Keep the server and initial client render identical, then synchronize
+    // browser-only state after hydration.
+    queueMicrotask(() => {
+      if (!active) return;
+      setIsOffline(!navigator.onLine);
+      setIsInstalled(
+        window.matchMedia("(display-mode: standalone)").matches ||
+          ((window.navigator as unknown as { standalone?: boolean }).standalone === true),
+      );
+    });
 
     // Register service worker
     if ("serviceWorker" in navigator) {
@@ -62,23 +71,9 @@ export function PwaProvider({ children }: { children: ReactNode }) {
         });
     }
 
-    // Check initial online status
-    setIsOffline(!navigator.onLine);
-
-    // Check if already installed
-    const isStandalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      ((window.navigator as unknown as { standalone?: boolean }).standalone ===
-        true);
-    setIsInstalled(isStandalone);
-
     // Online/offline listeners
     const handleOnline = () => {
       setIsOffline(false);
-      // Trigger background sync if available
-      if (swRegistration && "sync" in swRegistration) {
-        (swRegistration as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register("omp-sync").catch(() => {});
-      }
     };
     const handleOffline = () => setIsOffline(true);
 
@@ -117,14 +112,11 @@ export function PwaProvider({ children }: { children: ReactNode }) {
       if (e.data?.type === "offline-status") {
         setIsOffline(e.data.data?.isOffline ?? false);
       }
-      if (e.data?.type === "sync-complete") {
-        setSyncComplete(true);
-        setTimeout(() => setSyncComplete(false), 3000);
-      }
     };
     navigator.serviceWorker?.addEventListener("message", handleSwMessage);
 
     return () => {
+      active = false;
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener(
@@ -139,7 +131,7 @@ export function PwaProvider({ children }: { children: ReactNode }) {
         mediaQuery.removeListener(handleDisplayChange as EventListener);
       }
     };
-  }, [swRegistration]);
+  }, []);
 
   const installPrompt = useCallback(async () => {
     const deferredPrompt = deferredPromptRef.current;
@@ -162,7 +154,6 @@ export function PwaProvider({ children }: { children: ReactNode }) {
         isInstalled,
         installPrompt,
         swRegistration,
-        syncComplete,
       }}
     >
       {children}

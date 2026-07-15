@@ -25,6 +25,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -38,7 +41,9 @@ services:
     container_name: prompt-app
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://prompt:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/prompts
       REDIS_URL: redis://redis:6379
@@ -62,6 +67,8 @@ services:
     container_name: prompt-worker
     restart: unless-stopped
     entrypoint: ["node", "dist/worker.cjs"]
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://prompt:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/prompts
       REDIS_URL: redis://redis:6379
@@ -76,3 +83,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

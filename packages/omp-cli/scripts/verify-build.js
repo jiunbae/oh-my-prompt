@@ -17,6 +17,20 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+// A file existing in lib/ is not enough: stale generated output can silently
+// ship older sync or storage logic. Verify byte-for-byte freshness against the
+// canonical src/omp sources.
+const stale = requiredFiles.filter((file) => {
+  const source = fs.readFileSync(path.join(srcDir, file));
+  const built = fs.readFileSync(path.join(libDir, file));
+  return !source.equals(built);
+});
+if (stale.length > 0) {
+  console.error('❌ Stale generated files in lib/:', stale);
+  console.error('  Run pnpm build:cli before publishing.');
+  process.exit(1);
+}
+
 // Check bin/omp is executable
 try {
   fs.accessSync(binFile, fs.constants.X_OK);

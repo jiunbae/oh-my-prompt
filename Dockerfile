@@ -4,7 +4,7 @@ FROM registry.jiun.dev/library/node:22-alpine AS builder
 WORKDIR /app
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
 # Copy package files
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -21,6 +21,11 @@ RUN pnpm build
 
 # Bundle the BullMQ worker into a single self-contained file (dist/worker.cjs).
 RUN pnpm build:worker
+
+# Stage the migration driver's pnpm-versioned path at a stable location for
+# the production image. This avoids hard-coding a package-store version.
+RUN mkdir -p /tmp/migration-node-modules && \
+    cp -R node_modules/.pnpm/postgres@*/node_modules/postgres /tmp/migration-node-modules/postgres
 
 # Production stage
 FROM registry.jiun.dev/library/node:22-alpine AS runner
@@ -49,7 +54,7 @@ COPY --from=builder /app/scripts/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=builder /app/dist ./dist
 
 # Copy postgres driver from builder (needed for migration script)
-COPY --from=builder /app/node_modules/.pnpm/postgres@3.4.8/node_modules/postgres ./node_modules/postgres
+COPY --from=builder /tmp/migration-node-modules/postgres ./node_modules/postgres
 
 RUN chmod +x ./docker-entrypoint.sh && \
     chown -R nextjs:nodejs /app

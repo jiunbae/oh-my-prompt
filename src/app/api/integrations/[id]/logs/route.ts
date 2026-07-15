@@ -3,7 +3,8 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
+import { canManageOutgoingIntegration } from "@/lib/team-access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,19 +21,7 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get("limit") || "20", 10), 100);
 
-    // Verify the integration belongs to the user
-    const [integration] = await db
-      .select({ id: schema.outgoingIntegrations.id })
-      .from(schema.outgoingIntegrations)
-      .where(
-        and(
-          eq(schema.outgoingIntegrations.id, id),
-          eq(schema.outgoingIntegrations.userId, session.userId)
-        )
-      )
-      .limit(1);
-
-    if (!integration) {
+    if (!(await canManageOutgoingIntegration(session.userId, id))) {
       return NextResponse.json({ error: "Integration not found" }, { status: 404 });
     }
 

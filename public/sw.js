@@ -1,32 +1,18 @@
 /**
  * Oh My Prompt — Service Worker
- * Cache-first for static assets, network-first for API calls.
+ * Cache only public static assets. Authenticated HTML and API responses are
+ * intentionally network-only so data cannot leak between accounts.
  */
 
-const STATIC_CACHE = "omp-static-v1";
-const API_CACHE = "omp-api-cache";
+const STATIC_CACHE = "omp-static-v2";
 const OFFLINE_PAGE = "/offline.html";
 
 // Critical static assets to pre-cache
 const STATIC_ASSETS = [
-  "/",
-  "/dashboard",
   "/offline.html",
   "/manifest.json",
   "/icon.svg",
   "/logo-dark.svg",
-];
-
-// API route prefixes that should use network-first strategy
-const API_ROUTES = [
-  "/api/prompts",
-  "/api/sessions",
-  "/api/search",
-  "/api/analytics",
-  "/api/insights",
-  "/api/templates",
-  "/api/user",
-  "/api/teams",
 ];
 
 // Install: pre-cache critical assets
@@ -46,9 +32,10 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((name) => {
-          if (name !== STATIC_CACHE && name !== API_CACHE) {
+          if (name !== STATIC_CACHE && name.startsWith("omp-")) {
             return caches.delete(name);
           }
+          return Promise.resolve(false);
         })
       );
     }).then(() => {
@@ -57,19 +44,9 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-/**
- * Check if a URL is an API route we should cache.
- */
-function isApiRoute(url) {
-  return API_ROUTES.some((route) => url.pathname.startsWith(route));
-}
-
-/**
- * Check if a request is for a static asset (JS, CSS, fonts, images).
- */
+/** Check if a URL belongs to the explicitly public static asset set. */
 function isStaticAsset(url) {
-  const staticExts = [".js", ".css", ".woff", ".woff2", ".png", ".jpg", ".svg", ".ico"];
-  return staticExts.some((ext) => url.pathname.endsWith(ext));
+  return url.pathname.startsWith("/_next/static/") || STATIC_ASSETS.includes(url.pathname);
 }
 
 /**
@@ -87,7 +64,7 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests for caching (except API POSTs handled by bg sync)
+  // Never intercept mutations.
   if (request.method !== "GET") {
     return;
   }
@@ -97,41 +74,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // API routes: network first, cache fallback
-  if (isApiRoute(url)) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(API_CACHE).then((cache) => {
-              cache.put(request, clone);
-            });
-          }
-          return response;
-        })
-        .catch(() => {
-          return caches.match(request).then((cached) => {
-            if (cached) {
-              return cached;
-            }
-            return new Response(
-              JSON.stringify({ error: "Offline — no cached data available" }),
-              {
-                status: 503,
-                headers: { "Content-Type": "application/json" },
-              }
-            );
-          });
-        })
-    );
+  // Authenticated API responses are network-only and never enter Cache Storage.
+  if (url.pathname.startsWith("/api/")) {
     return;
   }
 
   // Static assets: cache first, network fallback
-  if (isStaticAsset(url) || STATIC_ASSETS.includes(url.pathname)) {
+  if (isStaticAsset(url)) {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      caches.open(STATIC_CACHE).then((cache) => cache.match(request).then((cached) => {
         if (cached) {
           // Revalidate in background
           fetch(request).then((response) => {
@@ -146,13 +97,11 @@ self.addEventListener("fetch", (event) => {
         return fetch(request).then((response) => {
           if (response.ok) {
             const clone = response.clone();
-            caches.open(STATIC_CACHE).then((cache) => {
-              cache.put(request, clone);
-            });
+            cache.put(request, clone);
           }
           return response;
         });
-      })
+      }))
     );
     return;
   }
@@ -165,11 +114,8 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => {
-          return caches.match(request).then((cached) => {
-            if (cached) {
-              return cached;
-            }
-            return caches.match(OFFLINE_PAGE).then((offline) => {
+          return caches.open(STATIC_CACHE).then((cache) =>
+            cache.match(OFFLINE_PAGE).then((offline) => {
               if (offline) {
                 return offline;
               }
@@ -177,27 +123,14 @@ self.addEventListener("fetch", (event) => {
                 status: 503,
                 headers: { "Content-Type": "text/plain" },
               });
-            });
-          });
+            }),
+          );
         })
     );
     return;
   }
 
-  // Default: network with simple cache fallback
-  event.respondWith(
-    fetch(request).catch(() => caches.match(request))
-  );
-});
-
-// Background sync for offline API calls
-self.addEventListener("sync", (event) => {
-  if (event.tag === "omp-sync") {
-    event.waitUntil(
-      // Replay queued requests if any
-      broadcastMessage("sync-complete", { timestamp: Date.now() })
-    );
-  }
+  // All other requests use normal browser networking without cache fallback.
 });
 
 // Listen for messages from clients
@@ -208,5 +141,16 @@ self.addEventListener("message", (event) => {
   }
   if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting();
+  }
+  if (event.data && event.data.type === "PURGE_PRIVATE_CACHES") {
+    event.waitUntil(
+      caches.keys().then((names) =>
+        Promise.all(
+          names
+            .filter((name) => name !== STATIC_CACHE && name.startsWith("omp-"))
+            .map((name) => caches.delete(name)),
+        ),
+      ),
+    );
   }
 });

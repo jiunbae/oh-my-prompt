@@ -5,7 +5,12 @@ import { env } from "@/env";
 
 const SALT_ROUNDS = 12;
 const EFFECTIVE_SECRET = env.SESSION_SECRET;
-if (!EFFECTIVE_SECRET && process.env.NODE_ENV === "production" && typeof window === "undefined") {
+if (
+  !EFFECTIVE_SECRET &&
+  process.env.NODE_ENV === "production" &&
+  process.env.SKIP_ENV_VALIDATION !== "true" &&
+  typeof window === "undefined"
+) {
   logger.warn("SESSION_SECRET is not set — sessions will not work");
 }
 
@@ -37,7 +42,6 @@ export async function verifyPassword(
 export interface SessionPayload {
   userId: string;
   email: string;
-  token: string; // User's API token
   isAdmin: boolean;
   iat: number; // Issued-at timestamp (ms since epoch)
 }
@@ -53,6 +57,7 @@ export function createSessionToken(payload: Omit<SessionPayload, "iat">): string
   }
   const data = JSON.stringify({
     ...payload,
+    v: 2,
     iat: Date.now(),
   });
   const encoded = Buffer.from(data).toString("base64url");
@@ -93,7 +98,9 @@ export function parseSessionToken(token: string): SessionPayload | null {
     const data = Buffer.from(encoded, "base64url").toString("utf-8");
     const parsed = JSON.parse(data);
 
-    if (!parsed.userId || !parsed.email || !parsed.token) {
+    // Version 1 cookies contained the raw API token. Reject them so the
+    // credential is removed from the browser as soon as this release deploys.
+    if (parsed.v !== 2 || !parsed.userId || !parsed.email) {
       return null;
     }
 
@@ -104,7 +111,6 @@ export function parseSessionToken(token: string): SessionPayload | null {
     return {
       userId: parsed.userId,
       email: parsed.email,
-      token: parsed.token,
       isAdmin: parsed.isAdmin ?? false,
       iat: parsed.iat,
     };

@@ -17,7 +17,7 @@ export default async function DashboardLayout({
         {tCommon("skipToContent")}
       </a>
       <KeyboardShortcuts />
-      <div className="flex h-screen flex-col md:flex-row">
+      <div className="flex h-dvh flex-col md:flex-row">
         <Sidebar />
         <div className="flex-1 flex flex-col min-h-0">
           <MobileHeader />

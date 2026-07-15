@@ -229,6 +229,27 @@ const MIGRATIONS = [
       );
     },
   },
+  {
+    version: 9,
+    run: (db) => {
+      // Older clients copied the sync bearer token into every log row. The
+      // column remains for backward-compatible file schemas but is no longer
+      // written or returned by status/doctor commands.
+      db.exec("UPDATE sync_log SET user_token = NULL WHERE user_token IS NOT NULL");
+    },
+  },
+  {
+    version: 10,
+    run: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS watched_files (
+          path TEXT PRIMARY KEY,
+          hash TEXT NOT NULL,
+          processed_at TEXT NOT NULL
+        )
+      `);
+    },
+  },
 ];
 
 /**
@@ -237,7 +258,7 @@ const MIGRATIONS = [
  * "SQL logic error" on every UPDATE/DELETE, making triggers unusable.
  * Search falls back to LIKE queries which work reliably.
  */
-function createFts(_db) {
+function createFts() {
   // No-op: FTS disabled for sql.js compatibility.
   // Migration v4 drops any existing FTS tables and triggers.
 }

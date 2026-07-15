@@ -61,6 +61,7 @@ export function TeamActivityFeed({ teamId, preview = false }: TeamActivityFeedPr
   const scrollRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectRef = useRef<() => void>(() => {});
   const maxItems = preview ? 5 : 500;
 
   const connect = useCallback(() => {
@@ -105,15 +106,23 @@ export function TeamActivityFeed({ teamId, preview = false }: TeamActivityFeedPr
       if (!preview) {
         // Auto-reconnect after 3s
         reconnectTimerRef.current = setTimeout(() => {
-          connect();
+          connectRef.current();
         }, 3000);
       }
     };
   }, [teamId, preview, maxItems]);
 
   useEffect(() => {
-    connect();
+    connectRef.current = connect;
+  }, [connect]);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) connect();
+    });
     return () => {
+      active = false;
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;

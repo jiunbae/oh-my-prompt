@@ -72,7 +72,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const rl = await rateLimiters.api(userToken);
+    // Never persist the bearer credential in Redis rate-limit keys/AOF.
+    const rl = await rateLimiters.api(user.id);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Too many requests" },
@@ -162,7 +163,6 @@ export async function POST(request: NextRequest) {
     const result = await processUpload(
       typedRecords,
       user.id,
-      user.token,
       deviceId,
       teamId,
     );

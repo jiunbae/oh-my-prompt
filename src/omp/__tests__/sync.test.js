@@ -4,7 +4,8 @@ const os = require("os");
 const http = require("http");
 const { ingestPayload } = require("../ingest");
 const { syncToServer } = require("../sync");
-const { getSyncState } = require("../sync-log");
+const { getSyncState, getSyncStatus } = require("../sync-log");
+const { openDb } = require("../db");
 
 function makeTempRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-test-"));
@@ -68,8 +69,60 @@ describe("syncToServer", () => {
       await ingestPayload(payload, config);
       await syncToServer(config, { dryRun: false });
 
-      const checkpoint = getSyncState(config);
+      const checkpoint = await getSyncState(config);
       expect(checkpoint.lastSyncedAt).not.toBeNull();
+
+      const status = await getSyncStatus(config, 1);
+      expect(status.recent[0]).not.toHaveProperty("user_token");
+      const db = await openDb(dbPath);
+      expect(db.prepare("SELECT user_token FROM sync_log LIMIT 1").get().user_token).toBeNull();
+      db.close();
+    } finally {
+      server.close();
+    }
+  });
+
+  it("does not advance the checkpoint when a 207 response rejects a record", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    const { server, port } = await startMockServer((_req, res) => {
+      res.writeHead(207, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        success: false,
+        accepted: 0,
+        duplicates: 0,
+        rejected: 1,
+        errors: ["Invalid record event-1: created_at is not a valid date"],
+      }));
+    });
+
+    try {
+      const config = {
+        server: { url: `http://127.0.0.1:${port}`, token: "test-token" },
+        storage: { sqlite: { path: dbPath } },
+        capture: { response: true },
+        sync: { enabled: true, deviceId: "d1", retries: 0 },
+        queue: { maxBytes: 1024 * 1024 },
+      };
+
+      await ingestPayload(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        source: "test",
+        session_id: "s-partial",
+        role: "user",
+        text: "Must not be skipped",
+        cli_name: "test",
+      }), config);
+
+      await expect(syncToServer(config)).rejects.toThrow("Server rejected 1 record");
+
+      const checkpoint = await getSyncState(config);
+      expect(checkpoint.lastSyncedAt).toBeNull();
+      expect(checkpoint.lastSyncedId).toBeNull();
+
+      const status = await getSyncStatus(config, 1);
+      expect(status.recent[0].status).toBe("failed");
     } finally {
       server.close();
     }

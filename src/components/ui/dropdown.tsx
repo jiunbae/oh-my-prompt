@@ -50,6 +50,8 @@ interface DropdownContextValue {
   setOpen: (next: boolean) => void;
   triggerRef: React.RefObject<HTMLElement | null>;
   contentRef: React.RefObject<HTMLDivElement | null>;
+  setTriggerElement: (element: HTMLElement | null) => void;
+  setContentElement: (element: HTMLDivElement | null) => void;
   menuId: string;
   triggerId: string;
 }
@@ -80,6 +82,14 @@ function Dropdown({ children, defaultOpen = false, open: openProp, onOpenChange 
   const triggerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const baseId = useId();
+
+  const setTriggerElement = useCallback((element: HTMLElement | null) => {
+    triggerRef.current = element;
+  }, []);
+
+  const setContentElement = useCallback((element: HTMLDivElement | null) => {
+    contentRef.current = element;
+  }, []);
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -124,10 +134,12 @@ function Dropdown({ children, defaultOpen = false, open: openProp, onOpenChange 
       setOpen,
       triggerRef,
       contentRef,
+      setTriggerElement,
+      setContentElement,
       menuId: `${baseId}-menu`,
       triggerId: `${baseId}-trigger`,
     }),
-    [open, setOpen, baseId]
+    [open, setOpen, setTriggerElement, setContentElement, baseId]
   );
 
   return <DropdownContext.Provider value={ctx}>{children}</DropdownContext.Provider>;
@@ -147,7 +159,7 @@ const DropdownTrigger = forwardRef<HTMLButtonElement, DropdownTriggerProps>(
 
     const handleRef = useCallback(
       (el: HTMLElement | null) => {
-        ctx.triggerRef.current = el;
+        ctx.setTriggerElement(el);
         if (typeof forwardedRef === "function")
           forwardedRef(el as HTMLButtonElement | null);
         else if (forwardedRef)
@@ -221,7 +233,7 @@ const DropdownContent = forwardRef<HTMLDivElement, DropdownContentProps>(
 
     const handleRef = useCallback(
       (el: HTMLDivElement | null) => {
-        ctx.contentRef.current = el;
+        ctx.setContentElement(el);
         if (typeof forwardedRef === "function") forwardedRef(el);
         else if (forwardedRef)
           (forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = el;

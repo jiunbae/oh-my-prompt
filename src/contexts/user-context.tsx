@@ -15,7 +15,6 @@ export interface User {
   id: string;
   email: string;
   name?: string;
-  token: string;
   isAdmin: boolean;
 }
 
@@ -54,7 +53,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setError(data.error || "Failed to fetch user");
       }
-    } catch (err) {
+    } catch {
       setError("Failed to fetch user");
       setUser(null);
     } finally {
@@ -68,6 +67,23 @@ export function UserProvider({ children }: { children: ReactNode }) {
     } catch {
       // Proceed with logout even if the API call fails
     }
+    // Delete legacy PWA caches that may contain authenticated responses from a
+    // previous account before navigating to the public login page.
+    if (typeof caches !== "undefined") {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys
+            .filter((key) => key.startsWith("omp-") && key !== "omp-static-v2")
+            .map((key) => caches.delete(key)),
+        );
+      } catch {
+        // Logout must still complete when Cache Storage is unavailable.
+      }
+    }
+    navigator.serviceWorker?.controller?.postMessage({
+      type: "PURGE_PRIVATE_CACHES",
+    });
     setUser(null);
     window.location.href = "/login";
   }, []);

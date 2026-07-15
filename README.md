@@ -546,7 +546,7 @@ docker run -p 3000:3000 \
   -e DATABASE_URL=postgresql://user:pass@host:5432/prompts \
   -e SESSION_SECRET=$(openssl rand -hex 32) \
   -e OMP_ADMIN_EMAIL=you@email.com \
-  ghcr.io/jiunbae/oh-my-prompt:latest
+  registry.jiun.dev/oh-my-prompt:latest
 ```
 
 ### Environment Variables
@@ -554,7 +554,7 @@ docker run -p 3000:3000 \
 | Variable | Required | Default | Description |
 |:---------|:--------:|:--------|:------------|
 | `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
-| `SESSION_SECRET` | **Yes** | random | Cookie signing key (`openssl rand -hex 32`) |
+| `SESSION_SECRET` | **Yes** | — | Cookie signing key (`openssl rand -hex 32`) |
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis for caching |
 | `OMP_ADMIN_EMAIL` | No | — | Auto-seed admin email on startup |
 | `NODE_ENV` | No | `production` | Environment mode |
@@ -592,11 +592,13 @@ configured model.
 
 ### Kubernetes
 
-Example manifests in `k8s/`. Update secrets and ingress for your cluster:
+Example manifests are in `k8s/`. Update secrets and ingress, then select an
+immutable image tag before applying the Kustomize bundle:
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/
+cd k8s
+kustomize edit set image registry.jiun.dev/oh-my-prompt=registry.jiun.dev/oh-my-prompt:<git-sha>
+kubectl apply -k .
 ```
 
 ### Connect CLI to Server
@@ -640,7 +642,7 @@ oh-my-prompt/
 </tr>
 <tr>
 <td><b>CLI</b></td>
-<td>Node.js · better-sqlite3 · @clack/prompts · picocolors</td>
+<td>Node.js · sql.js · @clack/prompts · picocolors</td>
 </tr>
 <tr>
 <td><b>Infra</b></td>

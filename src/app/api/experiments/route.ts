@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, checkIsAdmin, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
         endedAt: schema.promptExperiments.endedAt,
         winnerVersion: schema.promptExperiments.winnerVersion,
         createdAt: schema.promptExperiments.createdAt,
-        promptEventKey: schema.prompts.eventKey,
+        promptProjectName: schema.prompts.projectName,
       })
       .from(schema.promptExperiments)
       .leftJoin(schema.prompts, eq(schema.promptExperiments.promptId, schema.prompts.id))

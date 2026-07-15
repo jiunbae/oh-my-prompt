@@ -1,7 +1,7 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, desc, isNull } from "drizzle-orm";
-import { checkIsAdmin, getSessionUser } from "@/lib/with-auth";
+import { getSessionUser } from "@/lib/with-auth";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,8 @@ import { SessionStoryButton } from "@/components/insights/session-story-button";
 import { SessionNameEditor } from "@/components/session-name-editor";
 import { ShareSessionButton } from "@/components/share-session-button";
 import { FavoriteSessionButton } from "@/components/favorite-session-button";
+import { teamPromptViewConditionForMember } from "@/lib/team-access";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,13 @@ function formatTokens(count: number): string {
 
 interface SessionDetailPageProps {
   params: Promise<{ sessionId: string }>;
+  searchParams: Promise<{ teamId?: string; ownerId?: string }>;
 }
+
+const teamSessionScopeSchema = z.object({
+  teamId: z.string().uuid(),
+  ownerId: z.string().uuid(),
+});
 
 function buildSessionFallbackName(
   sessionId: string,
@@ -60,16 +68,43 @@ function buildSessionFallbackName(
   return `Session ${sessionId.slice(0, 12)}`;
 }
 
-export default async function SessionDetailPage({ params }: SessionDetailPageProps) {
-  const { sessionId } = await params;
+export default async function SessionDetailPage({ params, searchParams }: SessionDetailPageProps) {
+  const [{ sessionId }, query] = await Promise.all([params, searchParams]);
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const isAdmin = await checkIsAdmin(user.userId);
+  const hasTeamScope = Boolean(query.teamId || query.ownerId);
+  const parsedTeamScope = hasTeamScope
+    ? teamSessionScopeSchema.safeParse({ teamId: query.teamId, ownerId: query.ownerId })
+    : null;
+  if (parsedTeamScope && !parsedTeamScope.success) notFound();
 
-  const sessionConditions = isAdmin
-    ? and(eq(schema.prompts.sessionId, sessionId), isNull(schema.prompts.deletedAt))
-    : and(eq(schema.prompts.userId, user.userId), eq(schema.prompts.sessionId, sessionId), isNull(schema.prompts.deletedAt));
+  const teamScope = parsedTeamScope?.success ? parsedTeamScope.data : null;
+  if (teamScope) {
+    const [membership] = await db
+      .select({ userId: schema.teamMembers.userId })
+      .from(schema.teamMembers)
+      .where(
+        and(
+          eq(schema.teamMembers.teamId, teamScope.teamId),
+          eq(schema.teamMembers.userId, user.userId),
+        ),
+      )
+      .limit(1);
+    if (!membership) notFound();
+  }
+
+  const sessionConditions = and(
+    eq(schema.prompts.sessionId, sessionId),
+    teamScope
+      ? and(
+          eq(schema.prompts.teamId, teamScope.teamId),
+          eq(schema.prompts.userId, teamScope.ownerId),
+          teamPromptViewConditionForMember(user.userId),
+        )
+      : eq(schema.prompts.userId, user.userId),
+    isNull(schema.prompts.deletedAt)
+  );
 
   const prompts = await db.query.prompts.findMany({
     where: sessionConditions,
@@ -91,7 +126,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
   const last = prompts[0]; // newest
   const sessionOwnerId = first.userId;
   const canRename = sessionOwnerId === user.userId;
-  const [displayName] = sessionOwnerId
+  const [displayName] = canRename
     ? await db
         .select({ displayName: schema.sessionDisplayNames.displayName })
         .from(schema.sessionDisplayNames)
@@ -104,34 +139,38 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         .limit(1)
     : [];
   // Check if session is favorited
-  const [favoriteRow] = await db
-    .select({ id: schema.favoriteSessions.id })
-    .from(schema.favoriteSessions)
-    .where(
-      and(
-        eq(schema.favoriteSessions.userId, user.userId),
-        eq(schema.favoriteSessions.sessionId, sessionId)
-      )
-    )
-    .limit(1);
+  const [favoriteRow] = canRename
+    ? await db
+        .select({ id: schema.favoriteSessions.id })
+        .from(schema.favoriteSessions)
+        .where(
+          and(
+            eq(schema.favoriteSessions.userId, user.userId),
+            eq(schema.favoriteSessions.sessionId, sessionId)
+          )
+        )
+        .limit(1)
+    : [];
   const isFavorited = !!favoriteRow;
 
   // Check if session has notes
-  const [noteRow] = await db
-    .select({
-      id: schema.sessionNotes.id,
-      content: schema.sessionNotes.content,
-      createdAt: schema.sessionNotes.createdAt,
-      updatedAt: schema.sessionNotes.updatedAt,
-    })
-    .from(schema.sessionNotes)
-    .where(
-      and(
-        eq(schema.sessionNotes.userId, user.userId),
-        eq(schema.sessionNotes.sessionId, sessionId)
-      )
-    )
-    .limit(1);
+  const [noteRow] = canRename
+    ? await db
+        .select({
+          id: schema.sessionNotes.id,
+          content: schema.sessionNotes.content,
+          createdAt: schema.sessionNotes.createdAt,
+          updatedAt: schema.sessionNotes.updatedAt,
+        })
+        .from(schema.sessionNotes)
+        .where(
+          and(
+            eq(schema.sessionNotes.userId, user.userId),
+            eq(schema.sessionNotes.sessionId, sessionId)
+          )
+        )
+        .limit(1)
+    : [];
 
   const fallbackName = buildSessionFallbackName(sessionId, first.projectName, first.promptText);
   const totalInputTokens = prompts.reduce((sum, p) => sum + (p.tokenEstimate ?? Math.ceil(p.promptLength / 4)), 0);
@@ -145,7 +184,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <Link
-          href="/sessions"
+          href={teamScope ? `/sessions?teamId=${encodeURIComponent(teamScope.teamId)}` : "/sessions"}
           className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -170,8 +209,8 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
               editable={canRename}
             />
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
-              <ShareSessionButton sessionId={sessionId} />
+              {canRename && <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />}
+              {canRename && <ShareSessionButton sessionId={sessionId} />}
             </div>
           </div>
 
@@ -267,7 +306,7 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
         </CardContent>
       </Card>
 
-      <SessionStoryButton sessionId={sessionId} allowUseAsSessionName={canRename} />
+      {canRename && <SessionStoryButton sessionId={sessionId} allowUseAsSessionName />}
 
       {/* Conversation thread */}
       <SessionThread
@@ -288,10 +327,12 @@ export default async function SessionDetailPage({ params }: SessionDetailPagePro
       />
 
       {/* Session notes */}
-      <SessionNotes
-        sessionId={sessionId}
-        initialNote={noteRow ?? null}
-      />
+      {canRename && (
+        <SessionNotes
+          sessionId={sessionId}
+          initialNote={noteRow ?? null}
+        />
+      )}
     </div>
   );
 }

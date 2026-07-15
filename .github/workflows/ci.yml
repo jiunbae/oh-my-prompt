@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install dependencies
@@ -31,6 +31,15 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Check locale parity
+        run: pnpm check-i18n
+
+      - name: Check color contrast
+        run: pnpm check-contrast
+
+      - name: Audit dependencies
+        run: corepack pnpm@11.13.0 --pm-on-fail=ignore audit
 
       - name: Build
         run: pnpm build

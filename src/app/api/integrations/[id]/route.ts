@@ -3,10 +3,11 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { validateWebhookUrl } from "@/services/webhook";
 import { VALID_INTEGRATION_EVENTS } from "../shared";
+import { canManageOutgoingIntegration } from "@/lib/team-access";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,10 @@ export async function PATCH(
   try {
     const { id } = await params;
     const session = await requireAuth();
+
+    if (!(await canManageOutgoingIntegration(session.userId, id))) {
+      return NextResponse.json({ error: "Integration not found" }, { status: 404 });
+    }
 
     let body;
     try {
@@ -95,10 +100,7 @@ export async function PATCH(
       .update(schema.outgoingIntegrations)
       .set(setValues)
       .where(
-        and(
-          eq(schema.outgoingIntegrations.id, id),
-          eq(schema.outgoingIntegrations.userId, session.userId)
-        )
+        eq(schema.outgoingIntegrations.id, id)
       )
       .returning({
         id: schema.outgoingIntegrations.id,
@@ -144,14 +146,13 @@ export async function DELETE(
     const { id } = await params;
     const session = await requireAuth();
 
+    if (!(await canManageOutgoingIntegration(session.userId, id))) {
+      return NextResponse.json({ error: "Integration not found" }, { status: 404 });
+    }
+
     const [deleted] = await db
       .delete(schema.outgoingIntegrations)
-      .where(
-        and(
-          eq(schema.outgoingIntegrations.id, id),
-          eq(schema.outgoingIntegrations.userId, session.userId)
-        )
-      )
+      .where(eq(schema.outgoingIntegrations.id, id))
       .returning({ id: schema.outgoingIntegrations.id });
 
     if (!deleted) {

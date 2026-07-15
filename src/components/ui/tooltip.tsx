@@ -7,8 +7,8 @@
  *     <Button>Save</Button>
  *   </Tooltip>
  *
- * - The trigger is the single React element child; we clone it to inject
- *   the wiring (onPointerEnter/Leave, onFocus/Blur, `aria-describedby`).
+ * - The wrapper handles bubbling pointer/focus events; the single trigger
+ *   child is cloned only to wire up `aria-describedby`.
  * - The tooltip itself uses `useId` so a screen-reader can resolve the
  *   description.
  * - The trigger child should already be focusable (e.g. a Button) for the
@@ -24,8 +24,6 @@ import {
   useId,
   useRef,
   useState,
-  type FocusEvent,
-  type PointerEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -103,45 +101,27 @@ function Tooltip({
   }
 
   const onlyChild = Children.only(children) as ReactElement<{
-    onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
-    onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
-    onFocus?: (e: FocusEvent<HTMLElement>) => void;
-    onBlur?: (e: FocusEvent<HTMLElement>) => void;
     "aria-describedby"?: string;
   }>;
 
   const childProps = onlyChild.props as {
-    onPointerEnter?: (e: PointerEvent<HTMLElement>) => void;
-    onPointerLeave?: (e: PointerEvent<HTMLElement>) => void;
-    onFocus?: (e: FocusEvent<HTMLElement>) => void;
-    onBlur?: (e: FocusEvent<HTMLElement>) => void;
     "aria-describedby"?: string;
   };
 
   const trigger = cloneElement(onlyChild, {
-    onPointerEnter: (e: PointerEvent<HTMLElement>) => {
-      childProps.onPointerEnter?.(e);
-      schedule(true);
-    },
-    onPointerLeave: (e: PointerEvent<HTMLElement>) => {
-      childProps.onPointerLeave?.(e);
-      schedule(false);
-    },
-    onFocus: (e: FocusEvent<HTMLElement>) => {
-      childProps.onFocus?.(e);
-      schedule(true);
-    },
-    onBlur: (e: FocusEvent<HTMLElement>) => {
-      childProps.onBlur?.(e);
-      schedule(false);
-    },
     "aria-describedby": open
       ? [childProps["aria-describedby"], id].filter(Boolean).join(" ")
       : childProps["aria-describedby"],
   } as Partial<typeof onlyChild.props>);
 
   return (
-    <span className="relative inline-flex">
+    <span
+      className="relative inline-flex"
+      onPointerEnter={() => schedule(true)}
+      onPointerLeave={() => schedule(false)}
+      onFocus={() => schedule(true)}
+      onBlur={() => schedule(false)}
+    >
       {trigger}
       {open && !disabled ? (
         <span

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { eqMock, limitMock, selectMock } = vi.hoisted(() => {
+const { eqMock, limitMock, parseSessionTokenMock, selectMock } = vi.hoisted(() => {
   const limit = vi.fn();
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
@@ -8,6 +8,7 @@ const { eqMock, limitMock, selectMock } = vi.hoisted(() => {
   return {
     eqMock: vi.fn((field: unknown, value: unknown) => ({ field, value })),
     limitMock: limit,
+    parseSessionTokenMock: vi.fn(),
     selectMock: select,
   };
 });
@@ -22,7 +23,13 @@ vi.mock("@/db/schema", () => ({
   users: {
     id: "id",
     isAdmin: "is_admin",
+    passwordChangedAt: "password_changed_at",
   },
+}));
+
+vi.mock("@/lib/auth", () => ({
+  AUTH_COOKIE_NAME: "auth_session",
+  parseSessionToken: parseSessionTokenMock,
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -34,7 +41,7 @@ import { createTRPCContext } from "@/server/trpc";
 describe("createTRPCContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    limitMock.mockResolvedValue([{ isAdmin: false }]);
+    parseSessionTokenMock.mockReturnValue(null);
   });
 
   it("returns null user when request has no auth headers", async () => {
@@ -44,11 +51,32 @@ describe("createTRPCContext", () => {
     expect(selectMock).not.toHaveBeenCalled();
   });
 
-  it("uses DB role instead of forwarded admin claim", async () => {
-    limitMock.mockResolvedValue([{ isAdmin: false }]);
+  it("rejects forged identity headers without a signed session cookie", async () => {
     const headers = new Headers({
       "x-user-id": "user-1",
       "x-user-email": "user@example.com",
+      "x-user-is-admin": "true",
+    });
+
+    const ctx = await createTRPCContext({ headers });
+
+    expect(ctx.user).toBeNull();
+    expect(selectMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the signed cookie and DB role instead of forwarded admin claims", async () => {
+    parseSessionTokenMock.mockReturnValue({
+      userId: "user-1",
+      email: "user@example.com",
+      isAdmin: false,
+      iat: Date.now(),
+    });
+    limitMock
+      .mockResolvedValueOnce([{ passwordChangedAt: null }])
+      .mockResolvedValueOnce([{ isAdmin: false }]);
+    const headers = new Headers({
+      cookie: "auth_session=signed-token",
+      "x-user-id": "forged-admin",
       "x-user-is-admin": "true",
     });
 
@@ -61,15 +89,20 @@ describe("createTRPCContext", () => {
     const isAdmin = await ctx.user!.resolveIsAdmin();
     expect(isAdmin).toBe(false);
     expect(ctx.user!.isAdmin).toBe(false);
-    expect(selectMock).toHaveBeenCalledTimes(1);
+    expect(selectMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns isAdmin=true when DB reports admin", async () => {
-    limitMock.mockResolvedValue([{ isAdmin: true }]);
-    const headers = new Headers({
-      "x-user-id": "admin-1",
-      "x-user-email": "admin@example.com",
+    parseSessionTokenMock.mockReturnValue({
+      userId: "admin-1",
+      email: "admin@example.com",
+      isAdmin: false,
+      iat: Date.now(),
     });
+    limitMock
+      .mockResolvedValueOnce([{ passwordChangedAt: null }])
+      .mockResolvedValueOnce([{ isAdmin: true }]);
+    const headers = new Headers({ cookie: "auth_session=signed-token" });
 
     const ctx = await createTRPCContext({ headers });
 

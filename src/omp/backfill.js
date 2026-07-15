@@ -3,14 +3,37 @@ const path = require("path");
 const os = require("os");
 const { Worker } = require("worker_threads");
 const { openDb, hashContent } = require("./db");
-const { ingestPayload } = require("./ingest");
+const { ingestPayload, acquireIngestLock } = require("./ingest");
+const { releaseSyncLock } = require("./sync-lock");
 const {
-  SYSTEM_PREFIXES,
-  stripSystemTags,
   isRealUserMessage,
   extractText,
   parseTranscript,
 } = require("./transcript-parser");
+
+async function openBackfillDb(config, dryRun) {
+  if (dryRun) return { db: null, operationLock: null };
+  const operationLock = await acquireIngestLock();
+  if (!operationLock.ok) {
+    throw new Error("Local database is busy; retry the backfill after the active writer finishes");
+  }
+  try {
+    const db = await openDb(config.storage.sqlite.path);
+    db.setBatchMode(true);
+    return { db, operationLock };
+  } catch (error) {
+    releaseSyncLock(operationLock.lockPath);
+    throw error;
+  }
+}
+
+function closeBackfillDb(db, operationLock) {
+  try {
+    if (db) db.close();
+  } finally {
+    if (operationLock) releaseSyncLock(operationLock.lockPath);
+  }
+}
 
 function buildEventId(sessionId, userText, timestamp, turnIndex) {
   return hashContent(
@@ -98,8 +121,7 @@ async function backfillTranscripts(config, options = {}) {
   let totalDuplicates = 0;
   const fileResults = [];
   const onProgress = options.onProgress;
-  const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
-  if (db) db.setBatchMode(true);
+  const { db, operationLock } = await openBackfillDb(config, options.dryRun);
 
   const workerCount =
     options.workers !== undefined
@@ -238,7 +260,7 @@ async function backfillTranscripts(config, options = {}) {
       fileResults,
     };
   } finally {
-    if (db) db.close();
+    closeBackfillDb(db, operationLock);
   }
 }
 
@@ -353,8 +375,7 @@ async function backfillCodex(config, options = {}) {
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
-  const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
-  if (db) db.setBatchMode(true);
+  const { db, operationLock } = await openBackfillDb(config, options.dryRun);
 
   try {
   // Group history entries by session to match with transcript turns
@@ -448,7 +469,7 @@ async function backfillCodex(config, options = {}) {
     sessions: sessionResponses.size,
   };
   } finally {
-    if (db) db.close();
+    closeBackfillDb(db, operationLock);
   }
 }
 
@@ -467,8 +488,14 @@ async function backfillOpenCode(config, options = {}) {
 
   const { openDatabase } = require("./db-driver");
   const ocDb = await openDatabase(dbPath, { readonly: true });
-  const ompDb = options.dryRun ? null : await openDb(config.storage.sqlite.path);
-  if (ompDb) ompDb.setBatchMode(true);
+  let target;
+  try {
+    target = await openBackfillDb(config, options.dryRun);
+  } catch (error) {
+    ocDb.close();
+    throw error;
+  }
+  const { db: ompDb, operationLock } = target;
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
@@ -571,7 +598,7 @@ async function backfillOpenCode(config, options = {}) {
   return { sessions: sessions.length, imported, skipped, duplicates };
   } finally {
     ocDb.close();
-    if (ompDb) ompDb.close();
+    closeBackfillDb(ompDb, operationLock);
   }
 }
 
@@ -633,16 +660,6 @@ function resolveGeminiProjectDir(projectHash) {
     }
   } catch {}
 
-  // Also check projects.json for mapping
-  const projectsFile = path.join(geminiHome, "projects.json");
-  if (fs.existsSync(projectsFile)) {
-    try {
-      const projects = JSON.parse(fs.readFileSync(projectsFile, "utf-8"));
-      // projects.json maps dir -> name, not hash -> dir, so we can't directly resolve
-      // Return empty and fall back to session data
-    } catch {}
-  }
-
   return "";
 }
 
@@ -671,8 +688,7 @@ async function backfillGemini(config, options = {}) {
   let skipped = 0;
   let duplicates = 0;
   let sessionCount = 0;
-  const db = options.dryRun ? null : await openDb(config.storage.sqlite.path);
-  if (db) db.setBatchMode(true);
+  const { db, operationLock } = await openBackfillDb(config, options.dryRun);
 
   try {
   for (const { path: filePath, projectHash } of chatFiles) {
@@ -764,7 +780,7 @@ async function backfillGemini(config, options = {}) {
 
   return { sessions: sessionCount, imported, skipped, duplicates };
   } finally {
-    if (db) db.close();
+    closeBackfillDb(db, operationLock);
   }
 }
 

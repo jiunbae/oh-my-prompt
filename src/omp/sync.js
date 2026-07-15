@@ -1,7 +1,6 @@
 const http = require("http");
 const https = require("https");
-const { openDb } = require("./db");
-const { createSyncLog, finishSyncLog, getSyncState, updateSyncState, getDeviceId } = require("./sync-log");
+const { createSyncLog, finishSyncLog, updateSyncState, getDeviceId, withDatabaseOperation } = require("./sync-log");
 const { postprocessUploadRecord } = require("./upload-postprocess");
 
 function fetchRows(db, since, lastId) {
@@ -77,7 +76,7 @@ function fetchToolsForPrompts(db, promptIds) {
     if (!grouped.has(r.prompt_id)) grouped.set(r.prompt_id, []);
     let input = null;
     if (r.input_json) {
-      try { input = JSON.parse(r.input_json); } catch (_) { input = null; }
+      try { input = JSON.parse(r.input_json); } catch { input = null; }
     }
     grouped.get(r.prompt_id).push({
       tool_use_id: r.tool_use_id,
@@ -115,6 +114,19 @@ function isTransientError(err) {
 
 function isTransientStatus(status) {
   return status >= 500 && !NO_RETRY_STATUSES.includes(status);
+}
+
+function assertUploadResultAccepted(result, status) {
+  const rejected = Number(result?.rejected || 0);
+  if (rejected === 0 && result?.success !== false) return;
+
+  const details = Array.isArray(result?.errors)
+    ? result.errors.filter((message) => typeof message === "string").slice(0, 3).join("; ")
+    : "";
+  throw new Error(
+    `Server rejected ${rejected || "one or more"} record(s) (status ${status})` +
+      (details ? `: ${details}` : ". Sync checkpoint was not advanced.")
+  );
 }
 
 function postJsonOnce(url, headers, body, method) {
@@ -302,21 +314,27 @@ async function syncToServer(config, options = {}) {
     );
   }
 
-  const db = await openDb(config.storage.sqlite.path);
-  const state = await getSyncState(config);
-  const since = options.since || state.lastSyncedAt || null;
-  const rows = fetchRows(db, since, state.lastSyncedId);
+  const snapshot = await withDatabaseOperation(config, (db) => {
+    const deviceId = getDeviceId(config);
+    const stateRow = db
+      .prepare("SELECT last_synced_at, last_synced_id FROM sync_state WHERE device_id = ?")
+      .get(deviceId);
+    const state = stateRow
+      ? { lastSyncedAt: stateRow.last_synced_at, lastSyncedId: stateRow.last_synced_id }
+      : { lastSyncedAt: null, lastSyncedId: null };
+    const since = options.since || state.lastSyncedAt || null;
+    const rows = fetchRows(db, since, state.lastSyncedId);
+    const toolsByPrompt = fetchToolsForPrompts(
+      db,
+      rows.map((row) => row.id),
+    );
+    return { since, rows, toolsByPrompt };
+  });
+  const { since, rows, toolsByPrompt } = snapshot;
 
   if (rows.length === 0) {
-    db.close();
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
   }
-
-  const toolsByPrompt = fetchToolsForPrompts(
-    db,
-    rows.map((r) => r.id)
-  );
-  db.close();
 
   const chunkSize = options.chunkSize || 200;
   let totalAccepted = 0;
@@ -385,6 +403,10 @@ async function syncToServer(config, options = {}) {
           totalDuplicates += subResult.duplicates || 0;
           totalRejected += subResult.rejected || 0;
           if (subResult.errors?.length) errors.push(...subResult.errors);
+          // A 207 response is transport-level success but still means one or
+          // more records were not persisted. Fail the run before advancing the
+          // checkpoint; already accepted rows are safe to retry as duplicates.
+          assertUploadResultAccepted(subResult, subResp.status);
         }
         chunks++;
         continue;
@@ -401,6 +423,7 @@ async function syncToServer(config, options = {}) {
       if (result.errors?.length) {
         errors.push(...result.errors);
       }
+      assertUploadResultAccepted(result, response.status);
       chunks++;
 
       if (options.onProgress) {

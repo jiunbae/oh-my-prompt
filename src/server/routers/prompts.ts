@@ -5,6 +5,12 @@ import { createTRPCRouter, protectedProcedure } from "../trpc";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { desc, eq, sql, and, gte, lte, isNull } from "drizzle-orm";
+import {
+  canManagePromptAccess,
+  canViewPrompt,
+  teamPromptViewConditionForMember,
+} from "@/lib/team-access";
+import { toPromptDto } from "@/lib/prompt-dto";
 
 /**
  * Verify user is a member of the given team. Returns the role or null.
@@ -52,7 +58,11 @@ export const promptsRouter = createTRPCRouter({
         if (!role) {
           return { items: [], totalCount: 0 };
         }
-        conditions = [eq(schema.prompts.teamId, teamId), isNull(schema.prompts.deletedAt)];
+        conditions = [
+          eq(schema.prompts.teamId, teamId),
+          teamPromptViewConditionForMember(ctx.user.id),
+          isNull(schema.prompts.deletedAt),
+        ];
       } else {
         conditions = [eq(schema.prompts.userId, ctx.user.id), isNull(schema.prompts.deletedAt)];
       }
@@ -99,7 +109,7 @@ export const promptsRouter = createTRPCRouter({
 
       return {
         items: items.map((item) => ({
-          ...item,
+          ...toPromptDto(item),
           tags: item.promptTags.map((pt) => pt.tag),
           preview: item.promptText.slice(0, 200) + (item.promptText.length > 200 ? "..." : ""),
         })),
@@ -126,20 +136,12 @@ export const promptsRouter = createTRPCRouter({
 
       if (!result) return null;
 
-      // Check ownership or team membership
-      const isOwner = result.userId === ctx.user.id;
-      let hasTeamAccess = false;
-      if (result.teamId) {
-        const role = await verifyTeamMembership(ctx.user.id, result.teamId);
-        hasTeamAccess = !!role;
-      }
-
-      if (!isOwner && !hasTeamAccess) {
+      if (!(await canViewPrompt(ctx.user.id, result.id))) {
         return null;
       }
 
       return {
-        ...result,
+        ...toPromptDto(result),
         tags: result.promptTags.map((pt) => pt.tag),
       };
     }),
@@ -163,7 +165,10 @@ export const promptsRouter = createTRPCRouter({
             promptsByProject: [],
           };
         }
-        accessCondition = eq(schema.prompts.teamId, teamId);
+        accessCondition = and(
+          eq(schema.prompts.teamId, teamId),
+          teamPromptViewConditionForMember(ctx.user.id)
+        );
       } else {
         accessCondition = eq(schema.prompts.userId, ctx.user.id);
       }
@@ -225,7 +230,10 @@ export const promptsRouter = createTRPCRouter({
       if (teamId) {
         const role = await verifyTeamMembership(ctx.user.id, teamId);
         if (!role) return [];
-        accessCondition = eq(schema.prompts.teamId, teamId);
+        accessCondition = and(
+          eq(schema.prompts.teamId, teamId),
+          teamPromptViewConditionForMember(ctx.user.id)
+        );
       } else {
         accessCondition = eq(schema.prompts.userId, ctx.user.id);
       }
@@ -263,7 +271,7 @@ export const promptsRouter = createTRPCRouter({
       const { promptId, access, expiresInHours } = input;
 
       const [prompt] = await db
-        .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+        .select({ id: schema.prompts.id })
         .from(schema.prompts)
         .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
         .limit(1);
@@ -272,25 +280,7 @@ export const promptsRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Prompt not found" });
       }
 
-      // Check ownership or team admin
-      let canShare = prompt.userId === ctx.user.id;
-      if (!canShare && prompt.teamId) {
-        const [membership] = await db
-          .select({ role: schema.teamMembers.role })
-          .from(schema.teamMembers)
-          .where(
-            and(
-              eq(schema.teamMembers.teamId, prompt.teamId),
-              eq(schema.teamMembers.userId, ctx.user.id)
-            )
-          )
-          .limit(1);
-        if (membership && (membership.role === "owner" || membership.role === "admin")) {
-          canShare = true;
-        }
-      }
-
-      if (!canShare) {
+      if (!(await canManagePromptAccess(ctx.user.id, promptId))) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
       }
 
@@ -332,31 +322,14 @@ export const promptsRouter = createTRPCRouter({
       const { promptId } = input;
 
       const [prompt] = await db
-        .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+        .select({ id: schema.prompts.id })
         .from(schema.prompts)
         .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
         .limit(1);
 
       if (!prompt) return { shares: [] };
 
-      let canView = prompt.userId === ctx.user.id;
-      if (!canView && prompt.teamId) {
-        const [membership] = await db
-          .select({ role: schema.teamMembers.role })
-          .from(schema.teamMembers)
-          .where(
-            and(
-              eq(schema.teamMembers.teamId, prompt.teamId),
-              eq(schema.teamMembers.userId, ctx.user.id)
-            )
-          )
-          .limit(1);
-        if (membership && (membership.role === "owner" || membership.role === "admin")) {
-          canView = true;
-        }
-      }
-
-      if (!canView) return { shares: [] };
+      if (!(await canManagePromptAccess(ctx.user.id, promptId))) return { shares: [] };
 
       const shares = await db
         .select({
@@ -386,31 +359,16 @@ export const promptsRouter = createTRPCRouter({
       const { promptId, shareId } = input;
 
       const [prompt] = await db
-        .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+        .select({ id: schema.prompts.id })
         .from(schema.prompts)
         .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
         .limit(1);
 
       if (!prompt) throw new TRPCError({ code: "NOT_FOUND", message: "Prompt not found" });
 
-      let canRevoke = prompt.userId === ctx.user.id;
-      if (!canRevoke && prompt.teamId) {
-        const [membership] = await db
-          .select({ role: schema.teamMembers.role })
-          .from(schema.teamMembers)
-          .where(
-            and(
-              eq(schema.teamMembers.teamId, prompt.teamId),
-              eq(schema.teamMembers.userId, ctx.user.id)
-            )
-          )
-          .limit(1);
-        if (membership && (membership.role === "owner" || membership.role === "admin")) {
-          canRevoke = true;
-        }
+      if (!(await canManagePromptAccess(ctx.user.id, promptId))) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
       }
-
-      if (!canRevoke) throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
 
       const [share] = await db
         .select({ id: schema.promptShares.id })

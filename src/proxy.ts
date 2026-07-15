@@ -7,7 +7,6 @@ const MAX_TOKEN_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 interface SessionPayload {
   userId: string;
   email: string;
-  token: string;
   isAdmin: boolean;
   iat: number;
 }
@@ -66,7 +65,9 @@ async function verifySessionToken(
     );
     const parsed = JSON.parse(payloadJson);
 
-    if (!parsed.userId || !parsed.email || !parsed.token) return null;
+    // Version 1 cookies contained the raw API token; require a fresh, tokenless
+    // session after this security migration.
+    if (parsed.v !== 2 || !parsed.userId || !parsed.email) return null;
 
     // Check expiry
     if (!parsed.iat || Date.now() - parsed.iat > MAX_TOKEN_AGE_MS) return null;
@@ -74,7 +75,6 @@ async function verifySessionToken(
     return {
       userId: parsed.userId,
       email: parsed.email,
-      token: parsed.token,
       isAdmin: parsed.isAdmin ?? false,
       iat: parsed.iat,
     };
@@ -85,6 +85,7 @@ async function verifySessionToken(
 
 // Routes that don't require authentication
 const publicRoutes = [
+  "/",
   "/login",
   "/register",
   "/api/auth/login",
@@ -97,11 +98,12 @@ const publicRoutes = [
   "/share",
   "/api/share",
   "/api/health",
+  "/api/ready",
   "/api/locale", // language switcher must work on /login (pre-auth)
 ];
 
 // Routes that accept alternative authentication (X-User-Token header)
-const tokenAuthRoutes = ["/api/sync", "/api/auth/me"];
+const tokenAuthRoutes = ["/api/sync", "/api/auth/me", "/api/search/semantic"];
 
 /**
  * Prefix match that respects path segment boundaries so that, e.g., `/login`
@@ -111,7 +113,7 @@ function matchesRoute(pathname: string, route: string): boolean {
   return pathname === route || pathname.startsWith(route + "/");
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public routes

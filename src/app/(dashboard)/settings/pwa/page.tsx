@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 export default function PwaSettingsPage() {
   const { isOffline, isInstallable, isInstalled, installPrompt } = usePwaContext();
-  const [cacheInfo, setCacheInfo] = useState<{ static: number; api: number }>({ static: 0, api: 0 });
+  const [staticCacheCount, setStaticCacheCount] = useState(0);
   const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
@@ -16,10 +16,7 @@ export default function PwaSettingsPage() {
         const staticKeys = await caches.keys();
         const staticCount = staticKeys.filter((n) => n.startsWith("omp-static")).length;
 
-        const apiCache = await caches.open("omp-api-cache");
-        const apiRequests = await apiCache.keys();
-
-        setCacheInfo({ static: staticCount, api: apiRequests.length });
+        setStaticCacheCount(staticCount);
       } catch {
         // Cache API not available
       }
@@ -31,8 +28,10 @@ export default function PwaSettingsPage() {
     setClearing(true);
     try {
       const keys = await caches.keys();
-      await Promise.all(keys.map((name) => caches.delete(name)));
-      setCacheInfo({ static: 0, api: 0 });
+      await Promise.all(
+        keys.filter((name) => name.startsWith("omp-")).map((name) => caches.delete(name)),
+      );
+      setStaticCacheCount(0);
     } catch {
       // Ignore
     } finally {
@@ -116,8 +115,8 @@ export default function PwaSettingsPage() {
           </div>
           <p className="text-sm text-muted-foreground">
             {isOffline
-              ? "You are currently offline. Cached prompts and sessions are available for browsing."
-              : "You are connected. Recent data is cached automatically for offline access."}
+              ? "You are currently offline. Prompt and account data require a network connection."
+              : "You are connected. Only public app assets are cached; private account data stays network-only."}
           </p>
         </CardContent>
       </Card>
@@ -125,27 +124,19 @@ export default function PwaSettingsPage() {
       {/* Cache Management */}
       <Card>
         <CardHeader>
-          <CardTitle>Offline Cache</CardTitle>
+          <CardTitle>App Cache</CardTitle>
           <CardDescription>
-            Manage locally cached data for offline browsing
+            Manage public app assets stored for faster loading
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div className="p-4 rounded-lg border border-border bg-surface/50">
               <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60 mb-1">
                 Static Assets
               </p>
               <p className="text-2xl font-semibold text-foreground">
-                {cacheInfo.static > 0 ? "Cached" : "Empty"}
-              </p>
-            </div>
-            <div className="p-4 rounded-lg border border-border bg-surface/50">
-              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground/60 mb-1">
-                API Responses
-              </p>
-              <p className="text-2xl font-semibold text-foreground">
-                {cacheInfo.api}
+                {staticCacheCount > 0 ? "Cached" : "Empty"}
               </p>
             </div>
           </div>

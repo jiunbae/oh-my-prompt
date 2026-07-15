@@ -4,6 +4,16 @@ import * as schema from "@/db/schema";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { eq, and } from "drizzle-orm";
+import { toPromptDto } from "@/lib/prompt-dto";
+import { z } from "zod";
+
+const createPromptSchema = z.object({
+  promptText: z.string().min(1).max(1_000_000),
+  responseText: z.string().max(4_000_000).nullable().optional(),
+  projectName: z.string().trim().max(255).nullable().optional(),
+  promptType: z.string().trim().min(1).max(100).optional(),
+  teamId: z.string().uuid().nullable().optional(),
+});
 
 /**
  * POST /api/prompts - Create a new prompt
@@ -12,12 +22,15 @@ import { eq, and } from "drizzle-orm";
 export async function POST(request: NextRequest) {
   try {
     const session = await requireAuth();
-    const body = await request.json().catch(() => ({}));
-    const { promptText, responseText, projectName, promptType, teamId } = body;
-
-    if (!promptText || typeof promptText !== "string") {
-      return NextResponse.json({ error: "Prompt text is required" }, { status: 400 });
+    const body = await request.json().catch(() => null);
+    const parsed = createPromptSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid prompt", details: parsed.error.flatten() },
+        { status: 400 },
+      );
     }
+    const { promptText, responseText, projectName, promptType, teamId } = parsed.data;
 
     let visibility: "private" | "team" | "public" = "private";
 
@@ -69,7 +82,7 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    return NextResponse.json({ prompt }, { status: 201 });
+    return NextResponse.json({ prompt: toPromptDto(prompt) }, { status: 201 });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

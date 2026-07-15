@@ -73,24 +73,6 @@
       letter-spacing: 0.05em;
       color: var(--muted);
     }
-    .cached-item {
-      padding: 10px 12px;
-      background: var(--surface);
-      border-radius: 8px;
-      margin-bottom: 8px;
-      font-size: 0.875rem;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .cached-item:last-child { margin-bottom: 0; }
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--primary);
-      flex-shrink: 0;
-    }
     .btn {
       display: inline-flex;
       align-items: center;
@@ -113,7 +95,6 @@
       border-color: var(--primary);
     }
     .btn-primary:hover { opacity: 0.9; }
-    #cached-data { display: none; }
   </style>
 </head>
 <body>
@@ -123,14 +104,7 @@
       <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h1M12 3v1M20 12h1M12 20v1"/>
     </svg>
     <h1>You are offline</h1>
-    <p>Oh My Prompt can't reach the network right now. Some features may be limited, but you can still browse cached data.</p>
-
-    <div id="cached-data">
-      <div class="card">
-        <h2>Cached Data</h2>
-        <div id="cached-list"></div>
-      </div>
-    </div>
+    <p>Oh My Prompt can't reach the network right now. For your privacy, prompts and account data are not stored in the browser cache.</p>
 
     <div style="display:flex;gap:12px;justify-content:center;">
       <a href="/dashboard" class="btn btn-primary">
@@ -147,32 +121,5 @@
       </button>
     </div>
   </div>
-
-  <script>
-    (async function() {
-      try {
-        const cache = await caches.open('omp-api-cache');
-        const keys = await cache.keys();
-        const apiRequests = keys.filter(req => req.url.includes('/api/'));
-        if (apiRequests.length > 0) {
-          const list = document.getElementById('cached-list');
-          const seen = new Set();
-          apiRequests.slice(0, 5).forEach(req => {
-            const url = new URL(req.url);
-            const path = url.pathname.replace('/api/', '');
-            if (seen.has(path)) return;
-            seen.add(path);
-            const item = document.createElement('div');
-            item.className = 'cached-item';
-            item.innerHTML = '<span class="dot"></span><span>' + path + '</span>';
-            list.appendChild(item);
-          });
-          document.getElementById('cached-data').style.display = 'block';
-        }
-      } catch (e) {
-        // Cache API not available
-      }
-    })();
-  </script>
 </body>
 </html>

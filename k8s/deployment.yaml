@@ -62,7 +62,7 @@ spec:
             timeoutSeconds: 3
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/ready
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10

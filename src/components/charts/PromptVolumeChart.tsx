@@ -37,7 +37,7 @@ export function PromptVolumeChart({
 
   if (isLoading) {
     return (
-      <div className="h-[280px] w-full">
+      <div className="h-[280px] w-full" role="status" aria-label="Loading prompt volume chart">
         <Skeleton className="h-full w-full rounded-lg" />
       </div>
     );
@@ -56,11 +56,14 @@ export function PromptVolumeChart({
   }));
 
   const tooltipStyles = chartTooltipStyles();
+  const total = formattedData.reduce((sum, item) => sum + item.count, 0);
+  const summary = `Prompt volume chart with ${total} prompts across ${formattedData.length} days, from ${formattedData[0].displayDate} to ${formattedData[formattedData.length - 1].displayDate}.`;
 
   return (
     <div className="h-[280px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={formattedData} margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
+      <div className="h-full w-full" role="img" aria-label={summary}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={formattedData} margin={{ top: 5, right: 5, bottom: 5, left: -10 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor={chartColors.primary} stopOpacity={0.3} />
@@ -98,8 +101,20 @@ export function PromptVolumeChart({
             fillOpacity={1}
             fill={`url(#${gradientId})`}
           />
-        </AreaChart>
-      </ResponsiveContainer>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <table className="sr-only">
+        <caption>Prompt volume by date</caption>
+        <thead>
+          <tr><th scope="col">Date</th><th scope="col">Prompts</th></tr>
+        </thead>
+        <tbody>
+          {formattedData.map((item) => (
+            <tr key={item.date}><th scope="row">{item.displayDate}</th><td>{item.count}</td></tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

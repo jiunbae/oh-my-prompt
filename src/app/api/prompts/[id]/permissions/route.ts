@@ -4,7 +4,7 @@ import * as schema from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
-import { canViewPrompt, canEditPrompt } from "@/lib/team-access";
+import { canManagePromptAccess } from "@/lib/team-access";
 
 /**
  * GET /api/prompts/:id/permissions - List permissions for a prompt
@@ -17,8 +17,8 @@ export async function GET(
     const { id } = await params;
     const session = await requireAuth();
 
-    const canView = await canViewPrompt(session.userId, id);
-    if (!canView) {
+    const canManage = await canManagePromptAccess(session.userId, id);
+    if (!canManage) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
@@ -61,8 +61,8 @@ export async function POST(
     const { id } = await params;
     const session = await requireAuth();
 
-    const canEdit = await canEditPrompt(session.userId, id);
-    if (!canEdit) {
+    const canManage = await canManagePromptAccess(session.userId, id);
+    if (!canManage) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 

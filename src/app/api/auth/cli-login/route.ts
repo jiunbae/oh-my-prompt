@@ -8,7 +8,7 @@ import {
   createUser,
   updateLastLogin,
 } from "@/lib/auth";
-import { rateLimiters, getClientIp } from "@/lib/rate-limit";
+import { rateLimiters, getClientIp, getAuthRateLimitKey } from "@/lib/rate-limit";
 
 /**
  * POST /api/auth/cli-login
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   try {
     // Rate limit by IP (auth endpoints are unauthenticated)
     const ip = getClientIp(request);
-    const rateCheck = await rateLimiters.auth(ip);
+    const rateCheck = await rateLimiters.authGlobal(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Too many authentication attempts. Please try again later." },
@@ -50,6 +50,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const identityRateCheck = await rateLimiters.auth(getAuthRateLimitKey(ip, email));
+    if (!identityRateCheck.allowed) {
+      return NextResponse.json(
+        { error: "Too many authentication attempts. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(identityRateCheck.retryAfterMs / 1000)) } },
+      );
+    }
+
     // Try to find existing user
     const user = await findUserByEmail(email);
 
@@ -65,15 +73,18 @@ export async function POST(request: NextRequest) {
 
       await updateLastLogin(user.id);
 
-      return NextResponse.json({
-        success: true,
-        token: user.token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
+      return NextResponse.json(
+        {
+          success: true,
+          token: user.token,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+          },
         },
-      });
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
     }
 
     // User doesn't exist
@@ -117,16 +128,19 @@ export async function POST(request: NextRequest) {
       name: name || undefined,
     });
 
-    return NextResponse.json({
-      success: true,
-      token: newUser.token,
-      registered: true,
-      user: {
-        id: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
+    return NextResponse.json(
+      {
+        success: true,
+        token: newUser.token,
+        registered: true,
+        user: {
+          id: newUser.id,
+          email: newUser.email,
+          name: newUser.name,
+        },
       },
-    });
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch (error) {
     logger.error({ err: error }, "CLI login error");
     return NextResponse.json(

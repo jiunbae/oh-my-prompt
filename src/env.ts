@@ -42,7 +42,14 @@ export const env = createEnv({
     SMTP_PORT: z.coerce.number().default(587),
     SMTP_USER: z.string().default(""),
     SMTP_PASS: z.string().default(""),
-    SMTP_SECURE: z.coerce.boolean().default(false),
+    SMTP_SECURE: z.preprocess(
+      (value) => {
+        if (value === "true") return true;
+        if (value === "false") return false;
+        return value;
+      },
+      z.boolean(),
+    ).default(false),
     RESEND_API_KEY: z.string().default(""),
     SENDGRID_API_KEY: z.string().default(""),
     // Embedding provider (optional; e.g. Ollama or OpenAI-compatible)

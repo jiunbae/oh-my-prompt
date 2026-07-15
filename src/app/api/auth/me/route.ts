@@ -8,14 +8,12 @@ function serializeUser(user: {
   id: string;
   email: string;
   name: string | null;
-  token: string;
   isAdmin: boolean | null;
 }) {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    token: user.token,
     isAdmin: user.isAdmin ?? false,
   };
 }
@@ -32,7 +30,10 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      return NextResponse.json({ user: serializeUser(user) });
+      return NextResponse.json(
+        { user: serializeUser(user) },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
     }
 
     const session = await requireAuth();
@@ -46,7 +47,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ user: serializeUser(user) });
+    return NextResponse.json(
+      { user: serializeUser(user) },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: 401 });

@@ -39,6 +39,14 @@ jobs:
         run: |
           cd packages/omp-cli
           npm link
-          omp --help || true
-          omp config get || true
-          omp doctor || true
+          omp --help
+          omp config get
+
+      - name: Test packed CLI in a clean directory
+        run: |
+          cd packages/omp-cli
+          pack_dir="$(mktemp -d)"
+          tarball="$(npm pack --silent)"
+          npm install --prefix "$pack_dir" "./$tarball"
+          "$pack_dir/node_modules/.bin/omp" --help
+          rm -f "$tarball"

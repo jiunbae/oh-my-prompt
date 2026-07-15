@@ -389,8 +389,8 @@ export default function SearchPage() {
       </div>
 
       <form onSubmit={handleSearch} className="space-y-4">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="relative min-w-0 flex-1">
             <svg
               className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
               fill="none"
@@ -406,18 +406,21 @@ export default function SearchPage() {
             </svg>
             <Input
               type="search"
+              aria-label="Search prompts"
               placeholder="Search your prompts..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="pl-10"
             />
           </div>
-          <Button type="submit" disabled={loading || !query.trim()}>
+          <Button className="w-full sm:w-auto" type="submit" disabled={loading || !query.trim()}>
             {loading ? "Searching..." : "Search"}
           </Button>
           <Button
+            className="w-full sm:w-auto"
             type="button"
             variant="outline"
+            aria-expanded={showFilters}
             onClick={() => setShowFilters(!showFilters)}
           >
             <svg
@@ -524,22 +527,23 @@ export default function SearchPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-muted-foreground">Active filters:</span>
           {project && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-2/20 text-chart-2 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 rounded-full border border-chart-2/40 bg-chart-2/15 px-2 py-1 text-xs text-foreground">
               Project: {project}
-              <button type="button" onClick={() => handleFilterChange("project", "")} className="hover:text-foreground">x</button>
+              <button type="button" aria-label={`Remove Project filter ${project}`} onClick={() => handleFilterChange("project", "")} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-accent">×</button>
             </span>
           )}
           {source && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-3/20 text-chart-3 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 rounded-full border border-chart-3/40 bg-chart-3/15 px-2 py-1 text-xs text-foreground">
               Agent: {source}
-              <button type="button" onClick={() => handleFilterChange("source", "")} className="hover:text-foreground">x</button>
+              <button type="button" aria-label={`Remove Agent filter ${source}`} onClick={() => handleFilterChange("source", "")} className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-accent">×</button>
             </span>
           )}
           {(fromDate || toDate) && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-chart-4/20 text-chart-4 rounded-full text-xs">
+            <span className="inline-flex items-center gap-1 rounded-full border border-chart-4/40 bg-chart-4/15 px-2 py-1 text-xs text-foreground">
               Date: {fromDate || "..."} - {toDate || "..."}
               <button
                 type="button"
+                aria-label="Remove date filter"
                 onClick={() => {
                   setFromDate("");
                   setToDate("");
@@ -550,9 +554,9 @@ export default function SearchPage() {
                     doSearch({ searchPage: 1, searchFrom: "", searchTo: "" });
                   }
                 }}
-                className="hover:text-foreground"
+                className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-full hover:bg-accent"
               >
-                x
+                ×
               </button>
             </span>
           )}

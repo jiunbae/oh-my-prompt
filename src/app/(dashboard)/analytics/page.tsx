@@ -117,7 +117,7 @@ export default function AnalyticsPage() {
     } finally {
       setLoading(false);
     }
-  }, [buildQueryString]);
+  }, [buildQueryString, tAnalytics]);
 
   useEffect(() => {
     fetchData();

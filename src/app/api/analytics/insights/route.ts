@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { and, eq, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
+import { teamPromptViewConditionForMember } from "@/lib/team-access";
 
 function getDateRange(searchParams: URLSearchParams): { from: Date; to: Date } {
   const now = new Date();
@@ -100,7 +101,10 @@ export async function GET(request: NextRequest) {
     ];
 
     if (scopeUserId) conditions.push(eq(schema.prompts.userId, scopeUserId));
-    if (scopeTeamId) conditions.push(eq(schema.prompts.teamId, scopeTeamId));
+    if (scopeTeamId) {
+      conditions.push(eq(schema.prompts.teamId, scopeTeamId));
+      conditions.push(teamPromptViewConditionForMember(session.userId));
+    }
 
     const baseWhere = and(...conditions);
 
@@ -133,7 +137,10 @@ export async function GET(request: NextRequest) {
       lt(schema.prompts.timestamp, prevTo),
     ];
     if (scopeUserId) prevConditions.push(eq(schema.prompts.userId, scopeUserId));
-    if (scopeTeamId) prevConditions.push(eq(schema.prompts.teamId, scopeTeamId));
+    if (scopeTeamId) {
+      prevConditions.push(eq(schema.prompts.teamId, scopeTeamId));
+      prevConditions.push(teamPromptViewConditionForMember(session.userId));
+    }
     const prevWhere = and(...prevConditions);
 
     // Peak activity hour

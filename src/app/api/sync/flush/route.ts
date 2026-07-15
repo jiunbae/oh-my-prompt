@@ -25,7 +25,8 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const rl = await rateLimiters.api(userToken);
+    // Never persist the bearer credential in Redis rate-limit keys/AOF.
+    const rl = await rateLimiters.api(user.id);
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "Too many requests" },

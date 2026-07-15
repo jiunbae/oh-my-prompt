@@ -51,7 +51,6 @@ describe("GET /api/auth/me", () => {
         id: "user-1",
         email: "user@example.com",
         name: "User",
-        token: "api-token",
         isAdmin: false,
       },
     });
@@ -94,7 +93,6 @@ describe("GET /api/auth/me", () => {
         id: "user-1",
         email: "user@example.com",
         name: null,
-        token: "api-token",
         isAdmin: true,
       },
     });

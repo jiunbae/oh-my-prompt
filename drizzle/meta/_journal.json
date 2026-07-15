@@ -183,6 +183,13 @@
       "when": 1778284800000,
       "tag": "0029_add_fk_on_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784041200000,
+      "tag": "0030_remove_api_tokens_from_event_keys",
+      "breakpoints": true
     }
   ]
 }

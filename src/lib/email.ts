@@ -23,25 +23,25 @@ export interface EmailResult {
 }
 
 // ---------------------------------------------------------------------------
-// Console fallback — logs the email content when no provider is configured
+// Console fallback — never writes private message bodies to production logs
 // ---------------------------------------------------------------------------
 async function sendViaConsole(options: SendEmailOptions): Promise<EmailResult> {
   logger.warn(
-    { to: options.to, subject: options.subject },
-    "[EMAIL NOT DELIVERED] No email provider configured — email logged to console only, not sent. Set EMAIL_PROVIDER to actually deliver."
+    "[EMAIL NOT DELIVERED] No email provider configured. Set EMAIL_PROVIDER to enable delivery."
   );
-  logger.info("--- Email Start ---");
-  logger.info(`To: ${options.to}`);
-  logger.info(`Subject: ${options.subject}`);
-  logger.info(`Text:\n${options.text}`);
-  logger.info("--- Email End ---");
+  if (env.NODE_ENV !== "production") {
+    logger.debug(
+      { to: options.to, subject: options.subject, text: options.text },
+      "Undelivered development email"
+    );
+  }
   // Not actually delivered: mark success:false + delivered:false so callers
   // (digest, alert channel recording) do not record a phantom "email sent".
   return {
     success: false,
     provider: "console",
     delivered: false,
-    error: "No email provider configured; email logged to console but not delivered",
+    error: "No email provider configured; email was not delivered",
   };
 }
 

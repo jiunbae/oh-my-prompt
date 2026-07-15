@@ -4,7 +4,7 @@ import * as schema from "@/db/schema";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { eq, and } from "drizzle-orm";
-import { canManageTeam } from "@/lib/team-access";
+import { isTeamOwner } from "@/lib/team-access";
 
 /**
  * GET /api/teams/:id - Get team details with members
@@ -103,7 +103,7 @@ export async function DELETE(
     const { id } = await params;
 
     // Only team owner can delete
-    const isOwner = await canManageTeam(session.userId, id);
+    const isOwner = await isTeamOwner(session.userId, id);
     if (!isOwner) {
       return NextResponse.json({ error: "Only team owner can delete the team" }, { status: 403 });
     }

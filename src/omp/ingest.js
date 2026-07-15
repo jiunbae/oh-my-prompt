@@ -16,16 +16,16 @@ function sleep(ms) {
 // processes (hooks fire one per turn) can therefore clobber each other's writes:
 // both read the same file, mutate in memory, and the slower writer wins,
 // dropping the faster writer's rows. Serialize the read-modify-write with an
-// advisory file lock. A dedicated name ("ingest.lock") means ingest never waits
-// on sync's "sync.lock" (or vice-versa), so the two can't deadlock.
-const INGEST_LOCK = { name: "ingest.lock", ttlMs: 60 * 1000 };
+// advisory file lock. If it cannot be acquired, queue the event instead of
+// proceeding with an unlocked last-writer-wins update.
+const INGEST_LOCK = { name: "database-operation.lock", ttlMs: 60 * 1000 };
 
 async function acquireIngestLock() {
   const deadline = Date.now() + 10 * 1000;
   for (;;) {
     const lock = acquireSyncLock({ name: INGEST_LOCK.name, ttlMs: INGEST_LOCK.ttlMs });
     if (lock.ok) return lock;
-    if (Date.now() >= deadline) return lock; // give up waiting; proceed best-effort
+    if (Date.now() >= deadline) return lock;
     await sleep(40 + Math.floor(Math.random() * 60));
   }
 }
@@ -34,7 +34,7 @@ function parsePayload(raw) {
   if (!raw) return null;
   try {
     return JSON.parse(raw);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -296,13 +296,27 @@ async function ingestPayload(rawPayload, config, options = {}) {
   const toolRedact = config.capture?.redact?.enabled ? config.capture.redact : null;
 
   const externalDb = options.db;
+  const queueOnFailure = options.queueOnFailure !== false;
   // Serialize concurrent ingest processes around the whole read-modify-write.
   // The caller owns the lifecycle when it passes its own db handle, so skip
   // locking (and DB open/close) in that case.
   const lock = externalDb ? null : await acquireIngestLock();
-  const db = externalDb || await openDb(config.storage.sqlite.path);
+  if (!externalDb && (!lock || !lock.ok)) {
+    const queuedPayload =
+      config.capture?.redact?.enabled
+        ? redactValue(payload, config.capture.redact)
+        : payload;
+    if (queueOnFailure) {
+      enqueuePayload(JSON.stringify(queuedPayload), config.queue?.maxBytes);
+    }
+    const error = "Local database is busy; payload queued for retry";
+    updateState({ lastError: error });
+    return { ok: false, queued: queueOnFailure, error };
+  }
+  let db = externalDb;
 
   try {
+    db = db || await openDb(config.storage.sqlite.path);
     const record = normalizePayload(payload, config);
     if (record.role === "assistant" && record.session_id) {
       let row = null;
@@ -416,16 +430,22 @@ async function ingestPayload(rawPayload, config, options = {}) {
     touchTrigger();
     return { ok: true, id: record.id, updated: false };
   } catch (error) {
-    const raw = typeof rawPayload === "string" ? rawPayload : JSON.stringify(payload);
-    enqueuePayload(raw, config.queue?.maxBytes);
+    const queuedPayload =
+      config.capture?.redact?.enabled
+        ? redactValue(payload, config.capture.redact)
+        : payload;
+    if (queueOnFailure) {
+      enqueuePayload(JSON.stringify(queuedPayload), config.queue?.maxBytes);
+    }
     updateState({ lastError: error.message || "Failed to ingest" });
     return { ok: false, error: error.message || "Failed to ingest" };
   } finally {
     if (!externalDb) {
-      // Close (which saves) before releasing the lock so the next waiter reads
-      // the fully-written file.
-      db.close();
-      if (lock && lock.ok) releaseSyncLock(lock.lockPath);
+      try {
+        if (db) db.close();
+      } finally {
+        if (lock && lock.ok) releaseSyncLock(lock.lockPath);
+      }
     }
   }
 }
@@ -442,11 +462,19 @@ async function replayQueue(config) {
 
   for (const file of files) {
     const filepath = path.join(queueDir, file);
-    const lines = fs.readFileSync(filepath, "utf-8").split("\n").filter(Boolean);
+    let lines;
+    try {
+      lines = fs.readFileSync(filepath, "utf-8").split("\n").filter(Boolean);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
     let fileFailed = false;
 
     for (const line of lines) {
-      const result = await ingestPayload(line, config);
+      // The source queue file remains in place on failure; do not create a
+      // second copy of the same payload on every replay attempt.
+      const result = await ingestPayload(line, config, { queueOnFailure: false });
       if (result.ok) {
         processed += 1;
       } else {
@@ -456,7 +484,11 @@ async function replayQueue(config) {
     }
 
     if (!fileFailed) {
-      fs.unlinkSync(filepath);
+      try {
+        fs.unlinkSync(filepath);
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
     }
   }
 
@@ -476,4 +508,5 @@ async function replayQueue(config) {
 module.exports = {
   ingestPayload,
   replayQueue,
+  acquireIngestLock,
 };

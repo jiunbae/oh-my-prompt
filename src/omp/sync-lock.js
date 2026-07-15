@@ -11,7 +11,7 @@ function readLock(lockPath) {
   if (!fs.existsSync(lockPath)) return null;
   try {
     return JSON.parse(fs.readFileSync(lockPath, "utf-8"));
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -21,7 +21,7 @@ function isProcessAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
@@ -37,7 +37,7 @@ function getLockAgeMs(lockInfo, lockPath) {
   try {
     const stat = fs.statSync(lockPath);
     return Math.max(0, Date.now() - stat.mtimeMs);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -56,7 +56,7 @@ function tryCreateLock(lockPath) {
     createdAt: new Date().toISOString(),
   };
   try {
-    fs.writeFileSync(lockPath, JSON.stringify(payload), { flag: "wx" });
+    fs.writeFileSync(lockPath, JSON.stringify(payload), { flag: "wx", mode: 0o600 });
     return { created: true, payload };
   } catch (error) {
     if (error.code === "EEXIST") {
@@ -84,7 +84,10 @@ function acquireSyncLock(options = {}) {
   const alive = sameHost ? isProcessAlive(lockInfo?.pid) : null;
   const orphaned = sameHost && lockInfo?.pid && !alive;
 
-  if (options.force || stale || orphaned) {
+  // A long-running operation on this host remains authoritative even after its
+  // TTL. TTL recovery is only for remote/unverifiable or dead owners.
+  const staleAndNotAliveHere = stale && !(sameHost && alive);
+  if (options.force || staleAndNotAliveHere || orphaned) {
     if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
     const secondAttempt = tryCreateLock(lockPath);
     if (secondAttempt.created) {

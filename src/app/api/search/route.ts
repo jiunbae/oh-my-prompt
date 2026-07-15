@@ -7,6 +7,7 @@ import { sql, and, eq } from "drizzle-orm";
 import { teamMembers } from "@/db/schema";
 import { extractRows } from "@/lib/drizzle-utils";
 import { generateEmbedding } from "@/lib/embedding";
+import { teamPromptViewConditionForMember } from "@/lib/team-access";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,9 @@ export async function GET(request: NextRequest) {
       teamId ? sql`team_id = ${teamId}` : sql`user_id = ${session.userId}`,
       sql`deleted_at IS NULL`,
     ];
+    if (teamId) {
+      filterConditions.push(teamPromptViewConditionForMember(session.userId));
+    }
 
     if (projectFilter) {
       filterConditions.push(sql`project_name = ${projectFilter}`);

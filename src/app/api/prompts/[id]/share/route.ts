@@ -6,6 +6,7 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import crypto from "crypto";
 import { z } from "zod";
+import { canManagePromptAccess } from "@/lib/team-access";
 
 function generateToken(length = 16): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -15,26 +16,6 @@ function generateToken(length = 16): string {
     result += chars[bytes[i] % chars.length];
   }
   return result;
-}
-
-async function canSharePrompt(userId: string, prompt: { userId: string | null; teamId: string | null }): Promise<boolean> {
-  if (prompt.userId === userId) return true;
-  if (prompt.teamId) {
-    const [membership] = await db
-      .select({ role: schema.teamMembers.role })
-      .from(schema.teamMembers)
-      .where(
-        and(
-          eq(schema.teamMembers.teamId, prompt.teamId),
-          eq(schema.teamMembers.userId, userId)
-        )
-      )
-      .limit(1);
-    if (membership && (membership.role === "owner" || membership.role === "admin")) {
-      return true;
-    }
-  }
-  return false;
 }
 
 const shareBodySchema = z.object({
@@ -65,8 +46,6 @@ export async function POST(
     const [prompt] = await db
       .select({
         id: schema.prompts.id,
-        userId: schema.prompts.userId,
-        teamId: schema.prompts.teamId,
       })
       .from(schema.prompts)
       .where(and(eq(schema.prompts.id, id), isNull(schema.prompts.deletedAt)))
@@ -76,7 +55,7 @@ export async function POST(
       return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
     }
 
-    const hasAccess = await canSharePrompt(session.userId, prompt);
+    const hasAccess = await canManagePromptAccess(session.userId, id);
     if (!hasAccess) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

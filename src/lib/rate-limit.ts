@@ -10,6 +10,7 @@
 
 import { redis } from "@/lib/redis";
 import { logger } from "./logger";
+import crypto from "node:crypto";
 
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const REDIS_KEY_PREFIX = "rl:";
@@ -30,7 +31,8 @@ export type RateLimiter = (key: string) => Promise<RateLimitResult>;
 // ARGV[2] = window start (ms)
 // ARGV[3] = unique member suffix (avoids collisions within the same ms)
 // ARGV[4] = TTL in ms
-// Returns: current count in the window (including the just-added member)
+// ARGV[5] = maximum accepted requests
+// Returns: positive count when accepted, negative count when denied
 // ---------------------------------------------------------------------------
 const SLIDING_WINDOW_LUA = `
 local key       = KEYS[1]
@@ -38,12 +40,20 @@ local now       = tonumber(ARGV[1])
 local window    = tonumber(ARGV[2])
 local member    = ARGV[3]
 local ttl       = tonumber(ARGV[4])
+local limit     = tonumber(ARGV[5])
 
-redis.call('ZADD', key, now, member)
 redis.call('ZREMRANGEBYSCORE', key, 0, window)
 local count = redis.call('ZCARD', key)
+
+-- Rejected requests must not be inserted or refresh the TTL. Otherwise a
+-- client retrying while blocked can keep the window alive indefinitely.
+if count >= limit then
+  return -count
+end
+
+redis.call('ZADD', key, now, member)
 redis.call('PEXPIRE', key, ttl)
-return count
+return count + 1
 `;
 
 // Pre-register the Lua script so ioredis can reuse EVALSHA across calls.
@@ -60,6 +70,7 @@ type RedisWithRateLimit = typeof redis & {
     windowStart: number,
     member: string,
     ttl: number,
+    maxRequests: number,
   ): Promise<number>;
 };
 
@@ -75,7 +86,7 @@ function isRedisReady(): boolean {
 // Client IP extraction (spoofing-resistant)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_TRUSTED_PROXY_HOPS = 1;
+const DEFAULT_TRUSTED_PROXY_HOPS = 0;
 const UNKNOWN_IP = "unknown";
 
 type HeaderCarrier = { headers: { get(name: string): string | null } };
@@ -91,7 +102,7 @@ type HeaderCarrier = { headers: { get(name: string): string | null } };
  *
  * @param request       Anything exposing `.headers.get()` (NextRequest / Request).
  * @param trustedHops   Number of trusted proxies between the app and the client.
- *                      Defaults to `TRUSTED_PROXY_HOPS` env or 1.
+ *                      Defaults to `TRUSTED_PROXY_HOPS` env or 0 (trust none).
  */
 export function getClientIp(
   request: HeaderCarrier,
@@ -100,8 +111,13 @@ export function getClientIp(
   const envHops = Number(process.env.TRUSTED_PROXY_HOPS);
   const resolvedHops =
     trustedHops ??
-    (Number.isFinite(envHops) && envHops > 0 ? envHops : DEFAULT_TRUSTED_PROXY_HOPS);
-  const hops = Math.max(1, resolvedHops);
+    (Number.isFinite(envHops) && envHops >= 0 ? envHops : DEFAULT_TRUSTED_PROXY_HOPS);
+  const hops = Math.max(0, resolvedHops);
+
+  // Next.js does not expose the direct socket address. In a directly exposed
+  // deployment it is safer to share the conservative "unknown" bucket than to
+  // let clients spoof forwarding headers and bypass auth rate limits.
+  if (hops === 0) return UNKNOWN_IP;
 
   const xff = request.headers.get("x-forwarded-for");
   if (xff) {
@@ -123,6 +139,21 @@ export function getClientIp(
   return UNKNOWN_IP;
 }
 
+/**
+ * Build a privacy-preserving auth limiter key. Direct deployments cannot read
+ * the socket address from NextRequest, so hashing the normalized account/token
+ * identity prevents every user from sharing the same low-volume bucket without
+ * placing credentials or email addresses in Redis.
+ */
+export function getAuthRateLimitKey(ip: string, identity: string): string {
+  const normalizedIdentity = identity.trim().toLowerCase();
+  const identityHash = crypto
+    .createHash("sha256")
+    .update(normalizedIdentity || "anonymous")
+    .digest("hex");
+  return `${ip}:${identityHash}`;
+}
+
 // ---------------------------------------------------------------------------
 // Redis-backed limiter
 // ---------------------------------------------------------------------------
@@ -140,15 +171,16 @@ function createRedisRateLimiter(
 
     // Await the authoritative count from Redis. `count` includes the member we
     // just added, so it equals the number of requests in the current window.
-    const count: number = await (redis as RedisWithRateLimit).slidingWindowRateLimit(
+    const result: number = await (redis as RedisWithRateLimit).slidingWindowRateLimit(
       redisKey,
       now,
       windowStart,
       member,
       windowMs,
+      maxRequests,
     );
 
-    if (count > maxRequests) {
+    if (result < 0) {
       return {
         allowed: false,
         remaining: 0,
@@ -158,7 +190,7 @@ function createRedisRateLimiter(
 
     return {
       allowed: true,
-      remaining: Math.max(0, maxRequests - count),
+      remaining: Math.max(0, maxRequests - result),
       retryAfterMs: 0,
     };
   };
@@ -261,6 +293,8 @@ export function createRateLimiter(
 
 /** Rate limiter presets — each has its own isolated store and cleanup timer */
 export const rateLimiters = {
+  /** Coarse auth abuse guard. Per-account checks use the lower auth preset. */
+  authGlobal: createRateLimiter(300, 60 * 1000),
   /** Auth endpoints: 10 requests per minute */
   auth: createRateLimiter(10, 60 * 1000),
   /** Search endpoints: 30 requests per minute */

@@ -93,7 +93,7 @@ export function Dialog({ open, onClose, children, className }: DialogProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 sm:p-6">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-background/80 backdrop-blur-sm"
@@ -108,7 +108,7 @@ export function Dialog({ open, onClose, children, className }: DialogProps) {
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          "relative z-50 w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg",
+          "relative z-50 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-6 shadow-lg",
           className
         )}
       >
@@ -134,7 +134,11 @@ export function DialogDescription({ children, className }: { children: ReactNode
 }
 
 export function DialogFooter({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("mt-6 flex justify-end gap-3", className)}>{children}</div>;
+  return (
+    <div className={cn("mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end", className)}>
+      {children}
+    </div>
+  );
 }
 
 interface ConfirmDialogProps {

@@ -21,4 +21,13 @@ describe("queue", () => {
     const stats = getQueueStats();
     expect(stats.bytes).toBeLessThanOrEqual(maxBytes);
   });
+
+  it("stores queued prompt payloads with owner-only permissions", () => {
+    makeTempRoot();
+    const filepath = enqueuePayload('{"text":"private"}', 1024);
+
+    if (process.platform !== "win32") {
+      expect(fs.statSync(filepath).mode & 0o777).toBe(0o600);
+    }
+  });
 });

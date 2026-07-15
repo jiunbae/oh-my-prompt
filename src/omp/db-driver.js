@@ -2,6 +2,45 @@ const initSqlJs = require("sql.js");
 const fs = require("fs");
 const path = require("path");
 
+const WRITE_LOCK_TIMEOUT_MS = 2_000;
+const WRITE_LOCK_STALE_MS = 30_000;
+const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+
+function fileVersion(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  const stat = fs.statSync(filePath, { bigint: true });
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}`;
+}
+
+function waitForWriteLock(lockPath) {
+  const deadline = Date.now() + WRITE_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const fd = fs.openSync(lockPath, "wx", 0o600);
+      fs.closeSync(fd);
+      return;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+        if (age > WRITE_LOCK_STALE_MS) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code !== "ENOENT") throw statError;
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        const timeoutError = new Error("Timed out waiting for the local database write lock");
+        timeoutError.code = "OMP_DB_WRITE_LOCK_TIMEOUT";
+        throw timeoutError;
+      }
+      Atomics.wait(SLEEP_BUFFER, 0, 0, 25);
+    }
+  }
+}
+
 let SQL = null;
 
 async function initDriver() {
@@ -116,6 +155,7 @@ class DatabaseWrapper {
     this._db = sqlJsDb;
     this._filePath = filePath;
     this._readonly = !!options.readonly;
+    this._diskVersion = options.diskVersion ?? null;
     this._inTransaction = false;
     this._batchMode = false;
     this._batchDirty = false;
@@ -179,23 +219,31 @@ class DatabaseWrapper {
     const wrapper = function (...args) {
       self._db.run("BEGIN");
       self._inTransaction = true;
+      let result;
       try {
-        const result = fn.apply(this, args);
+        result = fn.apply(this, args);
         self._db.run("COMMIT");
-        self._inTransaction = false;
-        self._save();
-        return result;
       } catch (err) {
-        self._db.run("ROLLBACK");
+        try {
+          self._db.run("ROLLBACK");
+        } catch {}
         self._inTransaction = false;
         throw err;
       }
+      self._inTransaction = false;
+      // Persist after leaving the SQL transaction. A disk-version conflict is
+      // not a SQL rollback condition and must propagate with its original code.
+      self._save();
+      return result;
     };
     return wrapper;
   }
 
   close() {
-    this._save();
+    // Normal writes are persisted eagerly. Only a pending batch needs a final
+    // flush here; re-saving an unchanged snapshot on every read-only command
+    // can otherwise overwrite data written by another process.
+    this.flush();
     this._db.close();
   }
 
@@ -208,11 +256,22 @@ class DatabaseWrapper {
     // rename — rename is atomic on the same filesystem, so the DB is always
     // either fully old or fully new, never half-written.
     const tmp = `${this._filePath}.tmp-${process.pid}`;
+    const dir = path.dirname(this._filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const lockPath = `${this._filePath}.write.lock`;
+    waitForWriteLock(lockPath);
     try {
+      const currentVersion = fileVersion(this._filePath);
+      if (currentVersion !== this._diskVersion) {
+        const conflict = new Error(
+          "Local database changed in another process; refusing to overwrite newer data",
+        );
+        conflict.code = "OMP_DB_CONCURRENT_MODIFICATION";
+        throw conflict;
+      }
+
       const data = this._db.export();
-      const dir = path.dirname(this._filePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const fd = fs.openSync(tmp, "w");
+      const fd = fs.openSync(tmp, "w", 0o600);
       try {
         fs.writeSync(fd, Buffer.from(data));
         fs.fsyncSync(fd);
@@ -220,11 +279,17 @@ class DatabaseWrapper {
         fs.closeSync(fd);
       }
       fs.renameSync(tmp, this._filePath);
-    } catch {
-      // Silently ignore save errors (e.g. in-memory only usage), but don't
-      // leave a partial temp file behind.
+      fs.chmodSync(this._filePath, 0o600);
+      this._diskVersion = fileVersion(this._filePath);
+    } catch (error) {
+      // Never report a successful capture when the durable write failed.
       try {
         if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+      } catch {}
+      throw error;
+    } finally {
+      try {
+        fs.unlinkSync(lockPath);
       } catch {}
     }
   }
@@ -234,14 +299,28 @@ async function openDatabase(filePath, options = {}) {
   const drv = await initDriver();
 
   let db;
+  let diskVersion = null;
   if (filePath && fs.existsSync(filePath)) {
-    const fileBuffer = fs.readFileSync(filePath);
+    if (!options.readonly) fs.chmodSync(filePath, 0o600);
+    let fileBuffer;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = fileVersion(filePath);
+      fileBuffer = fs.readFileSync(filePath);
+      const after = fileVersion(filePath);
+      if (before === after) {
+        diskVersion = after;
+        break;
+      }
+    }
+    if (!fileBuffer || diskVersion === null) {
+      throw new Error("Local database changed repeatedly while it was being opened");
+    }
     db = new drv.Database(fileBuffer);
   } else {
     db = new drv.Database();
   }
 
-  return new DatabaseWrapper(db, filePath, options);
+  return new DatabaseWrapper(db, filePath, { ...options, diskVersion });
 }
 
 module.exports = { openDatabase, initDriver };

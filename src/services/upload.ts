@@ -14,22 +14,10 @@ import { generateEmbedding } from "@/lib/embedding";
 import { notifySlack } from "@/lib/slack";
 import { triggerEventBatch } from "@/lib/integration-triggers";
 import { dateKeyInTimeZone, startOfDateKeyInTimeZone } from "@/lib/date-utils";
+import { buildEventKey } from "@/lib/event-key";
 import crypto from "crypto";
 
 export type { UploadRecord, UploadResult } from "./upload-types";
-
-function sanitizeEventId(eventId: string): string {
-  // Allowlist: only alphanumeric, hyphens, and underscores
-  return eventId.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function buildEventKey(userToken: string, createdAt: Date, eventId: string): string {
-  const yyyy = createdAt.getUTCFullYear();
-  const mm = String(createdAt.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(createdAt.getUTCDate()).padStart(2, "0");
-  const safeId = sanitizeEventId(eventId);
-  return `${userToken}/${yyyy}/${mm}/${dd}/${safeId}.json`;
-}
 
 /** A validated+processed record ready for DB insert or duplicate-update. */
 interface PreparedRecord {
@@ -44,7 +32,6 @@ interface PreparedRecord {
 export async function processUpload(
   records: UploadRecord[],
   userId: string,
-  userToken: string,
   deviceId?: string,
   teamId?: string,
 ): Promise<UploadResult> {
@@ -85,7 +72,7 @@ export async function processUpload(
       redactMask,
     });
 
-    const eventKey = buildEventKey(userToken, createdAt, record.event_id);
+    const eventKey = buildEventKey(userId, createdAt, record.event_id);
     // Key affected days by APP_TIME_ZONE calendar day (not UTC) so the daily
     // analytics recompute in phase 7 covers the same local-day groups that
     // analytics-cache aggregates by `AT TIME ZONE APP_TIME_ZONE`.
@@ -289,7 +276,7 @@ export async function processUpload(
           .onConflictDoNothing({ target: schema.prompts.eventKey })
           .returning({ id: schema.prompts.id, eventKey: schema.prompts.eventKey });
         for (const row of returned) insertedById.set(row.eventKey, row.id);
-      } catch (error) {
+      } catch {
         // If batch insert fails, fall back to individual inserts for this chunk
         // so we can pinpoint the failing records
         for (let j = 0; j < chunk.length; j++) {
@@ -341,14 +328,13 @@ export async function processUpload(
         "prompt.created",
         insertedItems.map((item) => ({
           promptId: insertedById.get(item.eventKey)!,
-          promptText: item.processed.promptText,
           projectName:
             item.record.project ||
             (item.record.cwd ? item.record.cwd.split("/").pop() || null : null),
           sessionId: item.record.session_id ?? null,
         })),
         userId,
-        teamId,
+        teamId && defaultVisibility !== "private" ? teamId : null,
       ).catch((err) => {
         logger.error({ err }, "Non-blocking integration trigger failed for prompt.created");
       });

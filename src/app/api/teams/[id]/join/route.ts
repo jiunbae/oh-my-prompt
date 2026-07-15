@@ -5,6 +5,12 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { eq, and, gt, isNull } from "drizzle-orm";
 
+class JoinTeamError extends Error {
+  constructor(message: string, readonly status: 400 | 403 | 409) {
+    super(message);
+  }
+}
+
 /**
  * POST /api/teams/:id/join - Accept invite with token
  */
@@ -22,62 +28,60 @@ export async function POST(
       return NextResponse.json({ error: "Invite token is required" }, { status: 400 });
     }
 
-    // Find valid invite
-    const [invite] = await db
-      .select()
-      .from(schema.teamInvites)
-      .where(
-        and(
-          eq(schema.teamInvites.teamId, id),
-          eq(schema.teamInvites.token, token),
-          gt(schema.teamInvites.expiresAt, new Date()),
-          isNull(schema.teamInvites.usedAt)
+    await db.transaction(async (tx) => {
+      const [invite] = await tx
+        .select()
+        .from(schema.teamInvites)
+        .where(
+          and(
+            eq(schema.teamInvites.teamId, id),
+            eq(schema.teamInvites.token, token),
+            gt(schema.teamInvites.expiresAt, new Date()),
+            isNull(schema.teamInvites.usedAt),
+          ),
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (!invite) {
-      return NextResponse.json({ error: "Invalid or expired invite token" }, { status: 400 });
-    }
+      if (!invite) throw new JoinTeamError("Invalid or expired invite token", 400);
+      if (invite.email !== session.email.toLowerCase()) {
+        throw new JoinTeamError("Invite was sent to a different email address", 403);
+      }
 
-    // Verify the invite email matches the current user's email
-    if (invite.email !== session.email.toLowerCase()) {
-      return NextResponse.json(
-        { error: "Invite was sent to a different email address" },
-        { status: 403 }
-      );
-    }
-
-    // Check if already a member
-    const [existingMember] = await db
-      .select()
-      .from(schema.teamMembers)
-      .where(
-        and(
-          eq(schema.teamMembers.teamId, id),
-          eq(schema.teamMembers.userId, session.userId)
+      const [existingMember] = await tx
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(
+          and(
+            eq(schema.teamMembers.teamId, id),
+            eq(schema.teamMembers.userId, session.userId),
+          ),
         )
-      )
-      .limit(1);
+        .limit(1);
+      if (existingMember) {
+        throw new JoinTeamError("You are already a member of this team", 409);
+      }
 
-    if (existingMember) {
-      return NextResponse.json({ error: "You are already a member of this team" }, { status: 409 });
-    }
+      // Claim atomically: a concurrent request can no longer consume the same
+      // invite after both requests pass the initial read.
+      const [claimed] = await tx
+        .update(schema.teamInvites)
+        .set({ usedAt: new Date() })
+        .where(and(eq(schema.teamInvites.id, invite.id), isNull(schema.teamInvites.usedAt)))
+        .returning({ id: schema.teamInvites.id });
+      if (!claimed) throw new JoinTeamError("Invite token has already been used", 400);
 
-    // Add member and mark invite as used
-    await db.insert(schema.teamMembers).values({
-      teamId: id,
-      userId: session.userId,
-      role: "member",
+      await tx.insert(schema.teamMembers).values({
+        teamId: id,
+        userId: session.userId,
+        role: "member",
+      });
     });
-
-    await db
-      .update(schema.teamInvites)
-      .set({ usedAt: new Date() })
-      .where(eq(schema.teamInvites.id, invite.id));
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof JoinTeamError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,44 +51,75 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-2">
-            <img
+            <Image
               src="/logo-dark.svg"
               alt="Oh My Prompt"
+              width={160}
+              height={40}
               className="h-10 w-auto dark:invert-0 invert"
             />
           </div>
+          <h1 className="text-xl font-semibold text-foreground">
+            {tAuth("loginTitle")}
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {tAuth("loginTagline")}
           </p>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4"
+            aria-busy={loading}
+          >
+            <div className="space-y-2">
+              <label htmlFor="login-email" className="text-sm font-medium text-foreground">
+                {tAuth("email")}
+              </label>
               <Input
+                id="login-email"
+                name="email"
                 type="email"
                 placeholder={tAuth("email")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                inputMode="email"
+                required
                 autoFocus
               />
             </div>
-            <div>
+            <div className="space-y-2">
+              <label htmlFor="login-password" className="text-sm font-medium text-foreground">
+                {tAuth("password")}
+              </label>
               <Input
+                id="login-password"
+                name="password"
                 type="password"
                 placeholder={tAuth("password")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
               />
             </div>
             {error && (
-              <p className="text-destructive text-sm text-center">{error}</p>
+              <p
+                id="login-error"
+                role="alert"
+                aria-live="assertive"
+                className="text-destructive text-sm text-center"
+              >
+                {error}
+              </p>
             )}
             <Button
               type="submit"
               className="w-full"
               disabled={loading || !email || !password}
             >
-              {loading ? "..." : tCommon("signIn")}
+              {loading ? tCommon("submitting") : tCommon("signIn")}
             </Button>
           </form>
           <div className="mt-3 text-center">

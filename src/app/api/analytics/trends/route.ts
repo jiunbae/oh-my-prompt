@@ -13,6 +13,7 @@ import {
   getLastNDaysRange,
   parseDateTimeOrDateInTimeZone,
 } from "@/lib/date-utils";
+import { teamPromptViewConditionForMember } from "@/lib/team-access";
 
 function getDateRange(searchParams: URLSearchParams): { from: Date; to: Date } {
   const now = new Date();
@@ -101,6 +102,7 @@ export async function GET(request: NextRequest) {
     }
     if (scopeTeamId) {
       conditions.push(eq(schema.prompts.teamId, scopeTeamId));
+      conditions.push(teamPromptViewConditionForMember(session.userId));
     }
 
     const baseWhere = and(...conditions);

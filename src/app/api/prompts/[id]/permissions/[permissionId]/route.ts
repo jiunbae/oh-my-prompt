@@ -4,7 +4,7 @@ import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
-import { canEditPrompt } from "@/lib/team-access";
+import { canManagePromptAccess } from "@/lib/team-access";
 
 /**
  * DELETE /api/prompts/:id/permissions/:permissionId - Revoke a permission
@@ -17,8 +17,8 @@ export async function DELETE(
     const { id, permissionId } = await params;
     const session = await requireAuth();
 
-    const canEdit = await canEditPrompt(session.userId, id);
-    if (!canEdit) {
+    const canManage = await canManagePromptAccess(session.userId, id);
+    if (!canManage) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 

@@ -263,15 +263,16 @@ export default function TemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Templates</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Reusable prompt patterns with variables
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <Button
+            className="flex-1 sm:flex-none"
             variant="outline"
             onClick={() => window.location.href = "/marketplace"}
           >
@@ -281,6 +282,7 @@ export default function TemplatesPage() {
             Marketplace
           </Button>
           <Button
+            className="flex-1 sm:flex-none"
             onClick={() => {
               resetForm();
               setShowForm(true);
@@ -465,18 +467,26 @@ export default function TemplatesPage() {
           ))}
         </div>
       ) : templates.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
+        <div className="flex flex-col items-center py-12 text-center text-muted-foreground">
           <p>No templates found.</p>
           <p className="text-sm mt-1">
             Create your first prompt template to get started.
           </p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <Button onClick={() => { resetForm(); setShowForm(true); }}>
+              Create first template
+            </Button>
+            <Button variant="outline" onClick={() => { window.location.href = "/marketplace"; }}>
+              Browse Marketplace
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
           {templates.map((t) => (
             <Card key={t.id}>
               <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-medium text-foreground">{t.title}</h3>
@@ -507,7 +517,7 @@ export default function TemplatesPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
                     <Button
                       variant="outline"
                       size="sm"

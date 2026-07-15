@@ -14,7 +14,7 @@ interface ExperimentCardProps {
   winnerVersion: number | null;
   winMetric: string | null;
   createdAt: string;
-  promptEventKey: string | null;
+  promptProjectName: string | null;
 }
 
 function statusBadgeVariant(status: string | null): "default" | "secondary" | "warning" | "success" | "error" {
@@ -42,7 +42,7 @@ export function ExperimentCard({
   winnerVersion,
   winMetric,
   createdAt,
-  promptEventKey,
+  promptProjectName,
 }: ExperimentCardProps) {
   const formattedDate = new Date(createdAt).toLocaleDateString("en-US", {
     month: "short",
@@ -87,7 +87,7 @@ export function ExperimentCard({
           )}
 
           <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>{promptEventKey ?? "Prompt"}</span>
+            <span>{promptProjectName ?? "Prompt"}</span>
             <span>{formattedDate}</span>
           </div>
         </CardContent>

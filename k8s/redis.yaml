@@ -7,6 +7,10 @@ metadata:
     app: redis
 spec:
   replicas: 1
+  # The single ReadWriteOnce volume cannot be mounted by old and new pods at
+  # the same time during a rolling update.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: redis
@@ -30,7 +34,19 @@ spec:
                 - ALL
           ports:
             - containerPort: 6379
-          command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+          command:
+            - redis-server
+            - --maxmemory
+            - 128mb
+            - --maxmemory-policy
+            - noeviction
+            - --appendonly
+            - "yes"
+            - --appendfsync
+            - everysec
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
           resources:
             requests:
               memory: "64Mi"
@@ -48,3 +64,19 @@ spec:
               command: ["redis-cli", "ping"]
             initialDelaySeconds: 3
             periodSeconds: 5
+      volumes:
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: oh-my-prompt
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

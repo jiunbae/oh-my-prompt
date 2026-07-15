@@ -9,9 +9,11 @@ on:
       - "public/**"
       - "scripts/**"
       - "drizzle/**"
+      - "messages/**"
       - "Dockerfile"
       - "package.json"
       - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - "next.config.ts"
       - "tsconfig.json"
       - ".gitea/workflows/**"
@@ -31,6 +33,25 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify source
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm lint
+          pnpm test
+          pnpm check-i18n
+          pnpm check-contrast
+          corepack pnpm@11.13.0 --pm-on-fail=ignore audit
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

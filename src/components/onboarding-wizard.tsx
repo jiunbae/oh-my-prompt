@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogTitle } from "@/components/ui/dialog";
 
 export type OnboardingStepValue = "welcome" | "install_hook" | "create_team" | "explore" | "completed";
 
@@ -22,6 +22,7 @@ const STEPS: { id: OnboardingStepValue; label: string; number: number }[] = [
 ];
 
 const STEP_ORDER: OnboardingStepValue[] = ["welcome", "install_hook", "create_team", "explore"];
+const SETUP_COMMAND = "npm install -g oh-my-prompt && omp setup";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -44,8 +45,9 @@ function CopyButton({ text }: { text: string }) {
 
   return (
     <button
+      type="button"
       onClick={handleCopy}
-      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors motion-reduce:transition-none"
     >
       {copied ? (
         <>
@@ -86,7 +88,7 @@ function ConfettiAnimation() {
       {particles.map((p) => (
         <div
           key={p.id}
-          className={`absolute top-0 w-2 h-2 rounded-sm ${p.color} animate-confetti-fall`}
+          className={`absolute top-0 w-2 h-2 rounded-sm ${p.color} animate-confetti-fall motion-reduce:hidden`}
           style={{
             left: p.left,
             animationDelay: p.delay,
@@ -106,7 +108,9 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
   const [creatingTeam, setCreatingTeam] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [testConnectionStatus, setTestConnectionStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
-  const mountedRef = useRef(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const completionTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const completionHandledRef = useRef(false);
 
   const currentStepIndex = STEP_ORDER.indexOf(currentStep);
   const progress = ((currentStepIndex + 1) / STEP_ORDER.length) * 100;
@@ -140,8 +144,6 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
     const nextIndex = currentStepIndex + 1;
     if (nextIndex < STEP_ORDER.length) {
       await goToStep(STEP_ORDER[nextIndex]);
-    } else {
-      await finishOnboarding();
     }
   }, [currentStepIndex, goToStep]);
 
@@ -153,16 +155,29 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
   }, [currentStepIndex, goToStep]);
 
   const finishOnboarding = useCallback(async () => {
+    clearTimeout(completionTimerRef.current);
+    completionHandledRef.current = false;
     setShowCelebration(true);
     try {
       await fetch("/api/onboarding/complete", { method: "POST" });
     } catch {
       // Silently fail
     }
-    setTimeout(() => {
+    if (completionHandledRef.current) return;
+    completionTimerRef.current = setTimeout(() => {
+      if (completionHandledRef.current) return;
+      completionHandledRef.current = true;
       setShowCelebration(false);
       onComplete();
     }, 2500);
+  }, [onComplete]);
+
+  const closeCelebration = useCallback(() => {
+    if (completionHandledRef.current) return;
+    completionHandledRef.current = true;
+    clearTimeout(completionTimerRef.current);
+    setShowCelebration(false);
+    onComplete();
   }, [onComplete]);
 
   const createTeam = useCallback(async () => {
@@ -191,47 +206,84 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
 
   const testConnection = useCallback(async () => {
     setTestConnectionStatus("testing");
-    // Simulate a brief delay then show success (mock)
-    setTimeout(() => {
+    setConnectionError(null);
+
+    try {
+      const healthResponse = await fetch("/api/health", { cache: "no-store" });
+      const health = (await healthResponse.json().catch(() => null)) as { ok?: boolean } | null;
+      if (!healthResponse.ok || health?.ok !== true) {
+        throw new Error("The server is unavailable. Check your deployment and retry.");
+      }
+
+      const sessionResponse = await fetch("/api/auth/me", { cache: "no-store" });
+      if (!sessionResponse.ok) {
+        if (sessionResponse.status === 401) {
+          throw new Error("Your login session has expired. Sign in again, then retry.");
+        }
+        throw new Error("Your account connection could not be verified. Please retry.");
+      }
+
+      const session = (await sessionResponse.json().catch(() => null)) as {
+        user?: { id?: string; email?: string };
+      } | null;
+      if (!session?.user?.id || !session.user.email) {
+        throw new Error("The server returned an invalid account response. Please retry.");
+      }
+
       setTestConnectionStatus("success");
-      setTimeout(() => setTestConnectionStatus("idle"), 3000);
-    }, 1500);
+    } catch (error) {
+      setTestConnectionStatus("error");
+      setConnectionError(
+        error instanceof Error
+          ? error.message
+          : "The connection could not be verified. Please retry.",
+      );
+    }
   }, []);
 
   useEffect(() => {
-    mountedRef.current = true;
+    return () => clearTimeout(completionTimerRef.current);
   }, []);
 
   if (showCelebration) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+      <Dialog
+        open
+        onClose={closeCelebration}
+        className="relative max-w-md p-8 text-center"
+      >
         <ConfettiAnimation />
-        <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-card p-8 shadow-lg text-center">
+        <div className="relative z-10">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-chart-2/10 text-chart-2">
             <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-foreground">You&apos;re all set!</h2>
+          <DialogTitle className="text-xl">You&apos;re all set!</DialogTitle>
           <p className="mt-2 text-sm text-muted-foreground">
             Welcome to oh-my-prompt. Start capturing and analyzing your prompts.
           </p>
         </div>
-      </div>
+      </Dialog>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-      {/* Backdrop */}
-      <div className="fixed inset-0" onClick={onDismiss} aria-hidden="true" />
-
-      {/* Wizard Card */}
-      <div className="relative z-10 w-full max-w-lg rounded-lg border border-border bg-card shadow-lg overflow-hidden mx-4">
+    <Dialog open onClose={onDismiss} className="max-w-lg p-0">
+        <DialogTitle className="sr-only">
+          Onboarding: {STEPS[currentStepIndex]?.label ?? "Setup"}
+        </DialogTitle>
         {/* Progress bar */}
-        <div className="h-1 bg-secondary">
+        <div
+          role="progressbar"
+          aria-label="Onboarding progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+          className="h-1 bg-secondary"
+        >
           <div
-            className="h-full bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)] transition-all duration-500"
+            className="h-full bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)] transition-all duration-500 motion-reduce:transition-none"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -244,7 +296,8 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
             return (
               <div key={step.id} className="flex items-center gap-2">
                 <div
-                  className={`flex items-center justify-center h-7 w-7 rounded-full text-xs font-medium transition-colors ${
+                  aria-current={isActive ? "step" : undefined}
+                  className={`flex items-center justify-center h-7 w-7 rounded-full text-xs font-medium transition-colors motion-reduce:transition-none ${
                     isActive
                       ? "bg-primary text-primary-foreground"
                       : isPast
@@ -261,8 +314,8 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                   )}
                 </div>
                 <span
-                  className={`text-xs font-medium ${
-                    isActive ? "text-foreground" : isPast ? "text-muted-foreground" : "text-muted-foreground/60"
+                  className={`hidden text-xs font-medium sm:inline ${
+                    isActive ? "text-foreground" : "text-muted-foreground"
                   }`}
                 >
                   {step.label}
@@ -276,7 +329,7 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
         </div>
 
         {/* Content */}
-        <div className={`p-6 transition-opacity duration-200 ${animating ? "opacity-0" : "opacity-100"}`}>
+        <div className={`p-6 transition-opacity duration-200 motion-reduce:transition-none ${animating ? "opacity-0 motion-reduce:opacity-100" : "opacity-100"}`}>
           {/* Step 1: Welcome */}
           {currentStep === "welcome" && (
             <div className="text-center space-y-4">
@@ -316,27 +369,13 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                 <Card variant="outlined">
                   <CardContent className="p-4 space-y-2">
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Step 1 — Install globally
+                      Install and configure
                     </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 rounded bg-surface px-3 py-1.5 text-xs font-mono text-foreground">
-                        npm install -g oh-my-prompt
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <code className="min-w-0 flex-1 overflow-x-auto rounded bg-surface px-3 py-1.5 text-xs font-mono text-foreground">
+                        {SETUP_COMMAND}
                       </code>
-                      <CopyButton text="npm install -g oh-my-prompt" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card variant="outlined">
-                  <CardContent className="p-4 space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Step 2 — Install hook
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 rounded bg-surface px-3 py-1.5 text-xs font-mono text-foreground">
-                        omp install-hook
-                      </code>
-                      <CopyButton text="omp install-hook" />
+                      <CopyButton text={SETUP_COMMAND} />
                     </div>
                   </CardContent>
                 </Card>
@@ -351,7 +390,7 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                 >
                   {testConnectionStatus === "testing" ? (
                     <>
-                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <svg className="h-4 w-4 animate-spin motion-reduce:animate-none" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
@@ -364,6 +403,13 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                       </svg>
                       Connection looks good
                     </>
+                  ) : testConnectionStatus === "error" ? (
+                    <>
+                      <svg className="h-4 w-4 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 4h.01M10.29 3.86l-8.82 15.28A2 2 0 003.2 22h17.6a2 2 0 001.73-2.86L13.71 3.86a2 2 0 00-3.42 0z" />
+                      </svg>
+                      Retry connection
+                    </>
                   ) : (
                     <>
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -373,11 +419,23 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                     </>
                   )}
                 </Button>
-                <div className="flex gap-2 justify-between">
+                <div aria-live="polite" aria-atomic="true">
+                  {testConnectionStatus === "success" && (
+                    <p className="text-xs text-chart-2">
+                      Server and signed-in account verified.
+                    </p>
+                  )}
+                  {testConnectionStatus === "error" && connectionError && (
+                    <p role="alert" className="text-xs text-destructive">
+                      {connectionError}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
                   <Button variant="ghost" size="sm" onClick={handleBack}>
                     Back
                   </Button>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row">
                     <Button variant="ghost" size="sm" onClick={handleNext}>
                       I already have hooks installed
                     </Button>
@@ -402,8 +460,12 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
 
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-secondary-foreground">Team Name</label>
+                  <label htmlFor="onboarding-team-name" className="text-sm font-medium text-secondary-foreground">
+                    Team Name
+                  </label>
                   <Input
+                    id="onboarding-team-name"
+                    name="teamName"
                     type="text"
                     value={teamName}
                     onChange={(e) => setTeamName(e.target.value)}
@@ -412,17 +474,17 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                   />
                 </div>
                 {teamError && (
-                  <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+                  <div role="alert" className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
                     {teamError}
                   </div>
                 )}
               </div>
 
-              <div className="flex gap-2 justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
                 <Button variant="ghost" size="sm" onClick={handleBack}>
                   Back
                 </Button>
-                <div className="flex gap-2">
+                <div className="flex flex-col-reverse gap-2 sm:flex-row">
                   <Button variant="ghost" size="sm" onClick={handleNext}>
                     Skip for now
                   </Button>
@@ -499,7 +561,7 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
                 </Card>
               </div>
 
-              <div className="flex gap-2 justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
                 <Button variant="ghost" size="sm" onClick={handleBack}>
                   Back
                 </Button>
@@ -520,7 +582,6 @@ export default function OnboardingWizard({ initialStep, onComplete, onDismiss }:
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

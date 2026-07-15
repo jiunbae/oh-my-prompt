@@ -9,7 +9,7 @@ import {
   AUTH_COOKIE_NAME,
   AUTH_COOKIE_OPTIONS,
 } from "@/lib/auth";
-import { rateLimiters, getClientIp } from "@/lib/rate-limit";
+import { rateLimiters, getClientIp, getAuthRateLimitKey } from "@/lib/rate-limit";
 
 // Fixed dummy bcrypt hash used to equalize timing when a user is not found,
 // closing the login timing oracle (found vs. not-found paths take similar time).
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   try {
     // Rate limit by IP (auth endpoints are unauthenticated)
     const ip = getClientIp(request);
-    const rateCheck = await rateLimiters.auth(ip);
+    const rateCheck = await rateLimiters.authGlobal(ip);
     if (!rateCheck.allowed) {
       return NextResponse.json(
         { error: "Too many login attempts. Please try again later." },
@@ -41,6 +41,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Email and password are required" },
         { status: 400 }
+      );
+    }
+
+    const identityRateCheck = await rateLimiters.auth(getAuthRateLimitKey(ip, email));
+    if (!identityRateCheck.allowed) {
+      return NextResponse.json(
+        { error: "Too many login attempts. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(identityRateCheck.retryAfterMs / 1000)) } },
       );
     }
 
@@ -70,7 +78,6 @@ export async function POST(request: NextRequest) {
     const sessionToken = createSessionToken({
       userId: user.id,
       email: user.email,
-      token: user.token,
       isAdmin: user.isAdmin ?? false,
     });
 

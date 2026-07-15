@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, ne, sql, isNull } from "drizzle-orm";
-import { requireAuth, checkIsAdmin, AuthError } from "@/lib/with-auth";
+import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import { computeSimilarity } from "@/lib/prompt-diff";
+import { promptViewCondition } from "@/lib/team-access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,10 +24,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch the source prompt
-    const isAdmin = session.isAdmin ? await checkIsAdmin(session.userId) : false;
-    const ownershipCondition = isAdmin
-      ? and(eq(schema.prompts.id, id), isNull(schema.prompts.deletedAt))
-      : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, session.userId), isNull(schema.prompts.deletedAt));
+    const ownershipCondition = and(
+      eq(schema.prompts.id, id),
+      promptViewCondition(session.userId),
+      isNull(schema.prompts.deletedAt)
+    );
 
     const [sourcePrompt] = await db
       .select({
@@ -63,11 +65,6 @@ export async function GET(request: NextRequest) {
 
     const searchText = words.join(" ");
 
-    // Build ownership filter for candidates
-    const userFilter = isAdmin
-      ? sql`TRUE`
-      : sql`${schema.prompts.userId} = ${session.userId}`;
-
     const candidates = await db
       .select({
         id: schema.prompts.id,
@@ -81,7 +78,7 @@ export async function GET(request: NextRequest) {
         and(
           ne(schema.prompts.id, id),
           sql`${schema.prompts.searchVector} @@ plainto_tsquery('english', ${searchText})`,
-          sql`${userFilter}`,
+          promptViewCondition(session.userId),
           isNull(schema.prompts.deletedAt)
         )
       )

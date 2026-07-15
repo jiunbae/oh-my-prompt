@@ -2474,7 +2474,7 @@ async function main() {
           const { startLocalServer } = require("./serve-local");
           await startLocalServer(config, port, { host });
         } else {
-          await startServer(config);
+          await startServer(config, options);
         }
       } else {
         console.error(`Unknown subcommand: omp serve ${action}`);

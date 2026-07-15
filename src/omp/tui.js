@@ -179,8 +179,8 @@ function drawStatusBar(mode, searchQuery) {
 // Main TUI
 // ---------------------------------------------------------------------------
 
-function startTui(config) {
-  const db = openDb(config.storage.sqlite.path);
+async function startTui(config) {
+  const db = await openDb(config.storage.sqlite.path);
   let prompts = loadPrompts(db);
   let filteredPrompts = prompts;
   let selectedIndex = 0;

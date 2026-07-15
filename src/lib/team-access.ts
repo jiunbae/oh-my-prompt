@@ -1,6 +1,44 @@
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, sql, isNull } from "drizzle-orm";
+import {
+  hasPromptViewAccess,
+  hasPromptManageAccess,
+  type PromptPermissionLevel,
+  type PromptVisibility,
+} from "@/lib/prompt-access-policy";
+import { canTeamRoleManage, isOwnerRole } from "@/lib/team-role-policy";
+
+/** Shared SQL equivalent of canViewPrompt for prompt list/aggregate queries. */
+export function promptViewCondition(userId: string) {
+  return sql<boolean>`(
+    ${schema.prompts.userId} = ${userId}
+    OR ${schema.prompts.visibility} = 'public'
+    OR (
+      ${schema.prompts.teamId} IS NOT NULL
+      AND (${schema.prompts.visibility} = 'team' OR ${schema.prompts.visibility} IS NULL)
+      AND EXISTS (
+        SELECT 1
+        FROM ${schema.teamMembers}
+        WHERE ${schema.teamMembers.teamId} = ${schema.prompts.teamId}
+          AND ${schema.teamMembers.userId} = ${userId}
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM ${schema.promptPermissions}
+      WHERE ${schema.promptPermissions.promptId} = ${schema.prompts.id}
+        AND ${schema.promptPermissions.userId} = ${userId}
+        AND ${schema.promptPermissions.permission} IN ('view', 'edit', 'admin')
+    )
+  )`;
+}
+
+/**
+ * Kept as a descriptive alias for callers that already verify and scope a team.
+ * The full membership predicate remains in place as defense in depth.
+ */
+export const teamPromptViewConditionForMember = promptViewCondition;
 
 /**
  * Get the visibility of a prompt.
@@ -8,7 +46,7 @@ import { eq, and, inArray } from "drizzle-orm";
  */
 export async function getPromptVisibility(
   promptId: string
-): Promise<"private" | "team" | "public"> {
+): Promise<PromptVisibility> {
   const [prompt] = await db
     .select({
       userId: schema.prompts.userId,
@@ -16,7 +54,7 @@ export async function getPromptVisibility(
       visibility: schema.prompts.visibility,
     })
     .from(schema.prompts)
-    .where(eq(schema.prompts.id, promptId))
+    .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
     .limit(1);
 
   if (!prompt) return "private";
@@ -62,20 +100,22 @@ export async function canViewPrompt(
       visibility: schema.prompts.visibility,
     })
     .from(schema.prompts)
-    .where(eq(schema.prompts.id, promptId))
+    .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
     .limit(1);
 
   if (!prompt) return false;
 
-  // Owner can always view
-  if (prompt.userId === userId) return true;
+  const visibility: PromptVisibility =
+    prompt.visibility === "team" || prompt.visibility === "public"
+      ? prompt.visibility
+      : prompt.visibility === "private"
+        ? "private"
+        : prompt.teamId
+          ? "team"
+          : "private";
 
-  // Public visibility
-  const visibility = prompt.visibility ?? "private";
-  if (visibility === "public") return true;
-
-  // Team visibility: any team member can view
-  if (prompt.teamId && (visibility === "team" || !prompt.visibility)) {
+  let isTeamMember = false;
+  if (prompt.teamId && visibility === "team") {
     const [membership] = await db
       .select({ role: schema.teamMembers.role })
       .from(schema.teamMembers)
@@ -86,7 +126,7 @@ export async function canViewPrompt(
         )
       )
       .limit(1);
-    if (membership) return true;
+    isTeamMember = !!membership;
   }
 
   // Explicit permission grant
@@ -101,11 +141,65 @@ export async function canViewPrompt(
     )
     .limit(1);
 
-  if (permission) {
-    return permission.permission === "view" || permission.permission === "edit" || permission.permission === "admin";
+  return hasPromptViewAccess({
+    isOwner: prompt.userId === userId,
+    visibility,
+    isTeamMember,
+    permission: permission?.permission as PromptPermissionLevel | undefined,
+  });
+}
+
+/**
+ * Check whether a user may manage a prompt's ACL.
+ * Edit permission deliberately does not grant access-management rights.
+ */
+export async function canManagePromptAccess(
+  userId: string,
+  promptId: string
+): Promise<boolean> {
+  const [prompt] = await db
+    .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
+    .from(schema.prompts)
+    .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
+    .limit(1);
+
+  if (!prompt) return false;
+  if (prompt.userId === userId) {
+    return hasPromptManageAccess({ isOwner: true });
   }
 
-  return false;
+  let isTeamManager = false;
+  if (prompt.teamId) {
+    const [membership] = await db
+      .select({ role: schema.teamMembers.role })
+      .from(schema.teamMembers)
+      .where(
+        and(
+          eq(schema.teamMembers.teamId, prompt.teamId),
+          eq(schema.teamMembers.userId, userId),
+        ),
+      )
+      .limit(1);
+    isTeamManager = canTeamRoleManage(membership?.role);
+  }
+
+  const [permission] = await db
+    .select({ permission: schema.promptPermissions.permission })
+    .from(schema.promptPermissions)
+    .where(
+      and(
+        eq(schema.promptPermissions.promptId, promptId),
+        eq(schema.promptPermissions.userId, userId),
+        eq(schema.promptPermissions.permission, "admin")
+      )
+    )
+    .limit(1);
+
+  return hasPromptManageAccess({
+    isOwner: false,
+    isTeamManager,
+    permission: permission?.permission as PromptPermissionLevel | undefined,
+  });
 }
 
 /**
@@ -119,7 +213,7 @@ export async function canEditPrompt(
   const [prompt] = await db
     .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
     .from(schema.prompts)
-    .where(eq(schema.prompts.id, promptId))
+    .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
     .limit(1);
 
   if (!prompt) return false;
@@ -157,7 +251,7 @@ export async function canDeletePrompt(
   const [prompt] = await db
     .select({ userId: schema.prompts.userId, teamId: schema.prompts.teamId })
     .from(schema.prompts)
-    .where(eq(schema.prompts.id, promptId))
+    .where(and(eq(schema.prompts.id, promptId), isNull(schema.prompts.deletedAt)))
     .limit(1);
 
   if (!prompt) return false;
@@ -215,7 +309,52 @@ export async function canManageTeam(
     )
     .limit(1);
 
-  return membership?.role === "owner" || membership?.role === "admin";
+  return canTeamRoleManage(membership?.role);
+}
+
+/**
+ * Personal integrations are managed by their creator. Team integrations are
+ * managed by the team's current owner/admin, not by the original creator after
+ * that user loses the management role.
+ */
+export async function canManageOutgoingIntegration(
+  userId: string,
+  integrationId: string
+): Promise<boolean> {
+  const [integration] = await db
+    .select({
+      userId: schema.outgoingIntegrations.userId,
+      teamId: schema.outgoingIntegrations.teamId,
+    })
+    .from(schema.outgoingIntegrations)
+    .where(eq(schema.outgoingIntegrations.id, integrationId))
+    .limit(1);
+
+  if (!integration) return false;
+  if (integration.teamId) {
+    return canManageTeam(userId, integration.teamId);
+  }
+  return integration.userId === userId;
+}
+
+/** Check whether a user is the team's owner (admins are intentionally excluded). */
+export async function isTeamOwner(
+  userId: string,
+  teamId: string
+): Promise<boolean> {
+  const [membership] = await db
+    .select({ role: schema.teamMembers.role })
+    .from(schema.teamMembers)
+    .where(
+      and(
+        eq(schema.teamMembers.teamId, teamId),
+        eq(schema.teamMembers.userId, userId),
+        eq(schema.teamMembers.role, "owner")
+      )
+    )
+    .limit(1);
+
+  return isOwnerRole(membership?.role);
 }
 
 /**

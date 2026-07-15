@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { ingestPayload } = require("../ingest");
+const { ingestPayload, replayQueue } = require("../ingest");
 const { openDb } = require("../db");
 
 function makeTempRoot() {
@@ -11,6 +11,54 @@ function makeTempRoot() {
 }
 
 describe("ingestPayload", () => {
+  it("redacts a payload before queueing it after a durable write failure", async () => {
+    const root = makeTempRoot();
+    const invalidDbPath = path.join(root, "database-directory");
+    fs.mkdirSync(invalidDbPath);
+    const config = {
+      storage: { sqlite: { path: invalidDbPath } },
+      capture: {
+        response: true,
+        redact: { enabled: true, mask: "[REDACTED]" },
+      },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    const result = await ingestPayload(
+      {
+        source: "test-cli",
+        role: "user",
+        text: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
+      },
+      config
+    );
+
+    expect(result.ok).toBe(false);
+    const queueDir = path.join(root, "oh-my-prompt", "queue");
+    const queued = fs.readFileSync(path.join(queueDir, fs.readdirSync(queueDir)[0]), "utf8");
+    expect(queued).toContain("[REDACTED]");
+    expect(queued).not.toContain("abcdefghijklmnopqrstuvwxyz");
+  });
+
+  it("does not duplicate a queue file when replay fails again", async () => {
+    const root = makeTempRoot();
+    const invalidDbPath = path.join(root, "database-directory");
+    fs.mkdirSync(invalidDbPath);
+    const config = {
+      storage: { sqlite: { path: invalidDbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    await ingestPayload({ source: "test", role: "user", text: "queued" }, config);
+    const queueDir = path.join(root, "oh-my-prompt", "queue");
+    expect(fs.readdirSync(queueDir)).toHaveLength(1);
+
+    const replay = await replayQueue(config);
+    expect(replay.failed).toBe(1);
+    expect(fs.readdirSync(queueDir)).toHaveLength(1);
+  });
+
   it("writes a prompt record to sqlite", async () => {
     const root = makeTempRoot();
     const dbPath = path.join(root, "omp.db");

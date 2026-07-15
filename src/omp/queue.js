@@ -1,6 +1,38 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { getQueueDir, ensureDir } = require("./paths");
+
+const QUEUE_LOCK_TIMEOUT_MS = 2_000;
+const QUEUE_LOCK_STALE_MS = 30_000;
+const QUEUE_SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+
+function acquireQueueLock(queueDir) {
+  const lockPath = path.join(queueDir, ".queue.lock");
+  const deadline = Date.now() + QUEUE_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const fd = fs.openSync(lockPath, "wx", 0o600);
+      fs.closeSync(fd);
+      return lockPath;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - fs.statSync(lockPath).mtimeMs > QUEUE_LOCK_STALE_MS) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code !== "ENOENT") throw statError;
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("Timed out waiting for the local ingest queue lock");
+      }
+      Atomics.wait(QUEUE_SLEEP_BUFFER, 0, 0, 25);
+    }
+  }
+}
 
 function getQueueStats() {
   const queueDir = getQueueDir();
@@ -15,7 +47,13 @@ function getQueueStats() {
 
   for (const file of files) {
     const filepath = path.join(queueDir, file);
-    const stats = fs.statSync(filepath);
+    let stats;
+    try {
+      stats = fs.statSync(filepath);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
     bytes += stats.size;
     if (!oldest || stats.mtimeMs < oldest.mtimeMs) {
       oldest = { file, mtimeMs: stats.mtimeMs };
@@ -33,7 +71,7 @@ function getQueueStats() {
   };
 }
 
-function enforceQueueLimit(maxBytes) {
+function enforceQueueLimitUnlocked(maxBytes) {
   if (!maxBytes) return getQueueStats();
 
   const queueDir = getQueueDir();
@@ -47,16 +85,26 @@ function enforceQueueLimit(maxBytes) {
   const files = fs
     .readdirSync(queueDir)
     .filter((f) => f.endsWith(".jsonl"))
-    .map((file) => {
+    .flatMap((file) => {
       const filepath = path.join(queueDir, file);
-      const fileStats = fs.statSync(filepath);
-      return { file, filepath, mtimeMs: fileStats.mtimeMs, size: fileStats.size };
+      try {
+        const fileStats = fs.statSync(filepath);
+        return [{ file, filepath, mtimeMs: fileStats.mtimeMs, size: fileStats.size }];
+      } catch (error) {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      }
     })
     .sort((a, b) => a.mtimeMs - b.mtimeMs);
 
   for (const file of files) {
     if (stats.bytes <= maxBytes) break;
-    fs.unlinkSync(file.filepath);
+    try {
+      fs.unlinkSync(file.filepath);
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
     stats.bytes -= file.size;
     stats.count -= 1;
   }
@@ -64,15 +112,31 @@ function enforceQueueLimit(maxBytes) {
   return getQueueStats();
 }
 
+function enforceQueueLimit(maxBytes) {
+  const queueDir = getQueueDir();
+  ensureDir(queueDir);
+  const lockPath = acquireQueueLock(queueDir);
+  try {
+    return enforceQueueLimitUnlocked(maxBytes);
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch {}
+  }
+}
+
 function enqueuePayload(rawPayload, maxBytes) {
   const queueDir = getQueueDir();
   ensureDir(queueDir);
-  enforceQueueLimit(maxBytes);
-  const filename = `ingest-${Date.now()}-${Math.floor(Math.random() * 10000)}.jsonl`;
-  const filepath = path.join(queueDir, filename);
-  fs.writeFileSync(filepath, rawPayload + "\n");
-  enforceQueueLimit(maxBytes);
-  return filepath;
+  const lockPath = acquireQueueLock(queueDir);
+  try {
+    const filename = `ingest-${Date.now()}-${process.pid}-${crypto.randomUUID()}.jsonl`;
+    const filepath = path.join(queueDir, filename);
+    fs.writeFileSync(filepath, rawPayload + "\n", { flag: "wx", mode: 0o600 });
+    fs.chmodSync(filepath, 0o600);
+    enforceQueueLimitUnlocked(maxBytes);
+    return filepath;
+  } finally {
+    try { fs.unlinkSync(lockPath); } catch {}
+  }
 }
 
 module.exports = {

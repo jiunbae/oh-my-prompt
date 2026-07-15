@@ -17,7 +17,8 @@ function loadState() {
 function saveState(state) {
   const statePath = getStatePath();
   ensureDir(path.dirname(statePath));
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+  fs.chmodSync(statePath, 0o600);
 }
 
 function updateState(partial) {

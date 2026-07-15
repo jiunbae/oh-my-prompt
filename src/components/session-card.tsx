@@ -5,6 +5,10 @@ import { FavoriteSessionButton } from "@/components/favorite-session-button";
 
 interface SessionCardProps {
   sessionId: string;
+  /** Required with teamId to keep team sessions scoped to their owner. */
+  ownerId?: string | null;
+  /** Required with ownerId when linking to a team-scoped session. */
+  teamId?: string | null;
   displayName?: string | null;
   firstPrompt: string;
   startedAt: string;
@@ -27,6 +31,8 @@ interface SessionCardProps {
   untitledLabel?: string;
   /** Translated "Empty prompt" string. */
   emptyPromptLabel?: string;
+  /** Personal actions are ambiguous for another user's team session. */
+  canFavorite?: boolean;
 }
 
 function formatDate(dateStr: string, locale: string): string {
@@ -55,12 +61,13 @@ function formatTokens(count: number): string {
 
 export function SessionCard({
   sessionId,
+  ownerId,
+  teamId,
   displayName,
   firstPrompt,
   startedAt,
   endedAt,
   promptCount,
-  responseCount,
   projectName,
   source,
   totalTokens,
@@ -69,20 +76,37 @@ export function SessionCard({
   locale = "en-US",
   untitledLabel = "Untitled Session",
   emptyPromptLabel = "Empty prompt",
+  canFavorite = true,
 }: SessionCardProps) {
+  const teamQuery = teamId && ownerId
+    ? `?teamId=${encodeURIComponent(teamId)}&ownerId=${encodeURIComponent(ownerId)}`
+    : "";
+  const sessionHref = `/sessions/${encodeURIComponent(sessionId)}${teamQuery}`;
+
   if (variant === "grid") {
+    const titleId = `session-card-grid-${sessionId}`;
+
     return (
-      <Link href={`/sessions/${sessionId}`} className="block h-full">
-        <Card className="h-full transition-all duration-200 hover:border-border-strong/30 hover:shadow-[0_0_20px_var(--glow)] hover:translate-y-[-1px] cursor-pointer overflow-hidden">
+      <div className="group relative h-full">
+        <Link
+          href={sessionHref}
+          aria-labelledby={titleId}
+          className="absolute inset-0 z-10 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        />
+        <Card className="pointer-events-none h-full overflow-hidden transition-all duration-200 group-hover:-translate-y-px group-hover:border-border-strong/30 group-hover:shadow-[0_0_20px_var(--glow)]">
           {/* Top gradient bar */}
           <div className="h-1 bg-gradient-to-r from-[var(--accent-gradient-from)] to-[var(--accent-gradient-to)]" />
           <CardContent className="p-4">
             {/* Title */}
             <div className="flex items-start justify-between gap-1 mb-1">
-              <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
+              <h3 id={titleId} className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
                 {displayName || untitledLabel}
               </h3>
-              <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
+              {canFavorite && (
+                <div className="pointer-events-auto relative z-20">
+                  <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
+                </div>
+              )}
             </div>
             {/* Preview */}
             <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-line mb-3">
@@ -125,14 +149,21 @@ export function SessionCard({
             </div>
           </CardContent>
         </Card>
-      </Link>
+      </div>
     );
   }
 
   // List variant (default)
+  const titleId = `session-card-list-${sessionId}`;
+
   return (
-    <Link href={`/sessions/${sessionId}`} className="block">
-      <Card className="transition-all duration-200 hover:border-border-strong/30 hover:shadow-[0_0_20px_var(--glow)] hover:translate-y-[-1px] cursor-pointer overflow-hidden">
+    <div className="group relative">
+      <Link
+        href={sessionHref}
+        aria-labelledby={titleId}
+        className="absolute inset-0 z-10 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      />
+      <Card className="pointer-events-none overflow-hidden transition-all duration-200 group-hover:-translate-y-px group-hover:border-border-strong/30 group-hover:shadow-[0_0_20px_var(--glow)]">
         <div className="flex">
           {/* Left color indicator bar */}
           <div className="w-[2px] shrink-0 bg-primary/60" />
@@ -140,8 +171,12 @@ export function SessionCard({
             {/* Top section: name + time */}
             <div className="flex items-start justify-between gap-4 mb-1">
               <div className="flex items-center gap-1 min-w-0">
-                <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
-                <h3 className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
+                {canFavorite && (
+                  <div className="pointer-events-auto relative z-20">
+                    <FavoriteSessionButton sessionId={sessionId} initialFavorited={isFavorited} />
+                  </div>
+                )}
+                <h3 id={titleId} className="text-sm font-semibold text-foreground line-clamp-1 min-w-0">
                   {displayName || firstPrompt || emptyPromptLabel}
                 </h3>
               </div>
@@ -194,6 +229,6 @@ export function SessionCard({
           </CardContent>
         </div>
       </Card>
-    </Link>
+    </div>
   );
 }

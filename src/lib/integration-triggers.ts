@@ -5,6 +5,8 @@ import { eq, and, sql, isNull } from "drizzle-orm";
 import { env } from "@/env";
 import { validateWebhookUrl } from "@/services/webhook";
 import crypto from "crypto";
+import { canManageOutgoingIntegration } from "@/lib/team-access";
+import { sanitizeIntegrationPayload } from "@/lib/integration-payload";
 
 const INTEGRATION_TIMEOUT_MS = env.INTEGRATION_WEBHOOK_TIMEOUT_MS;
 
@@ -39,7 +41,10 @@ export async function triggerEvent(
   if (teamId) {
     conditions.push(eq(schema.outgoingIntegrations.teamId, teamId));
   } else {
-    conditions.push(eq(schema.outgoingIntegrations.userId, userId));
+    conditions.push(
+      eq(schema.outgoingIntegrations.userId, userId),
+      isNull(schema.outgoingIntegrations.teamId),
+    );
   }
 
   const integrations = await db
@@ -52,7 +57,7 @@ export async function triggerEvent(
   const deliveryPayload = {
     event: eventType,
     timestamp: new Date().toISOString(),
-    data: payload,
+    data: sanitizeIntegrationPayload(payload),
   };
 
   // Fire-and-forget: don't block the main flow
@@ -84,8 +89,11 @@ export async function triggerEventBatch(
   // event) the team's integrations. The single-event path historically only
   // matched one or the other, leaving team integrations unreachable on upload.
   const scope = teamId
-    ? sql`(${schema.outgoingIntegrations.userId} = ${userId} OR ${schema.outgoingIntegrations.teamId} = ${teamId})`
-    : eq(schema.outgoingIntegrations.userId, userId);
+    ? sql`((${schema.outgoingIntegrations.userId} = ${userId} AND ${schema.outgoingIntegrations.teamId} IS NULL) OR ${schema.outgoingIntegrations.teamId} = ${teamId})`
+    : and(
+        eq(schema.outgoingIntegrations.userId, userId),
+        isNull(schema.outgoingIntegrations.teamId),
+      );
 
   const integrations = await db
     .select()
@@ -114,10 +122,11 @@ export async function triggerEventBatch(
           "Outgoing integration blocked by SSRF check",
         );
         for (const payload of payloads) {
+          const sanitizedPayload = sanitizeIntegrationPayload(payload);
           await logDelivery(
             integration.id,
             eventType,
-            { event: eventType, timestamp: nowIso, data: payload },
+            { event: eventType, timestamp: nowIso, data: sanitizedPayload },
             null,
             null,
             errorMessage,
@@ -127,10 +136,11 @@ export async function triggerEventBatch(
       }
 
       for (const payload of payloads) {
+        const sanitizedPayload = sanitizeIntegrationPayload(payload);
         await postToIntegration(integration, eventType, {
           event: eventType,
           timestamp: new Date().toISOString(),
-          data: payload,
+          data: sanitizedPayload,
         });
       }
     }),
@@ -268,15 +278,14 @@ export async function sendTestIntegration(
   integrationId: string,
   userId: string,
 ): Promise<{ success: boolean; statusCode: number | null; responseBody: string | null; error?: string }> {
-  const conditions = [
-    eq(schema.outgoingIntegrations.id, integrationId),
-    eq(schema.outgoingIntegrations.userId, userId),
-  ];
+  if (!(await canManageOutgoingIntegration(userId, integrationId))) {
+    return { success: false, statusCode: null, responseBody: null, error: "Integration not found" };
+  }
 
   const [integration] = await db
     .select()
     .from(schema.outgoingIntegrations)
-    .where(and(...conditions))
+    .where(eq(schema.outgoingIntegrations.id, integrationId))
     .limit(1);
 
   if (!integration) {
@@ -295,7 +304,6 @@ export async function sendTestIntegration(
   };
 
   const bodyString = JSON.stringify(testPayload);
-  const startTime = Date.now();
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

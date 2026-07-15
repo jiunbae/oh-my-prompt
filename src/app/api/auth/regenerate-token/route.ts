@@ -47,17 +47,19 @@ export async function POST() {
     const newSessionToken = createSessionToken({
       userId: session.userId,
       email: updatedUser.email,
-      token: updatedUser.token,
       isAdmin: session.isAdmin,
     });
     const cookieStore = await cookies();
     cookieStore.set(AUTH_COOKIE_NAME, newSessionToken, AUTH_COOKIE_OPTIONS);
 
-    return NextResponse.json({
-      success: true,
-      token: updatedUser.token,
-      message: "Token regenerated successfully. Update your prompt capture hook configuration.",
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        token: updatedUser.token,
+        message: "Token regenerated successfully. Update your prompt capture hook configuration.",
+      },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: 401 });

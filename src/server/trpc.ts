@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { AUTH_COOKIE_NAME, parseSessionToken } from "@/lib/auth";
 
 async function resolveIsAdmin(userId: string): Promise<boolean> {
   try {
@@ -47,39 +48,36 @@ async function isSessionInvalidatedByPasswordChange(
  * Context creation for tRPC
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
-  const userId = opts.headers.get("x-user-id");
-  const email = opts.headers.get("x-user-email");
-  const iatHeader = opts.headers.get("x-session-iat");
+  const cookieHeader = opts.headers.get("cookie") ?? "";
+  const token = cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${AUTH_COOKIE_NAME}=`))
+    ?.slice(AUTH_COOKIE_NAME.length + 1);
+  const session = token ? parseSessionToken(decodeURIComponent(token)) : null;
 
-  if (!userId) {
+  if (!session) {
     return { headers: opts.headers, user: null };
   }
 
-  // Reject sessions issued before the user's last password change. The iat is
-  // injected by middleware (src/middleware.ts) alongside the trusted x-user-id.
-  // When present, it MUST validate; a present-but-invalid iat fails closed.
-  if (iatHeader !== null) {
-    const iat = Number(iatHeader);
-    if (
-      !Number.isFinite(iat) ||
-      (await isSessionInvalidatedByPasswordChange(userId, iat))
-    ) {
-      return { headers: opts.headers, user: null };
-    }
+  // Authenticate at the tRPC boundary itself. Middleware-injected identity
+  // headers are useful metadata, but must never be the source of truth.
+  if (await isSessionInvalidatedByPasswordChange(session.userId, session.iat)) {
+    return { headers: opts.headers, user: null };
   }
 
   let cachedIsAdmin: boolean | undefined;
   return {
     headers: opts.headers,
     user: {
-      id: userId,
-      email,
+      id: session.userId,
+      email: session.email,
       get isAdmin() {
         return cachedIsAdmin;
       },
       resolveIsAdmin: async () => {
         if (cachedIsAdmin === undefined) {
-          cachedIsAdmin = await resolveIsAdmin(userId);
+          cachedIsAdmin = await resolveIsAdmin(session.userId);
         }
         return cachedIsAdmin;
       },

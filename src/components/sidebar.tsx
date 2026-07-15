@@ -253,7 +253,7 @@ function TeamSwitcher() {
             >
               <Users className="h-4 w-4" aria-hidden="true" />
               <span className="flex-1 truncate text-left">{team.name}</span>
-              <span className="text-[10px] uppercase text-muted-foreground/60">{team.role}</span>
+              <span className="text-xs uppercase text-muted-foreground">{team.role}</span>
             </button>
           ))}
           <div className="border-t border-border px-3 py-2">

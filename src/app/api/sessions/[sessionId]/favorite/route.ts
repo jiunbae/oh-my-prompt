@@ -4,6 +4,7 @@ import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
 import * as schema from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
+import { promptViewCondition } from "@/lib/team-access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,14 +21,14 @@ export async function POST(
     const session = await requireAuth();
     const { sessionId } = await params;
 
-    // Check that the session actually belongs to the user
+    // Check that the user can view at least one prompt in the session.
     const [existingSession] = await db
       .select({ sessionId: schema.prompts.sessionId })
       .from(schema.prompts)
       .where(
         and(
-          eq(schema.prompts.userId, session.userId),
           eq(schema.prompts.sessionId, sessionId),
+          promptViewCondition(session.userId),
           isNull(schema.prompts.deletedAt)
         )
       )

@@ -13,7 +13,6 @@ resources:
   - worker.yaml
   - service.yaml
   - ingress.yaml
-  - cronjob.yaml
 
 # Image tag is managed by the GitOps CI pipeline:
 #   CI builds image -> pushes to registry -> runs

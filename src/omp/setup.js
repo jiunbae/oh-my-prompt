@@ -378,7 +378,7 @@ async function runSetup(options) {
       s.start("Migrating database...");
       try {
         const { migrateDatabase } = require("./migrate");
-        const dbResult = migrateDatabase(config);
+        const dbResult = await migrateDatabase(config);
         result.db = dbResult;
         s.stop(`Database migrated ${c.dim(`(schema v${dbResult.version})`)}`);
       } catch (err) {
@@ -677,7 +677,7 @@ async function runSetup(options) {
   if (!options["dry-run"]) {
     try {
       const { migrateDatabase } = require("./migrate");
-      const dbResult = migrateDatabase(config);
+      const dbResult = await migrateDatabase(config);
       result.db = dbResult;
     } catch (err) {
       result.db = { error: err.message };

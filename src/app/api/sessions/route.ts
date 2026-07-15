@@ -6,6 +6,8 @@ import * as schema from "@/db/schema";
 import { eq, and, gte, lt, sql, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import { parseDateTimeOrDateInTimeZone } from "@/lib/date-utils";
+import { teamPromptViewConditionForMember } from "@/lib/team-access";
+import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,12 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get("source") || null;
     const from = searchParams.get("from") || null;
     const to = searchParams.get("to") || null;
-    const teamId = searchParams.get("teamId")?.trim() || null;
+    const teamIdParam = searchParams.get("teamId")?.trim() || null;
+    const parsedTeamId = teamIdParam ? z.string().uuid().safeParse(teamIdParam) : null;
+    if (parsedTeamId && !parsedTeamId.success) {
+      return NextResponse.json({ error: "Invalid teamId" }, { status: 400 });
+    }
+    const teamId = parsedTeamId?.success ? parsedTeamId.data : null;
     const page = parseInt(searchParams.get("page") ?? "1", 10);
     const pageSize = 20;
     const offset = (page - 1) * pageSize;
@@ -45,6 +52,9 @@ export async function GET(request: NextRequest) {
       sql`${schema.prompts.sessionId} IS NOT NULL`,
       isNull(schema.prompts.deletedAt),
     ];
+    if (teamId) {
+      conditions.push(teamPromptViewConditionForMember(session.userId));
+    }
 
     if (project) conditions.push(eq(schema.prompts.projectName, project));
     if (source) conditions.push(eq(schema.prompts.source, source));
@@ -63,7 +73,12 @@ export async function GET(request: NextRequest) {
       db.execute(sql`
         SELECT
           ${schema.prompts.sessionId} as session_id,
-          ${schema.sessionDisplayNames.displayName} as display_name,
+          ${schema.prompts.userId} as owner_id,
+          CASE
+            WHEN ${schema.prompts.userId} = ${session.userId}
+            THEN ${schema.sessionDisplayNames.displayName}
+            ELSE NULL
+          END as display_name,
           MIN(${schema.prompts.timestamp}) as started_at,
           MAX(${schema.prompts.timestamp}) as ended_at,
           COUNT(*)::int as prompt_count,
@@ -78,12 +93,12 @@ export async function GET(request: NextRequest) {
           ON ${schema.sessionDisplayNames.userId} = ${session.userId}
          AND ${schema.sessionDisplayNames.sessionId} = ${schema.prompts.sessionId}
         WHERE ${whereClause}
-        GROUP BY ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
+        GROUP BY ${schema.prompts.userId}, ${schema.prompts.sessionId}, ${schema.sessionDisplayNames.displayName}
         ORDER BY MAX(${schema.prompts.timestamp}) DESC
         LIMIT ${pageSize} OFFSET ${offset}
       `),
       db.execute(sql`
-        SELECT COUNT(DISTINCT ${schema.prompts.sessionId})::int as count
+        SELECT COUNT(DISTINCT (${schema.prompts.userId}, ${schema.prompts.sessionId}))::int as count
         FROM ${schema.prompts}
         WHERE ${whereClause}
       `),
@@ -95,6 +110,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       sessions: sRows.map((row) => ({
         sessionId: row.session_id,
+        ownerId: row.owner_id,
+        teamId,
         displayName: row.display_name,
         startedAt: row.started_at,
         endedAt: row.ended_at,

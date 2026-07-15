@@ -46,11 +46,11 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
     dayOfWeek: "",
   });
 
-  const handleMouseEnter = useCallback(
-    (e: React.MouseEvent, day: { date: string; count: number; inRange: boolean }) => {
+  const showTooltip = useCallback(
+    (tile: HTMLElement, day: { date: string; count: number; inRange: boolean }) => {
       if (!day.inRange || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const tileRect = (e.target as HTMLElement).getBoundingClientRect();
+      const tileRect = tile.getBoundingClientRect();
       setTooltip({
         visible: true,
         x: tileRect.left - rect.left + tileRect.width / 2,
@@ -63,7 +63,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
     []
   );
 
-  const handleMouseLeave = useCallback(() => {
+  const hideTooltip = useCallback(() => {
     setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
 
@@ -145,7 +145,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
                 ? "No prompts"
                 : `${tooltip.count} prompt${tooltip.count !== 1 ? "s" : ""}`}
             </p>
-            <p className="text-background/70 text-[10px]">{formatTooltipDate(tooltip.date)}</p>
+            <p className="text-background/80 text-xs">{formatTooltipDate(tooltip.date)}</p>
           </div>
           {/* Arrow */}
           <div
@@ -161,7 +161,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
           {weeks.map((_, colIdx) => {
             const ml = monthLabels.find((m) => m.colIndex === colIdx);
             return (
-              <div key={colIdx} className="w-[13px] text-[10px] text-muted-foreground">
+              <div key={colIdx} className="w-[13px] text-xs text-muted-foreground">
                 {ml ? ml.label : ""}
               </div>
             );
@@ -174,7 +174,7 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
         {/* Day-of-week labels */}
         <div className="flex flex-col gap-[3px] w-8 shrink-0">
           {dayLabels.map((label, i) => (
-            <div key={i} className="h-[13px] text-[10px] text-muted-foreground leading-[13px]">
+            <div key={i} className="h-[13px] text-xs text-muted-foreground leading-[13px]">
               {label}
             </div>
           ))}
@@ -184,23 +184,33 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
         <div className="flex gap-[3px]">
           {weeks.map((week, colIdx) => (
             <div key={colIdx} className="flex flex-col gap-[3px]">
-              {week.map((day) => (
-                <div
-                  key={day.date}
-                  className={`w-[13px] h-[13px] rounded-sm ${getColor(day.count, day.inRange)} transition-colors ${
-                    day.inRange ? "hover:ring-1 hover:ring-foreground/40 cursor-pointer" : ""
-                  }`}
-                  onMouseEnter={(e) => handleMouseEnter(e, day)}
-                  onMouseLeave={handleMouseLeave}
-                />
-              ))}
+              {week.map((day) =>
+                day.inRange ? (
+                  <button
+                    key={day.date}
+                    type="button"
+                    aria-label={`${formatTooltipDate(day.date)}: ${day.count} prompt${day.count === 1 ? "" : "s"}`}
+                    className={`h-[13px] w-[13px] rounded-sm ${getColor(day.count, true)} transition-colors hover:ring-1 hover:ring-foreground/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                    onMouseEnter={(event) => showTooltip(event.currentTarget, day)}
+                    onMouseLeave={hideTooltip}
+                    onFocus={(event) => showTooltip(event.currentTarget, day)}
+                    onBlur={hideTooltip}
+                  />
+                ) : (
+                  <span
+                    key={day.date}
+                    aria-hidden="true"
+                    className="h-[13px] w-[13px] rounded-sm bg-transparent"
+                  />
+                ),
+              )}
             </div>
           ))}
         </div>
       </div>
 
       {/* Legend */}
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1">
+      <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
         <span>
           {totalPrompts.toLocaleString()} prompts in {activeDays} active day{activeDays !== 1 ? "s" : ""}
         </span>

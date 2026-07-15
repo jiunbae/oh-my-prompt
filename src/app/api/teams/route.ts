@@ -3,8 +3,7 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { requireAuth, AuthError } from "@/lib/with-auth";
 import { logger } from "@/lib/logger";
-import { eq, and, sql } from "drizzle-orm";
-import crypto from "crypto";
+import { eq } from "drizzle-orm";
 
 function generateSlug(name: string): string {
   return name
@@ -32,7 +31,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Team name must be 255 characters or less" }, { status: 400 });
     }
 
-    const baseSlug = generateSlug(trimmedName);
+    const baseSlug = generateSlug(trimmedName) || "team";
     let slug = baseSlug;
     let attempts = 0;
 
@@ -48,16 +47,19 @@ export async function POST(request: NextRequest) {
       slug = `${baseSlug}-${attempts}`;
     }
 
-    // Create team and add creator as owner
-    const [team] = await db.insert(schema.teams).values({
-      name: trimmedName,
-      slug,
-    }).returning();
+    // Team and owner membership must either both exist or both roll back.
+    const team = await db.transaction(async (tx) => {
+      const [created] = await tx.insert(schema.teams).values({
+        name: trimmedName,
+        slug,
+      }).returning();
 
-    await db.insert(schema.teamMembers).values({
-      teamId: team.id,
-      userId: session.userId,
-      role: "owner",
+      await tx.insert(schema.teamMembers).values({
+        teamId: created.id,
+        userId: session.userId,
+        role: "owner",
+      });
+      return created;
     });
 
     return NextResponse.json({ team }, { status: 201 });

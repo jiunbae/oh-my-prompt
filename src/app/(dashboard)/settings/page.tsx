@@ -121,7 +121,7 @@ function ThemeCard({
 }
 
 export default function SettingsPage() {
-  const { user, loading, refetch } = useUser();
+  const { user, loading } = useUser();
   const { theme, setTheme } = useTheme();
   const [itemsPerPage, setItemsPerPage] = useState(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('omp-items-per-page') || '12';
@@ -135,6 +135,8 @@ export default function SettingsPage() {
   const [regenerating, setRegenerating] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [apiToken, setApiToken] = useState<string | null>(null);
+  const [revealingToken, setRevealingToken] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -147,7 +149,8 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/auth/regenerate-token", { method: "POST" });
       if (res.ok) {
-        await refetch();
+        const data = await res.json();
+        setApiToken(data.token);
         setShowConfirm(false);
       } else {
         const data = await res.json().catch(() => ({}));
@@ -161,11 +164,29 @@ export default function SettingsPage() {
   };
 
   const copyToken = async () => {
-    if (user?.token) {
-      await navigator.clipboard.writeText(user.token);
+    if (apiToken) {
+      await navigator.clipboard.writeText(apiToken);
       setCopied(true);
       clearTimeout(copyTimerRef.current);
       copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const revealToken = async () => {
+    setRevealingToken(true);
+    setTokenError(null);
+    try {
+      const res = await fetch("/api/auth/token", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTokenError(data.error || "Failed to reveal token");
+        return;
+      }
+      setApiToken(data.token);
+    } catch {
+      setTokenError("Failed to reveal token. Please check your connection.");
+    } finally {
+      setRevealingToken(false);
     }
   };
 
@@ -193,20 +214,23 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             {loading ? (
               <div className="h-10 bg-skeleton rounded animate-pulse max-w-md" />
-            ) : user?.token ? (
+            ) : user ? (
               <>
-                <div className="flex gap-3">
-                  <Input
-                    type="text"
-                    value={user.token}
-                    readOnly
-                    className="font-mono text-sm max-w-md"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={copyToken}
-                    className="shrink-0"
-                  >
+                {apiToken ? (
+                  <div className="flex gap-3">
+                    <Input
+                      type="text"
+                      value={apiToken}
+                      readOnly
+                      aria-label="API token"
+                      className="font-mono text-sm max-w-md"
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={copyToken}
+                      className="shrink-0"
+                      aria-label="Copy API token"
+                    >
                     {copied ? (
                       <svg
                         className="h-4 w-4 text-chart-2"
@@ -236,8 +260,17 @@ export default function SettingsPage() {
                         />
                       </svg>
                     )}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    onClick={revealToken}
+                    disabled={revealingToken}
+                  >
+                    {revealingToken ? "Revealing..." : "Reveal API Token"}
                   </Button>
-                </div>
+                )}
                 <div className="bg-surface/50 rounded-lg p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-secondary-foreground mb-2">Quick Setup (Recommended)</p>
                   <p className="mb-2">

@@ -17,7 +17,7 @@ interface Experiment {
   winnerVersion: number | null;
   winMetric: string | null;
   createdAt: string;
-  promptEventKey: string | null;
+  promptProjectName: string | null;
 }
 
 export default function ExperimentsPage() {
@@ -141,7 +141,7 @@ export default function ExperimentsPage() {
               winnerVersion={exp.winnerVersion}
               winMetric={exp.winMetric}
               createdAt={exp.createdAt}
-              promptEventKey={exp.promptEventKey}
+              promptProjectName={exp.promptProjectName}
             />
           ))}
         </div>

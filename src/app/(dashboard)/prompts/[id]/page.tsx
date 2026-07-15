@@ -3,22 +3,20 @@ import { db } from "@/db/client";
 import * as schema from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
-import { checkIsAdmin, getSessionUser } from "@/lib/with-auth";
+import { getSessionUser } from "@/lib/with-auth";
 import { SimilarPrompts } from "@/components/similar-prompts";
+import { canViewPrompt } from "@/lib/team-access";
 
 // Force dynamic rendering - don't pre-render at build time
 export const dynamic = "force-dynamic";
 
 const getCurrentUser = getSessionUser;
 
-async function getPromptWithTags(id: string, userId: string, isAdmin: boolean) {
-  // Admins can view any prompt; non-admins are scoped to their own prompts.
-  const whereCondition = isAdmin
-    ? and(eq(schema.prompts.id, id), isNull(schema.prompts.deletedAt))
-    : and(eq(schema.prompts.id, id), eq(schema.prompts.userId, userId), isNull(schema.prompts.deletedAt));
+async function getPromptWithTags(id: string, userId: string) {
+  if (!(await canViewPrompt(userId, id))) return null;
 
   return db.query.prompts.findFirst({
-    where: whereCondition,
+    where: and(eq(schema.prompts.id, id), isNull(schema.prompts.deletedAt)),
     with: {
       promptTags: {
         with: {
@@ -40,9 +38,7 @@ export default async function PromptDetailPage({ params }: PromptDetailPageProps
   }
 
   const resolvedParams = await params;
-  const isAdmin = await checkIsAdmin(user.userId);
-
-  const prompt = await getPromptWithTags(resolvedParams.id, user.userId, isAdmin);
+  const prompt = await getPromptWithTags(resolvedParams.id, user.userId);
 
   if (!prompt) {
     notFound();

@@ -35,16 +35,6 @@ function getWatchTargets() {
   return targets;
 }
 
-function ensureWatchedFilesTable(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS watched_files (
-      path TEXT PRIMARY KEY,
-      hash TEXT NOT NULL,
-      processed_at TEXT NOT NULL
-    )
-  `);
-}
-
 function hashFile(p) {
   try {
     const stat = fs.statSync(p);
@@ -99,30 +89,40 @@ function transcriptPayloads(filePath) {
   }));
 }
 
-async function processFile(db, config, filePath) {
+async function processFile(config, filePath) {
   const hash = hashFile(filePath);
-  if (!hash || isAlreadyProcessed(db, filePath, hash)) {
+  if (!hash) return 0;
+
+  const statusDb = await openDb(config.storage.sqlite.path);
+  const alreadyProcessed = isAlreadyProcessed(statusDb, filePath, hash);
+  statusDb.close();
+  if (alreadyProcessed) {
     return 0;
   }
 
   const payloads = transcriptPayloads(filePath);
   let count = 0;
+  let allSucceeded = true;
   for (const payload of payloads) {
     if (!payload.text && !payload.response_text) continue;
     try {
-      // Reuse the open watcher db handle so we don't reopen/save the whole
-      // sql.js file per turn, and so ingest applies the same config (redaction,
-      // capture settings) as the hook path.
-      const result = await ingestPayload(payload, config, { db });
+      // Each turn gets a fresh, locked database snapshot. A long-lived sql.js
+      // handle becomes stale as soon as another hook process writes.
+      const result = await ingestPayload(payload, config);
       if (result.ok) count++;
+      else allSucceeded = false;
     } catch {
-      // skip individual failures
+      allSucceeded = false;
     }
   }
 
-  // Always record the hash so an unchanged file short-circuits next time, even
-  // when it produced no new rows (e.g. all turns already ingested).
-  markProcessed(db, filePath, hash);
+  // Never mark a partial import complete, and do not mark an obsolete hash if
+  // the transcript changed while it was being parsed.
+  if (allSucceeded && hashFile(filePath) === hash) {
+    const markDb = await openDb(config.storage.sqlite.path);
+    markProcessed(markDb, filePath, hash);
+    markDb.close();
+  }
   return count;
 }
 
@@ -152,7 +152,6 @@ function collectJsonlFiles(dir) {
 // ---------------------------------------------------------------------------
 
 let watchers = [];
-let dbRef = null;
 
 async function startWatch(config) {
   if (watchers.length > 0) {
@@ -164,15 +163,15 @@ async function startWatch(config) {
     return { started: false, error: "No Claude transcript directory found (~/.claude/projects)", dirs: [] };
   }
 
-  const db = await openDb(config.storage.sqlite.path);
-  dbRef = db;
-  ensureWatchedFilesTable(db);
+  // Opening applies the watched_files schema migration before callbacks start.
+  const schemaDb = await openDb(config.storage.sqlite.path);
+  schemaDb.close();
 
   // Initial scan: process existing files.
   let initialCount = 0;
   for (const { dir } of targets) {
     for (const fullPath of collectJsonlFiles(dir)) {
-      initialCount += await processFile(db, config, fullPath);
+      initialCount += await processFile(config, fullPath);
     }
   }
 
@@ -186,7 +185,7 @@ async function startWatch(config) {
         setTimeout(() => {
           try {
             if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-              processFile(db, config, fullPath).catch(() => {});
+              processFile(config, fullPath).catch(() => {});
             }
           } catch {
             // skip
@@ -222,15 +221,6 @@ function stopWatch() {
   }
   watchers = [];
 
-  if (dbRef) {
-    try {
-      dbRef.close();
-    } catch {
-      // ignore
-    }
-    dbRef = null;
-  }
-
   try {
     if (fs.existsSync(PID_FILE)) {
       fs.unlinkSync(PID_FILE);
@@ -252,7 +242,6 @@ async function getStatus(config) {
 
   try {
     const db = await openDb(config.storage.sqlite.path);
-    ensureWatchedFilesTable(db);
     const row = db.prepare("SELECT COUNT(*) as count FROM watched_files").get();
     processedCount = row?.count || 0;
     db.close();
@@ -270,7 +259,6 @@ async function getStatus(config) {
 async function getRecentFiles(config, limit = 20) {
   try {
     const db = await openDb(config.storage.sqlite.path);
-    ensureWatchedFilesTable(db);
     const rows = db
       .prepare("SELECT path, processed_at FROM watched_files ORDER BY processed_at DESC LIMIT ?")
       .all(limit);

@@ -13,38 +13,30 @@ interface PwaState {
   isInstalled: boolean;
   installPrompt: () => Promise<void>;
   swRegistration: ServiceWorkerRegistration | null;
-  syncComplete: boolean;
 }
 
 export function usePwa(): PwaState {
   const [isOffline, setIsOffline] = useState(false);
   const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
-  const [swRegistration, setSwRegistration] =
-    useState<ServiceWorkerRegistration | null>(null);
-  const [syncComplete, setSyncComplete] = useState(false);
+  const swRegistration: ServiceWorkerRegistration | null = null;
   const deferredPromptRef =
     useRef<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
-    // Check initial online status
-    setIsOffline(!navigator.onLine);
-
-    // Check if already installed (standalone display mode)
-    const isStandalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      // iOS Safari
-      ((window.navigator as unknown as { standalone?: boolean }).standalone ===
-        true);
-    setIsInstalled(isStandalone);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setIsOffline(!navigator.onLine);
+      setIsInstalled(
+        window.matchMedia("(display-mode: standalone)").matches ||
+          ((window.navigator as unknown as { standalone?: boolean }).standalone === true),
+      );
+    });
 
     // Online/offline listeners
     const handleOnline = () => {
       setIsOffline(false);
-      // Trigger background sync if available
-      if (swRegistration && "sync" in swRegistration) {
-        (swRegistration as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register("omp-sync").catch(() => {});
-      }
     };
     const handleOffline = () => setIsOffline(true);
 
@@ -84,14 +76,11 @@ export function usePwa(): PwaState {
       if (e.data && e.data.type === "offline-status") {
         setIsOffline(e.data.data?.isOffline ?? false);
       }
-      if (e.data && e.data.type === "sync-complete") {
-        setSyncComplete(true);
-        setTimeout(() => setSyncComplete(false), 3000);
-      }
     };
     navigator.serviceWorker?.addEventListener("message", handleSwMessage);
 
     return () => {
+      active = false;
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener(
@@ -106,7 +95,7 @@ export function usePwa(): PwaState {
         mediaQuery.removeListener(handleDisplayChange as EventListener);
       }
     };
-  }, [swRegistration]);
+  }, []);
 
   const installPrompt = useCallback(async () => {
     const deferredPrompt = deferredPromptRef.current;
@@ -127,6 +116,5 @@ export function usePwa(): PwaState {
     isInstalled,
     installPrompt,
     swRegistration,
-    syncComplete,
   };
 }
