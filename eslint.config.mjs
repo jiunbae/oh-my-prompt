@@ -16,6 +16,11 @@ const eslintConfig = defineConfig([
     "packages/omp-cli/lib/**",
     // Generated worker bundle.
     "dist/**",
+    // Agent worktrees / scratch: full repo copies that would otherwise be
+    // linted with the wrong (non-root-relative) config overrides, producing
+    // hundreds of phantom no-require-imports errors. Keeps local `pnpm lint`
+    // consistent with CI, which checks out a clean tree without them.
+    ".claude/**",
   ]),
   // The CLI (src/omp), build/maintenance scripts, and the published CLI package
   // are plain CommonJS Node code that legitimately uses `require`. Treat them as
