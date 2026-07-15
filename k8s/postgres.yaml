@@ -19,21 +19,14 @@ spec:
       labels:
         app: prompt-db
     spec:
-      securityContext:
-        # pgvector/pgvector:pg16 is Debian-based; its "postgres" user is uid 999.
-        runAsNonRoot: true
-        runAsUser: 999
-        fsGroup: 999
       containers:
         - name: postgres
           # Must match docker-compose (pgvector/pgvector:pg16): migration 0016
           # runs `CREATE EXTENSION vector`, unavailable in plain postgres:16-alpine.
-          image: pgvector/pgvector:pg16
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
+          # Keep the image's root entrypoint: when upgrading an existing Alpine
+          # PostgreSQL volume (uid 70) to Debian (uid 999), the official
+          # entrypoint fixes ownership before dropping to the postgres user.
+          image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
           ports:
             - containerPort: 5432
           env:
@@ -46,10 +39,6 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: "prompts"
-            # Debian postgres image defaults PGDATA to the mount root; keep data
-            # in a subdirectory so the volume's lost+found doesn't block initdb.
-            - name: PGDATA
-              value: "/var/lib/postgresql/data/pgdata"
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
