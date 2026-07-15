@@ -21,12 +21,10 @@ spec:
     spec:
       containers:
         - name: postgres
-          # Must match docker-compose (pgvector/pgvector:pg16): migration 0016
-          # runs `CREATE EXTENSION vector`, unavailable in plain postgres:16-alpine.
-          # Keep the image's root entrypoint: when upgrading an existing Alpine
-          # PostgreSQL volume (uid 70) to Debian (uid 999), the official
-          # entrypoint fixes ownership before dropping to the postgres user.
-          image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
+          # Built from docker/postgres-pgvector. It preserves the Alpine
+          # postgres uid 70 and PostgreSQL 16.14 data format used by existing
+          # volumes while adding pgvector 0.8.1.
+          image: registry.jiun.dev/oh-my-prompt-postgres@sha256:61e6b6b172c86d52f0a9ad4339120750015bf226cb11408d3555abd29c1fc324
           ports:
             - containerPort: 5432
           env:
