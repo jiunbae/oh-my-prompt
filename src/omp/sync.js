@@ -3,6 +3,12 @@ const https = require("https");
 const { createSyncLog, finishSyncLog, updateSyncState, getDeviceId, withDatabaseOperation } = require("./sync-log");
 const { postprocessUploadRecord } = require("./upload-postprocess");
 
+// The server upload schema rejects records with more than 1000 tool
+// invocations (tools: z.array(...).max(1000) in /api/sync/upload). Long
+// agentic sessions can exceed this; cap at upload time so one oversized
+// record doesn't 400 the whole chunk. The local DB keeps the full list.
+const MAX_TOOLS_PER_RECORD = 1000;
+
 function fetchRows(db, since, lastId) {
   if (!since) {
     return db
@@ -55,7 +61,14 @@ function rowToUploadRecord(row, tools) {
     content_hash: row.content_hash ?? null,
   };
   if (Array.isArray(tools) && tools.length > 0) {
-    rec.tools = tools;
+    if (tools.length > MAX_TOOLS_PER_RECORD) {
+      process.stderr.write(
+        `[omp] Record ${rec.event_id} has ${tools.length} tool invocations; uploading first ${MAX_TOOLS_PER_RECORD} (server limit)\n`
+      );
+      rec.tools = tools.slice(0, MAX_TOOLS_PER_RECORD);
+    } else {
+      rec.tools = tools;
+    }
   }
   return rec;
 }
