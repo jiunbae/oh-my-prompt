@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.728.1] - 2026-07-28
+
+### Fixed
+- Cap uploaded tool invocations at 1000 per record to match the server upload schema. A single long agentic session with more tool calls than the limit made the server reject the whole chunk with HTTP 400, stalling `omp sync` and `omp sync backfill` at the same point on every run. The full list is still kept locally
+
 ## [2026.715.1] - 2026-07-15
 
 ### Performance

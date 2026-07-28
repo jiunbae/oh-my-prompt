@@ -201,6 +201,72 @@ describe("syncToServer", () => {
     }
   });
 
+  it("caps tools at 1000 per record so oversized records still upload", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    const received = [];
+    const { server, port } = await startMockServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        const parsed = JSON.parse(body);
+        // Mirror the server-side schema: tools max 1000 per record
+        if (parsed.records.some((r) => Array.isArray(r.tools) && r.tools.length > 1000)) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid request body" }));
+          return;
+        }
+        received.push(parsed);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ accepted: parsed.records.length, duplicates: 0, rejected: 0, errors: [] }));
+      });
+    });
+
+    try {
+      const config = {
+        server: { url: `http://127.0.0.1:${port}`, token: "test-token" },
+        storage: { sqlite: { path: dbPath } },
+        capture: { response: true },
+        sync: { enabled: true, deviceId: "d1", retries: 0 },
+        queue: { maxBytes: 1024 * 1024 },
+      };
+
+      const tools = Array.from({ length: 1050 }, (_, i) => ({
+        tool_use_id: `tu_${i}`,
+        tool_name: "Bash",
+        input: { command: `echo ${i}` },
+        sequence: i,
+      }));
+
+      await ingestPayload(
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          source: "claude-code",
+          session_id: "sess-many-tools",
+          role: "assistant",
+          text: "done",
+          user_prompt_text: "long agentic run",
+          cli_name: "claude",
+          capture_response: true,
+          tools,
+        }),
+        config
+      );
+
+      await syncToServer(config, { dryRun: false });
+
+      expect(received.length).toBe(1);
+      const record = received[0].records[0];
+      expect(record.tools).toHaveLength(1000);
+      // Keeps the earliest invocations by sequence
+      expect(record.tools[0].tool_use_id).toBe("tu_0");
+      expect(record.tools[999].tool_use_id).toBe("tu_999");
+    } finally {
+      server.close();
+    }
+  }, 30000);
+
   it("throws when server is not configured", async () => {
     const root = makeTempRoot();
     const dbPath = path.join(root, "omp.db");
