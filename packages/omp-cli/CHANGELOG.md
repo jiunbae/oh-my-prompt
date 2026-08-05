@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.805.4] - 2026-08-05
+
+### Fixed
+- `omp install --cli codex` reported success while capturing nothing — `omp status` showed `codex=installed` and no record ever reached the database. Three independent defects, each sufficient on its own:
+  - The pre-existing `notify` value was stored in `notify-chain.json` as raw TOML text rather than argv, then run through `sh -lc` as an invalid command, so the chained notify never fired. `parseTomlValue` reached `JSON.parse` first, which rejects the trailing comma in the multi-line array Codex writes, and its `toml` fallback is not a dependency of the published CLI. TOML string arrays are now parsed directly — trailing commas, interior comments and literal strings included — with no optional dependency
+  - The wrapper ran the chained command with a blocking `spawnSync` *before* its own capture. Notify programs are under no obligation to exit (the Codex Computer Use client stays resident), so `notify.js` was never reached. Chained commands now run detached; only the ingest stays synchronous
+  - Both the wrapper and the `notify` line in `config.toml` invoked a bare `"node"`. Codex spawns notify directly, so a version-managed node only resolves when Codex inherited a shell PATH carrying it. Both now use absolute paths, and the wrapper pins `PATH`/`OMP_BIN` from its own interpreter. Existing bare-node lines are repointed in place, without re-chaining them
+
 ## [2026.805.3] - 2026-08-05
 
 ### Fixed
