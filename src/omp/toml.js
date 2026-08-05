@@ -5,10 +5,90 @@ try {
   tomlParser = null;
 }
 
+// TOML string arrays are *almost* JSON, but three legal TOML spellings are not:
+// trailing commas before `]`, `#` comments inside the brackets, and single-quoted
+// literal strings. Codex writes multi-line arrays with a trailing comma, so
+// JSON.parse alone rejects the value the installer most needs to read. Parsing it
+// here keeps the common case independent of the optional `toml` package, which is
+// not a dependency of the published CLI.
+// Returns null (not a throw) for anything richer — nested arrays, numbers,
+// booleans — so callers fall through to the parser paths below.
+function parseTomlStringArray(text) {
+  if (!text.startsWith("[") || !text.endsWith("]")) return null;
+  const body = text.slice(1, -1);
+  const out = [];
+  let i = 0;
+  let expectValue = true;
+
+  while (i < body.length) {
+    const ch = body[i];
+
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") {
+      i += 1;
+      continue;
+    }
+    if (ch === "#") {
+      const nl = body.indexOf("\n", i);
+      if (nl === -1) break;
+      i = nl + 1;
+      continue;
+    }
+    if (ch === ",") {
+      if (expectValue) return null; // leading or doubled comma
+      expectValue = true;
+      i += 1;
+      continue;
+    }
+    if (!expectValue) return null; // two values with no separator
+
+    if (ch === '"') {
+      let j = i + 1;
+      let value = "";
+      while (j < body.length) {
+        const c = body[j];
+        if (c === "\\") {
+          const next = body[j + 1];
+          if (next === undefined) return null;
+          if (next === "n") value += "\n";
+          else if (next === "t") value += "\t";
+          else if (next === "r") value += "\r";
+          else value += next; // covers \" and \\
+          j += 2;
+          continue;
+        }
+        if (c === '"') break;
+        value += c;
+        j += 1;
+      }
+      if (j >= body.length) return null; // unterminated
+      out.push(value);
+      expectValue = false;
+      i = j + 1;
+      continue;
+    }
+
+    if (ch === "'") {
+      // TOML literal string: no escape processing.
+      const end = body.indexOf("'", i + 1);
+      if (end === -1) return null;
+      out.push(body.slice(i + 1, end));
+      expectValue = false;
+      i = end + 1;
+      continue;
+    }
+
+    return null; // not a string element
+  }
+
+  return out;
+}
+
 function parseTomlValue(raw) {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    const stringArray = parseTomlStringArray(trimmed);
+    if (stringArray) return stringArray;
     try {
       return JSON.parse(trimmed);
     } catch (error) {
@@ -99,6 +179,9 @@ function removeTomlLine(content, key) {
 }
 
 module.exports = {
+  // Exported so tests can pin the dependency-free path directly, rather than
+  // passing only because the optional `toml` package happens to resolve.
+  parseTomlStringArray,
   parseTomlValue,
   findTomlLine,
   setTomlLine,

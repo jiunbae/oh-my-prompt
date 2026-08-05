@@ -458,7 +458,15 @@ if (result.error) {
 function codexWrapperScript(chainPath, notifyScriptPath) {
   return `#!/usr/bin/env node
 const fs = require("fs");
-const { spawnSync } = require("child_process");
+const path = require("path");
+const { spawn, spawnSync } = require("child_process");
+
+// Codex may spawn notify without a login-shell PATH (launched from a GUI, for
+// one), in which case a version-managed node/omp would not resolve. Pin both to
+// the interpreter already running this wrapper.
+const nodeBin = path.dirname(process.execPath);
+process.env.PATH = nodeBin + path.delimiter + (process.env.PATH || "");
+if (!process.env.OMP_BIN) process.env.OMP_BIN = path.join(nodeBin, "omp");
 
 const raw = process.argv[2];
 if (!raw) process.exit(0);
@@ -470,26 +478,43 @@ try {
   chain = null;
 }
 
-function runCommand(cmdSpec) {
+// The chained command is whatever \`notify\` pointed at before omp was installed.
+// It is under no obligation to exit — the Codex Computer Use client, for one,
+// stays resident — so it has to run detached. Waiting on it would block omp's
+// own capture indefinitely.
+function runDetached(cmdSpec) {
   try {
+    let file;
+    let args;
     if (Array.isArray(cmdSpec) && cmdSpec.length > 0) {
-      spawnSync(cmdSpec[0], cmdSpec.slice(1).concat([raw]), { stdio: "ignore" });
+      file = cmdSpec[0];
+      args = cmdSpec.slice(1).concat([raw]);
+    } else if (typeof cmdSpec === "string" && cmdSpec.trim()) {
+      // Preserve string notify commands by running via sh -lc and passing raw as $1.
+      file = "sh";
+      args = ["-lc", cmdSpec, "omp-codex-notify", raw];
+    } else {
       return;
     }
-    if (typeof cmdSpec === "string" && cmdSpec.trim()) {
-      // Preserve string notify commands by running via sh -lc and passing raw as $1.
-      spawnSync("sh", ["-lc", cmdSpec, "omp-codex-notify", raw], { stdio: "ignore" });
-    }
+    const child = spawn(file, args, { stdio: "ignore", detached: true });
+    child.on("error", () => {});
+    child.unref();
   } catch (error) {
     // ignore
   }
 }
 
 if (chain && (Array.isArray(chain.original) || typeof chain.original === "string")) {
-  runCommand(chain.original);
+  runDetached(chain.original);
 }
 
-runCommand(["node", "${notifyScriptPath}"]);
+// omp's own capture stays synchronous: this process must outlive the ingest.
+try {
+  spawnSync(process.execPath, ["${notifyScriptPath}", raw], { stdio: "ignore" });
+} catch (error) {
+  // ignore
+}
+
 process.exit(0);
 `;
 }
@@ -1124,8 +1149,11 @@ function uninstallClaudeHook() {
 function ensureCodexNotifyConfig(scriptPath, wrapperPath, chainPath) {
   const configPath = getCodexConfigPath();
   const notifyKey = "notify";
-  const notifyLine = buildNotifyLine(["node", scriptPath]);
-  const wrapperLine = buildNotifyLine(["node", wrapperPath]);
+  // Spell node as an absolute path: Codex spawns `notify` directly, so a bare
+  // "node" only resolves when Codex itself inherited a shell PATH carrying it.
+  const nodeBin = process.execPath;
+  const notifyLine = buildNotifyLine([nodeBin, scriptPath]);
+  const wrapperLine = buildNotifyLine([nodeBin, wrapperPath]);
 
   let content = "";
   if (fs.existsSync(configPath)) {
@@ -1141,6 +1169,15 @@ function ensureCodexNotifyConfig(scriptPath, wrapperPath, chainPath) {
   }
 
   if (info.line.includes(scriptPath) || info.line.includes(wrapperPath)) {
+    // Already ours. Rewrite anyway when the interpreter drifted — earlier
+    // installs wrote a bare "node", and re-pointing it must not re-chain the
+    // line into notify-chain.json (that would nest the wrapper inside itself).
+    const desiredLine = info.line.includes(wrapperPath) ? wrapperLine : notifyLine;
+    if (info.value.trim() !== desiredLine) {
+      const newContent = setTomlLine(content, notifyKey, desiredLine, OMP_MARKER);
+      ensureDir(path.dirname(configPath));
+      fs.writeFileSync(configPath, newContent);
+    }
     return { configPath, configured: true, conflict: false, merged: false };
   }
 
