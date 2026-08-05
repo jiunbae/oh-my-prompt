@@ -2353,7 +2353,12 @@ async function main() {
             const parts = [c.green("connected")];
             if (srv.latencyMs !== undefined) parts.push(`${srv.latencyMs}ms`);
             if (srv.serverVersion) parts.push(`v${srv.serverVersion}`);
-            if (srv.user) parts.push(srv.user);
+            // /api/auth/me returns user as an object; print an identifier, not [object Object].
+            const who =
+              typeof srv.user === "string"
+                ? srv.user
+                : srv.user && (srv.user.email || srv.user.name || srv.user.id);
+            if (who) parts.push(who);
             console.log(label("Server", parts.join(" | ")));
           } else if (srv.status === "timeout") {
             console.log(label("Server", c.red("timeout (10s)")));

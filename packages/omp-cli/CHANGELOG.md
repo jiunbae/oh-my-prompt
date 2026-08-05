@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.805.2] - 2026-08-05
+
+### Fixed
+- `omp doctor` printed `[object Object]` for the signed-in user on the Server line. `/api/auth/me` returns `user` as an object, so the raw value was interpolated into the status string; it now shows the email (falling back to name or id)
+
 ## [2026.728.1] - 2026-07-28
 
 ### Fixed
