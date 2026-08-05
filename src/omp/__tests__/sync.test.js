@@ -380,6 +380,69 @@ describe("syncToServer", () => {
     }
   }, 15000);
 
+  it("never moves the checkpoint backwards for backfilled rows", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    const { server, port } = await startMockServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        const parsed = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          accepted: parsed.records.length,
+          duplicates: 0,
+          rejected: 0,
+          errors: [],
+        }));
+      });
+    });
+
+    try {
+      const config = {
+        server: { url: `http://127.0.0.1:${port}`, token: "test-token" },
+        storage: { sqlite: { path: dbPath } },
+        capture: { response: true },
+        sync: { enabled: true, deviceId: "d1", retries: 0 },
+        queue: { maxBytes: 1024 * 1024 },
+      };
+
+      const older = new Date(Date.now() - 60000).toISOString();
+      const newer = new Date().toISOString();
+      for (const [ts, text] of [[older, "older"], [newer, "newer"]]) {
+        await ingestPayload(JSON.stringify({
+          timestamp: ts,
+          source: "test",
+          session_id: "s-backfill",
+          role: "user",
+          text,
+          cli_name: "test",
+        }), config);
+      }
+
+      await syncToServer(config, { chunkSize: 1 });
+      expect((await getSyncState(config)).lastSyncedAt).toBe(newer);
+
+      // A later Stop hook attaches a response to the OLDER prompt. fetchRows
+      // returns it ahead of everything else because it sorts by created_at.
+      const db = await openDb(dbPath);
+      db.prepare(
+        "UPDATE prompts SET response_text = ?, updated_at = ? WHERE prompt_text = ?"
+      ).run("backfilled answer", new Date(Date.now() + 60000).toISOString(), "older");
+      db.close();
+
+      await syncToServer(config, { chunkSize: 1 });
+
+      // The backfilled row uploads, but the checkpoint must not regress to its
+      // created_at — that would make every later run re-fetch from there.
+      const after = await getSyncState(config);
+      expect(after.lastSyncedAt).toBe(newer);
+    } finally {
+      server.close();
+    }
+  }, 15000);
+
   it("throws when server is not configured", async () => {
     const root = makeTempRoot();
     const dbPath = path.join(root, "omp.db");

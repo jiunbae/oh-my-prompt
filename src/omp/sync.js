@@ -388,9 +388,9 @@ async function syncToServer(config, options = {}) {
       db,
       rows.map((row) => row.id),
     );
-    return { since, rows, toolsByPrompt };
+    return { since, rows, toolsByPrompt, state };
   });
-  const { since, rows, toolsByPrompt } = snapshot;
+  const { since, rows, toolsByPrompt, state } = snapshot;
 
   if (rows.length === 0) {
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
@@ -423,9 +423,27 @@ async function syncToServer(config, options = {}) {
   // A large backlog can outlive one run (throttling, a dropped connection); a
   // single end-of-run commit would throw that progress away and make the next
   // run replay every record from the same starting point.
+  //
+  // Only ever move forward. fetchRows also returns backfilled rows — created
+  // before the checkpoint but updated after it, e.g. a response attached by a
+  // later Stop hook — and orders them ahead of new rows because they sort by
+  // created_at. Committing a chunk verbatim would drag the checkpoint backwards
+  // and make every later run re-fetch from the older point.
+  let checkpointAt = state.lastSyncedAt;
+  let checkpointId = state.lastSyncedId;
+
+  function isAhead(row) {
+    if (!checkpointAt) return true;
+    if (row.created_at !== checkpointAt) return row.created_at > checkpointAt;
+    return !checkpointId || String(row.id) > String(checkpointId);
+  }
+
   async function commitCheckpoint(row) {
     if (options.dryRun || !row?.created_at) return;
-    await updateSyncState(config, row.created_at, row.id);
+    if (!isAhead(row)) return;
+    checkpointAt = row.created_at;
+    checkpointId = row.id;
+    await updateSyncState(config, checkpointAt, checkpointId);
   }
 
   function failFromStatus(status, body) {
