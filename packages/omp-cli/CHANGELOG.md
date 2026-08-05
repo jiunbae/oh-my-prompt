@@ -10,10 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.805.3] - 2026-08-05
+
+### Fixed
+- `omp sync` could move its checkpoint *backwards*. `fetchRows` also returns backfilled rows — created before the checkpoint but updated after it, e.g. a response attached by a later Stop hook — and orders them ahead of new rows because both sort by `created_at`. Committing each chunk verbatim (added in 2026.805.1) dragged the checkpoint back to the older row's timestamp, so every later run re-fetched from that earlier point. Checkpoint commits now only ever move forward
+
 ## [2026.805.2] - 2026-08-05
 
 ### Fixed
 - `omp doctor` printed `[object Object]` for the signed-in user on the Server line. `/api/auth/me` returns `user` as an object, so the raw value was interpolated into the status string; it now shows the email (falling back to name or id)
+
+## [2026.805.1] - 2026-08-05
+
+### Fixed
+- `omp sync` failed with `Server error (429)` and could never recover. The server allows 100 requests/minute per user, but 429 was absent from the CLI's no-retry list and `isTransientStatus` only matched 5xx, so it fell through to the generic `status >= 400` throw. Because the sync checkpoint advanced only once — after every chunk succeeded — that throw discarded all progress and the next run replayed the whole backlog into the same limit. 429 now has its own retry budget and honours the server's `Retry-After`
+- Advance the sync checkpoint after every fully accepted chunk, so a run interrupted partway keeps its progress. The existing guard against advancing past a 207 partial success is unchanged
+- Pace upload requests at 90/minute (`sync.maxRequestsPerMinute`) to stay under the server budget instead of discovering it via 429s
+- Keep the reduced chunk size for the rest of the run after a 413, rather than re-discovering the body limit — and burning an extra request — on every chunk
 
 ## [2026.728.1] - 2026-07-28
 
