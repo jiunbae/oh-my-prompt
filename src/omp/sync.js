@@ -110,8 +110,58 @@ const TRANSIENT_CODES = ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EPIPE", "EA
 // HTTP status codes that should NOT be retried (permanent failures)
 const NO_RETRY_STATUSES = [401, 403, 413];
 
+// The server applies a per-user sliding window of 100 requests/minute
+// (rateLimiters.api in /api/sync/upload). Pace client requests just under it so
+// a large backlog never rate-limits itself, and retry rather than abort when we
+// do get throttled (e.g. by a concurrent auto-sync daemon).
+const DEFAULT_MAX_REQUESTS_PER_MINUTE = 90;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const DEFAULT_RATE_LIMIT_RETRIES = 5;
+const MAX_RETRY_AFTER_MS = 120 * 1000;
+const FALLBACK_RETRY_AFTER_MS = 15 * 1000;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Client-side sliding-window throttle. Blocks before a request would exceed
+ * `maxPerMinute`, so the run stays inside the server's budget instead of
+ * discovering the limit via 429s.
+ */
+function createRequestPacer(maxPerMinute) {
+  const limit = Number(maxPerMinute);
+  if (!Number.isFinite(limit) || limit <= 0) return async () => {};
+
+  const sent = [];
+  return async function pace() {
+    for (;;) {
+      const now = Date.now();
+      const cutoff = now - RATE_LIMIT_WINDOW_MS;
+      while (sent.length > 0 && sent[0] <= cutoff) sent.shift();
+      if (sent.length < limit) {
+        sent.push(now);
+        return;
+      }
+      await sleep(Math.max(50, sent[0] + RATE_LIMIT_WINDOW_MS - now));
+    }
+  };
+}
+
+/** Parse a `Retry-After` header (delta-seconds or HTTP-date) into milliseconds. */
+function parseRetryAfterMs(headers) {
+  const raw = headers && (headers["retry-after"] ?? headers["Retry-After"]);
+  if (raw === undefined || raw === null || raw === "") return null;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) {
+    if (seconds < 0) return null;
+    return Math.min(MAX_RETRY_AFTER_MS, Math.round(seconds * 1000));
+  }
+
+  const at = Date.parse(String(raw));
+  if (Number.isNaN(at)) return null;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, at - Date.now()));
 }
 
 function computeBackoffDelay(attempt, baseDelay) {
@@ -168,7 +218,7 @@ function postJsonOnce(url, headers, body, method) {
       res.on("end", () => {
         try {
           const json = data ? JSON.parse(data) : {};
-          resolve({ status: res.statusCode, body: json });
+          resolve({ status: res.statusCode, body: json, headers: res.headers });
         } catch {
           reject(new Error(`Failed to parse JSON response (status: ${res.statusCode}): ${data.slice(0, 200)}`));
         }
@@ -209,7 +259,7 @@ function getJsonOnce(url, headers) {
       res.on("end", () => {
         try {
           const json = data ? JSON.parse(data) : {};
-          resolve({ status: res.statusCode, body: json });
+          resolve({ status: res.statusCode, body: json, headers: res.headers });
         } catch {
           reject(new Error(`Failed to parse JSON response (status: ${res.statusCode}): ${data.slice(0, 200)}`));
         }
@@ -225,57 +275,47 @@ function getJsonOnce(url, headers) {
   });
 }
 
-async function getJson(url, headers, retryOpts = {}) {
+/**
+ * Shared retry loop for a single HTTP request.
+ *
+ * 429 is throttling, not failure: it gets its own retry budget and waits for the
+ * server-supplied `Retry-After` instead of consuming the transient-error budget.
+ * Previously 429 fell through to the generic `status >= 400` check, so a backlog
+ * big enough to exhaust the per-user window aborted the whole run — and the next
+ * run replayed the same requests into the same wall.
+ */
+async function requestWithRetry(perform, retryOpts = {}) {
   const maxRetries = retryOpts.retries ?? 3;
   const baseDelay = retryOpts.retryBaseDelay ?? 1000;
+  const maxRateLimitRetries = retryOpts.rateLimitRetries ?? DEFAULT_RATE_LIMIT_RETRIES;
+  const pace = retryOpts.pace;
 
   let lastError;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  let attempt = 0;
+  let rateLimitAttempt = 0;
+
+  for (;;) {
     try {
-      const response = await getJsonOnce(url, headers);
+      if (pace) await pace();
+      const response = await perform();
 
-      if (NO_RETRY_STATUSES.includes(response.status)) {
-        return response;
-      }
-
-      if (isTransientStatus(response.status) && attempt < maxRetries) {
-        const delay = computeBackoffDelay(attempt, baseDelay);
+      if (response.status === 429) {
+        if (rateLimitAttempt >= maxRateLimitRetries) return response;
+        const delay =
+          parseRetryAfterMs(response.headers) ??
+          Math.min(
+            MAX_RETRY_AFTER_MS,
+            computeBackoffDelay(rateLimitAttempt, FALLBACK_RETRY_AFTER_MS)
+          );
+        rateLimitAttempt++;
         process.stderr.write(
-          `[omp] Retry ${attempt + 1}/${maxRetries} after ${response.status} response (backoff ${delay}ms)\n`
+          `[omp] Rate limited by server; waiting ${Math.round(delay / 1000)}s before ` +
+            `retry ${rateLimitAttempt}/${maxRateLimitRetries}\n`
         );
         await sleep(delay);
-        lastError = new Error(`Server error (${response.status})`);
+        lastError = new Error("Server error (429)");
         continue;
       }
-
-      return response;
-    } catch (err) {
-      lastError = err;
-
-      if (isTransientError(err) && attempt < maxRetries) {
-        const delay = computeBackoffDelay(attempt, baseDelay);
-        process.stderr.write(
-          `[omp] Retry ${attempt + 1}/${maxRetries} after ${err.code || err.message} (backoff ${delay}ms)\n`
-        );
-        await sleep(delay);
-        continue;
-      }
-
-      throw err;
-    }
-  }
-
-  throw lastError;
-}
-
-async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
-  const maxRetries = retryOpts.retries ?? 3;
-  const baseDelay = retryOpts.retryBaseDelay ?? 1000;
-
-  let lastError;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await postJsonOnce(url, headers, body, method);
 
       // Don't retry permanent failure statuses
       if (NO_RETRY_STATUSES.includes(response.status)) {
@@ -285,8 +325,9 @@ async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
       // Retry on transient HTTP statuses (5xx)
       if (isTransientStatus(response.status) && attempt < maxRetries) {
         const delay = computeBackoffDelay(attempt, baseDelay);
+        attempt++;
         process.stderr.write(
-          `[omp] Retry ${attempt + 1}/${maxRetries} after ${response.status} response (backoff ${delay}ms)\n`
+          `[omp] Retry ${attempt}/${maxRetries} after ${response.status} response (backoff ${delay}ms)\n`
         );
         await sleep(delay);
         lastError = new Error(`Server error (${response.status})`);
@@ -300,19 +341,25 @@ async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
       // Only retry transient network errors
       if (isTransientError(err) && attempt < maxRetries) {
         const delay = computeBackoffDelay(attempt, baseDelay);
+        attempt++;
         process.stderr.write(
-          `[omp] Retry ${attempt + 1}/${maxRetries} after ${err.code || err.message} (backoff ${delay}ms)\n`
+          `[omp] Retry ${attempt}/${maxRetries} after ${err.code || err.message} (backoff ${delay}ms)\n`
         );
         await sleep(delay);
         continue;
       }
 
-      throw err;
+      throw lastError;
     }
   }
+}
 
-  // All retries exhausted
-  throw lastError;
+async function getJson(url, headers, retryOpts = {}) {
+  return requestWithRetry(() => getJsonOnce(url, headers), retryOpts);
+}
+
+async function postJson(url, headers, body, method = "POST", retryOpts = {}) {
+  return requestWithRetry(() => postJsonOnce(url, headers, body, method), retryOpts);
 }
 
 async function syncToServer(config, options = {}) {
@@ -349,7 +396,7 @@ async function syncToServer(config, options = {}) {
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
   }
 
-  const chunkSize = options.chunkSize || 200;
+  let currentChunkSize = options.chunkSize || 200;
   let totalAccepted = 0;
   let totalDuplicates = 0;
   let totalRejected = 0;
@@ -359,15 +406,45 @@ async function syncToServer(config, options = {}) {
 
   const maxRetries = config.sync?.retries ?? 3;
   const retryBaseDelay = config.sync?.retryBaseDelay ?? 1000;
-  const retryOpts = { retries: maxRetries, retryBaseDelay };
+  const retryOpts = {
+    retries: maxRetries,
+    retryBaseDelay,
+    rateLimitRetries: config.sync?.rateLimitRetries ?? DEFAULT_RATE_LIMIT_RETRIES,
+    pace: createRequestPacer(
+      config.sync?.maxRequestsPerMinute ?? DEFAULT_MAX_REQUESTS_PER_MINUTE
+    ),
+  };
 
   const logId = await createSyncLog(config, since, "server");
   const uploadUrl = `${serverUrl.replace(/\/$/, "")}/api/sync/upload`;
   const headers = { "X-User-Token": serverToken };
 
+  // Advance the checkpoint after every chunk the server has fully accepted.
+  // A large backlog can outlive one run (throttling, a dropped connection); a
+  // single end-of-run commit would throw that progress away and make the next
+  // run replay every record from the same starting point.
+  async function commitCheckpoint(row) {
+    if (options.dryRun || !row?.created_at) return;
+    await updateSyncState(config, row.created_at, row.id);
+  }
+
+  function failFromStatus(status, body) {
+    if (status === 429) {
+      return new Error(
+        "Rate limited by server (429) after exhausting retries. Records synced so far " +
+          "are checkpointed — rerun `omp sync` to continue, or lower sync.maxRequestsPerMinute."
+      );
+    }
+    return new Error(`Server error (${status}): ${JSON.stringify(body)}`);
+  }
+
   try {
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      const chunk = rows.slice(i, i + chunkSize);
+    let i = 0;
+    while (i < rows.length) {
+      const chunk = rows.slice(i, i + currentChunkSize);
+      i += chunk.length;
+      const lastRowOfChunk = chunk[chunk.length - 1];
+
       let records = chunk.map((r) => rowToUploadRecord(r, toolsByPrompt.get(r.id)));
       records = records.map((r) => postprocessUploadRecord(r, config));
       records = records.filter((r) => r.prompt_text && r.prompt_text.trim().length > 0);
@@ -375,6 +452,7 @@ async function syncToServer(config, options = {}) {
       if (records.length === 0) {
         totalSkipped += chunk.length;
         chunks++;
+        await commitCheckpoint(lastRowOfChunk);
         continue;
       }
 
@@ -394,10 +472,13 @@ async function syncToServer(config, options = {}) {
       }
 
       if (response.status === 413) {
-        // Auto-reduce chunk size and retry this chunk
+        // Auto-reduce chunk size and retry this chunk. Keep the smaller size for
+        // the rest of the run: re-discovering the limit on every chunk burns an
+        // extra request each time, which is what drains the rate-limit window.
         const smallerChunk = Math.max(10, Math.floor(records.length / 4));
+        currentChunkSize = Math.min(currentChunkSize, smallerChunk);
         process.stderr.write(
-          `[omp] Request too large (${records.length} records). Splitting into chunks of ${smallerChunk}...\n`
+          `[omp] Request too large (${records.length} records). Using chunks of ${smallerChunk} from here on...\n`
         );
         for (let j = 0; j < records.length; j += smallerChunk) {
           const subChunk = records.slice(j, j + smallerChunk);
@@ -409,7 +490,7 @@ async function syncToServer(config, options = {}) {
             throw new Error(`Request too large even with ${subChunk.length} records. Try reducing chunk size further.`);
           }
           if (subResp.status >= 400) {
-            throw new Error(`Server error (${subResp.status}): ${JSON.stringify(subResp.body)}`);
+            throw failFromStatus(subResp.status, subResp.body);
           }
           const subResult = subResp.body;
           totalAccepted += subResult.accepted || 0;
@@ -422,11 +503,15 @@ async function syncToServer(config, options = {}) {
           assertUploadResultAccepted(subResult, subResp.status);
         }
         chunks++;
+        await commitCheckpoint(lastRowOfChunk);
+        if (options.onProgress) {
+          options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: i });
+        }
         continue;
       }
 
       if (response.status >= 400) {
-        throw new Error(`Server error (${response.status}): ${JSON.stringify(response.body)}`);
+        throw failFromStatus(response.status, response.body);
       }
 
       const result = response.body;
@@ -438,17 +523,11 @@ async function syncToServer(config, options = {}) {
       }
       assertUploadResultAccepted(result, response.status);
       chunks++;
+      await commitCheckpoint(lastRowOfChunk);
 
       if (options.onProgress) {
-        options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: Math.min(i + chunkSize, rows.length) });
+        options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: i });
       }
-    }
-
-    // Only advance sync state if the server actually accepted records
-    // This prevents permanently skipping records when the server is temporarily down
-    const lastRow = rows[rows.length - 1];
-    if (!options.dryRun && lastRow?.created_at && (totalAccepted > 0 || totalDuplicates > 0 || totalSkipped > 0)) {
-      await updateSyncState(config, lastRow.created_at, lastRow.id);
     }
 
     await finishSyncLog(config, logId, "success", null, chunks, totalAccepted);
@@ -456,6 +535,7 @@ async function syncToServer(config, options = {}) {
       uploaded: totalAccepted,
       duplicates: totalDuplicates,
       rejected: totalRejected,
+      skipped: totalSkipped,
       chunks,
       since,
       retries: maxRetries,

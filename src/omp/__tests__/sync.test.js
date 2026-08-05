@@ -267,6 +267,119 @@ describe("syncToServer", () => {
     }
   }, 30000);
 
+  it("waits out a 429 and completes the sync instead of aborting", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    let calls = 0;
+    const { server, port } = await startMockServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        calls++;
+        if (calls === 1) {
+          res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+          res.end(JSON.stringify({ error: "Too many requests" }));
+          return;
+        }
+        const parsed = JSON.parse(body);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          accepted: parsed.records.length,
+          duplicates: 0,
+          rejected: 0,
+          errors: [],
+        }));
+      });
+    });
+
+    try {
+      const config = {
+        server: { url: `http://127.0.0.1:${port}`, token: "test-token" },
+        storage: { sqlite: { path: dbPath } },
+        capture: { response: true },
+        sync: { enabled: true, deviceId: "d1", retries: 0 },
+        queue: { maxBytes: 1024 * 1024 },
+      };
+
+      await ingestPayload(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        source: "test",
+        session_id: "s-429",
+        role: "user",
+        text: "Survives throttling",
+        cli_name: "test",
+      }), config);
+
+      const result = await syncToServer(config);
+
+      expect(calls).toBe(2);
+      expect(result.uploaded).toBe(1);
+      const checkpoint = await getSyncState(config);
+      expect(checkpoint.lastSyncedAt).not.toBeNull();
+    } finally {
+      server.close();
+    }
+  }, 15000);
+
+  it("keeps the checkpoint of chunks accepted before a later chunk fails", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    let calls = 0;
+    const { server, port } = await startMockServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        calls++;
+        if (calls === 1) {
+          const parsed = JSON.parse(body);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            accepted: parsed.records.length,
+            duplicates: 0,
+            rejected: 0,
+            errors: [],
+          }));
+          return;
+        }
+        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "0" });
+        res.end(JSON.stringify({ error: "Too many requests" }));
+      });
+    });
+
+    try {
+      const config = {
+        server: { url: `http://127.0.0.1:${port}`, token: "test-token" },
+        storage: { sqlite: { path: dbPath } },
+        capture: { response: true },
+        sync: { enabled: true, deviceId: "d1", retries: 0, rateLimitRetries: 1 },
+        queue: { maxBytes: 1024 * 1024 },
+      };
+
+      const first = new Date(Date.now() - 60000).toISOString();
+      const second = new Date().toISOString();
+      for (const [ts, text] of [[first, "first"], [second, "second"]]) {
+        await ingestPayload(JSON.stringify({
+          timestamp: ts,
+          source: "test",
+          session_id: "s-partial-429",
+          role: "user",
+          text,
+          cli_name: "test",
+        }), config);
+      }
+
+      await expect(syncToServer(config, { chunkSize: 1 })).rejects.toThrow("Rate limited");
+
+      // Chunk 1 was accepted, so its checkpoint survives the failure of chunk 2.
+      const checkpoint = await getSyncState(config);
+      expect(checkpoint.lastSyncedAt).toBe(first);
+    } finally {
+      server.close();
+    }
+  }, 15000);
+
   it("throws when server is not configured", async () => {
     const root = makeTempRoot();
     const dbPath = path.join(root, "omp.db");

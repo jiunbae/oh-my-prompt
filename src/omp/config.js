@@ -43,6 +43,10 @@ function defaultConfig() {
       interval: 300,
       retries: 3,
       retryBaseDelay: 1000,
+      // Server allows 100 req/min per user; stay under it and wait out any 429
+      // instead of aborting the run.
+      maxRequestsPerMinute: 90,
+      rateLimitRetries: 5,
       userToken: "",
       deviceId: "",
       // Redact only when uploading to server (default ON).
