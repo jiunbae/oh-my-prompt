@@ -134,6 +134,101 @@ describe("hooks", () => {
     });
   });
 
+  // Regression: every step below failed in shipped installs while `omp status`
+  // still reported codex=installed, so nothing was ever captured.
+  it("chains a resident codex notify without blocking its own capture", () => {
+    withTempEnv(({ root, codexHome }) => {
+      // A chained notify that never exits — the Codex Computer Use client behaves
+      // this way. Waiting on it would strand the wrapper before it ingests.
+      const residentDir = path.join(root, "resident");
+      fs.mkdirSync(residentDir, { recursive: true });
+      const chainedMarker = path.join(root, "chained-ran");
+      const residentCmd = path.join(residentDir, "resident-notify");
+      fs.writeFileSync(residentCmd, `#!/bin/sh\ntouch ${JSON.stringify(chainedMarker)}\nsleep 20\n`);
+      fs.chmodSync(residentCmd, 0o755);
+
+      // Codex spells notify as a multi-line array with a trailing comma.
+      const codexConfigPath = path.join(codexHome, "config.toml");
+      fs.writeFileSync(
+        codexConfigPath,
+        ["notify = [", `    ${JSON.stringify(residentCmd)},`, '    "turn-ended",', "]", ""].join("\n")
+      );
+
+      const installResult = installCodexHook();
+      expect(installResult.merged).toBe(true);
+
+      // The original notify must survive as argv, not as raw TOML text.
+      const chain = JSON.parse(fs.readFileSync(installResult.chainPath, "utf-8"));
+      expect(chain.original).toEqual([residentCmd, "turn-ended"]);
+
+      // Codex spawns notify directly, so a bare "node" may not resolve.
+      const installedConfig = fs.readFileSync(codexConfigPath, "utf-8");
+      expect(installedConfig).toContain(`notify = ["${process.execPath}"`);
+
+      const capturePath = path.join(root, "wrapper-captured.json");
+      const fakeOmp = path.join(root, "bin-wrapper", "omp");
+      fs.mkdirSync(path.dirname(fakeOmp), { recursive: true });
+      fs.writeFileSync(
+        fakeOmp,
+        "#!/usr/bin/env node\nconst fs = require('fs');\nlet buf='';\nprocess.stdin.on('data',d=>buf+=d);\nprocess.stdin.on('end',()=>{fs.writeFileSync(process.env.CAPTURE_PATH, buf);});\n"
+      );
+      fs.chmodSync(fakeOmp, 0o755);
+
+      const event = {
+        type: "agent-turn-complete",
+        "thread-id": "thr-wrapper",
+        "turn-id": "turn-wrapper",
+        "input-messages": ["hi"],
+        "last-assistant-message": "there",
+      };
+
+      const startedAt = process.hrtime.bigint();
+      const result = spawnSync(process.execPath, [installResult.wrapperPath, JSON.stringify(event)], {
+        env: { ...process.env, CODEX_HOME: codexHome, OMP_BIN: fakeOmp, CAPTURE_PATH: capturePath },
+        encoding: "utf-8",
+        timeout: 15000,
+      });
+      const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+      expect(result.status).toBe(0);
+      // Blocking on the 20s resident command would blow well past this.
+      expect(elapsedMs).toBeLessThan(8000);
+
+      const captured = JSON.parse(fs.readFileSync(capturePath, "utf-8"));
+      expect(captured.session_id).toBe("thr-wrapper");
+      expect(captured.text).toBe("hi");
+
+      // The chained command still has to actually run.
+      expect(fs.existsSync(chainedMarker)).toBe(true);
+
+      uninstallCodexHook();
+      const restoredConfig = fs.readFileSync(codexConfigPath, "utf-8");
+      expect(restoredConfig).toContain(residentCmd);
+      expect(restoredConfig).toContain("turn-ended");
+    });
+  });
+
+  it("repoints an older bare-node notify line without re-chaining it", () => {
+    withTempEnv(({ codexHome }) => {
+      const codexConfigPath = path.join(codexHome, "config.toml");
+      const first = installCodexHook();
+
+      // Simulate what earlier versions wrote.
+      fs.writeFileSync(codexConfigPath, `notify = ["node", ${JSON.stringify(first.scriptPath)}]\n`);
+
+      const second = installCodexHook();
+      expect(second.configured).toBe(true);
+      expect(second.merged).toBe(false);
+
+      const config = fs.readFileSync(codexConfigPath, "utf-8");
+      expect(config).toContain(`notify = ["${process.execPath}", ${JSON.stringify(first.scriptPath)}]`);
+      // Our own line must never be captured as a chained "original".
+      expect(fs.existsSync(second.chainPath)).toBe(false);
+
+      uninstallCodexHook();
+    });
+  });
+
   it("gemini hook script mines toolCalls from the chat session JSON and emits tools[]", () => {
     withTempEnv(({ root, codexHome }) => {
       const geminiHome = path.join(root, ".gemini");
