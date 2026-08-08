@@ -23,7 +23,7 @@ env:
   REGISTRY: registry.jiun.dev
   IMAGE_NAME: oh-my-prompt
   IAC_REPO: jiunbae/IaC
-  APP_PATH: kubernetes/apps/oh-my-prompt
+  APP_PATH: kubernetes/base/apps/oh-my-prompt
   DEV_PATH: kubernetes/overlays/dev/oh-my-prompt
   PROD_PATH: kubernetes/overlays/prod/oh-my-prompt
 
