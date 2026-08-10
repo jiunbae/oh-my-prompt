@@ -12,6 +12,7 @@ const { getConfigPath, getConfigDir } = require("./paths");
 const { getQueueStats } = require("./queue");
 const { listHookStatus } = require("./hooks");
 const { getSyncStatus } = require("./sync-log");
+const { getDriverInfo } = require("./db-driver");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -233,7 +234,7 @@ async function checkServer(report, config) {
 
 async function checkDatabase(report, config) {
   const dbPath = config.storage.sqlite?.path;
-  const result = { path: dbPath };
+  const result = { path: dbPath, driver: getDriverInfo() };
 
   if (!dbPath) {
     result.status = "no_path";

@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.810.3] - 2026-08-10
+
+### Performance
+- Local storage now selects optional `better-sqlite3` first and uses WAL page writes, while retaining `sql.js` as a build-tool-free fallback. On a 342.8 MB real-data clone, a one-row capture wrote 520,192 bytes instead of a full 342,794,240-byte database image (-99.85%) and completed in 9.9 ms
+- Auto-sync now runs database-heavy work in a short-lived worker process. The resident file-event watcher no longer retains the 326 MiB sql.js WebAssembly heap after each sync
+- Background sync workers and hook ingest processes use nice level 10 and Linux best-effort I/O priority 7; the systemd user unit also receives low CPU and I/O weights so OMP yields to interactive and build workloads without starving a database lock holder
+- The systemd unit launches a minimal daemon entrypoint instead of loading the full CLI command graph into the resident watcher
+
+### Added
+- `omp status` and `omp doctor` report the selected SQLite driver. The first native open of an existing database atomically creates and fsyncs a copy-on-write-capable `omp.db.pre-native.bak`, validates `PRAGMA quick_check`, and records the completed transition before enabling WAL
+
+### Fixed
+- A repeatedly syncing daemon could retain roughly 749 MiB RSS (1.1 GiB peak observed) even while completely idle because closing sql.js did not make V8 return its WebAssembly allocation to the OS
+
 ## [2026.810.2] - 2026-08-10
 
 ### Added

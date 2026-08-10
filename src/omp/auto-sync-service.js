@@ -23,13 +23,12 @@ function quoteSystemd(value) {
 
 function renderUserService(options = {}) {
   const nodePath = options.nodePath || process.execPath;
-  const rawCliPath = options.cliPath || process.argv[1];
+  const rawDaemonPath = options.daemonPath || require.resolve("./auto-sync-daemon-entry");
   const rawConfigPath = options.configPath || getConfigPath();
-  if (!rawCliPath) throw new Error("Could not determine the omp CLI entry path");
   // systemd does not inherit the caller's working directory. Resolve every
-  // path at install time so `node ./bin/omp` cannot create a unit that only
+  // path at install time so a relative entry cannot create a unit that only
   // happens to work from the repository directory.
-  const cliPath = path.resolve(rawCliPath);
+  const daemonPath = path.resolve(rawDaemonPath);
   const configPath = path.resolve(rawConfigPath);
 
   return `[Unit]
@@ -40,12 +39,17 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=${quoteSystemd(`OMP_CONFIG_PATH=${configPath}`)}
-ExecStart=${quoteSystemd(nodePath)} ${quoteSystemd(cliPath)} sync auto run
+ExecStart=${quoteSystemd(nodePath)} ${quoteSystemd(daemonPath)} ${quoteSystemd(configPath)}
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=20
 KillSignal=SIGTERM
 UMask=0077
+Nice=10
+CPUWeight=10
+IOWeight=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
 
 [Install]
 WantedBy=default.target

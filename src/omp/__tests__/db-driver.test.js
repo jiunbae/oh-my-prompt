@@ -1,9 +1,21 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { openDatabase } = require("../db-driver");
+const { openDatabase, getDriverInfo } = require("../db-driver");
 
 describe("sql.js database durability", () => {
+  let previousDriver;
+
+  beforeAll(() => {
+    previousDriver = process.env.OMP_SQLITE_DRIVER;
+    process.env.OMP_SQLITE_DRIVER = "sql.js";
+  });
+
+  afterAll(() => {
+    if (previousDriver === undefined) delete process.env.OMP_SQLITE_DRIVER;
+    else process.env.OMP_SQLITE_DRIVER = previousDriver;
+  });
+
   it("refuses a stale writer instead of overwriting newer process data", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-db-driver-"));
     const dbPath = path.join(root, "omp.db");
@@ -134,5 +146,57 @@ describe("sql.js database durability", () => {
     expect(renameSpy.mock.calls).toHaveLength(afterInsert);
     renameSpy.mockRestore();
     db.close();
+  });
+});
+
+describe("native SQLite driver", () => {
+  it("uses WAL and persists page-level writes without replacing the DB file", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-native-driver-"));
+    const dbPath = path.join(root, "omp.db");
+    const bootstrap = await openDatabase(dbPath, { driver: "sql.js" });
+    bootstrap.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
+    bootstrap.close();
+
+    const db = await openDatabase(dbPath, { driver: "native" });
+    expect(db.driver).toBe("better-sqlite3");
+    expect(fs.existsSync(`${dbPath}.pre-native.bak`)).toBe(true);
+    expect(fs.existsSync(`${dbPath}.native-driver`)).toBe(true);
+    expect(db.pragma("journal_mode = WAL")).toEqual([{ journal_mode: "wal" }]);
+
+    const renameSpy = vi.spyOn(fs, "renameSync");
+    db.prepare("INSERT INTO records (id) VALUES (?)").run("first");
+    expect(renameSpy).not.toHaveBeenCalled();
+    renameSpy.mockRestore();
+    db.close();
+
+    const verify = await openDatabase(dbPath, { driver: "native", readonly: true });
+    expect(verify.prepare("SELECT id FROM records").all()).toEqual([{ id: "first" }]);
+    verify.close();
+  });
+
+  it("allows concurrent handles without last-writer-wins data loss", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-native-concurrent-"));
+    const dbPath = path.join(root, "omp.db");
+    const first = await openDatabase(dbPath, { driver: "native" });
+    first.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
+    first.pragma("journal_mode = WAL");
+    const second = await openDatabase(dbPath, { driver: "native" });
+
+    first.prepare("INSERT INTO records (id) VALUES (?)").run("first");
+    second.prepare("INSERT INTO records (id) VALUES (?)").run("second");
+    expect(first.prepare("SELECT id FROM records ORDER BY id").all()).toEqual([
+      { id: "first" },
+      { id: "second" },
+    ]);
+    second.close();
+    first.close();
+  });
+
+  it("selects the available native driver in auto mode", () => {
+    expect(getDriverInfo()).toEqual({
+      name: "better-sqlite3",
+      native: true,
+      fallback: false,
+    });
   });
 });

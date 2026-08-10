@@ -372,7 +372,11 @@ omp sync auto status
 
 The service starts at login. New captures are debounced for 30 seconds, then
 synced as one batch; a one-hour interval is only a missed-event and network
-recovery safety net. To disable or remove it:
+recovery safety net. The resident watcher does not open the database: each sync
+runs in a short-lived, low-priority worker so transient memory is reclaimed and
+interactive workloads win CPU and disk contention. Local storage prefers native
+SQLite WAL page writes and automatically retains `sql.js` as the portable
+fallback. To disable or remove it:
 
 ```bash
 omp sync auto stop
@@ -518,5 +522,5 @@ MIT © Jiun Bae
 
 - Inspired by oh-my-zsh and prompt engineering best practices
 - Built for Claude Code, Codex, and OpenCode users
-- Uses sql.js for build-tool-free Node.js 20+ installation; see the local
-  SQLite driver ADR for the native WAL roadmap
+- Uses optional `better-sqlite3` with WAL page writes when a compatible native
+  binary is available, with `sql.js` as the build-tool-free Node.js 20+ fallback

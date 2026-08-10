@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
+const { execSync, fork } = require("child_process");
 const { getConfigDir, ensureDir } = require("./paths");
 
 const TRIGGER_FILE = path.join(getConfigDir(), "sync-trigger");
@@ -271,13 +271,66 @@ function watchTrigger(onTrigger, onError = () => {}) {
 }
 
 /**
+ * Run one sync in a short-lived process. This bounds any transient database or
+ * network allocation, and is especially important when an installation falls
+ * back to sql.js: it loads the complete database into WebAssembly memory and V8
+ * does not reliably return that address space after close().
+ */
+function launchSyncWorker(configPath, options = {}) {
+  const forkProcess = options.fork || fork;
+  const workerPath = options.workerPath || require.resolve("./auto-sync-worker");
+  const child = forkProcess(workerPath, configPath ? [configPath] : [], {
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+
+  let outcome = null;
+  let settled = false;
+  const promise = new Promise((resolve, reject) => {
+    child.on("message", (message) => {
+      if (!message || typeof message !== "object") return;
+      if (message.type === "lock" && message.lockPath) {
+        if (options.onLock) options.onLock(message.lockPath);
+      } else if (message.type === "result") {
+        outcome = message;
+      }
+    });
+
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+
+    child.once("exit", (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (outcome?.ok) {
+        resolve(outcome.result);
+        return;
+      }
+      const error = new Error(
+        outcome?.error ||
+          `sync worker exited unexpectedly (${signal || `code ${code}`})`
+      );
+      if (outcome?.code) error.code = outcome.code;
+      reject(error);
+    });
+  });
+
+  return { child, promise };
+}
+
+/**
  * Run the daemon loop in the current process.
  * This is called by the detached child process.
  */
 function runDaemonLoop(configPath) {
   const { loadConfig } = require("./config");
-  const { syncToServer } = require("./sync");
-  const { acquireSyncLock, releaseSyncLock } = require("./sync-lock");
+
+  // The watcher itself is almost entirely idle, but keep detached fallback
+  // daemons at the same background CPU and I/O priority as the managed service.
+  // This also covers its small append-only log writes.
+  require("./resource-priority").lowerBackgroundPriority();
 
   // Set process title for identity verification via ps / /proc
   process.title = DAEMON_PROCESS_TITLE;
@@ -316,6 +369,7 @@ function runDaemonLoop(configPath) {
   let shuttingDown = false;
   let triggerWatcher = null;
   let watcherRetryTimer = null;
+  let activeWorker = null;
   let activeLockPath = null;
   let consecutiveFailures = 0;
   let currentIntervalMs = intervalMs;
@@ -369,30 +423,12 @@ function runDaemonLoop(configPath) {
     syncing = true;
     pendingSync = false;
 
-    // Reload config each time in case it changed
-    let currentConfig;
     try {
-      currentConfig = loadConfig();
-    } catch {
-      currentConfig = config;
-    }
-
-    const lock = acquireSyncLock({ ttlMs: 60000 });
-    if (!lock.ok) {
-      appendLog("sync skipped: lock held by another process");
-      syncing = false;
-      // If something was pending, try again after a short delay
-      if (pendingSync && !shuttingDown) {
-        pendingSync = false;
-        setTimeout(() => doSync(), 5000);
-      }
-      return;
-    }
-
-    activeLockPath = lock.lockPath;
-
-    try {
-      const result = await syncToServer(currentConfig);
+      const worker = launchSyncWorker(configPath, {
+        onLock: (lockPath) => { activeLockPath = lockPath; },
+      });
+      activeWorker = worker.child;
+      const result = await worker.promise;
       appendLog(
         "sync completed: uploaded=" + result.uploaded +
         " duplicates=" + (result.duplicates || 0) +
@@ -400,10 +436,14 @@ function runDaemonLoop(configPath) {
       );
       resetIntervalOnSuccess();
     } catch (err) {
-      appendLog("sync failed: " + (err.message || "unknown error"));
-      adjustIntervalOnFailure();
+      if (err.code === "OMP_SYNC_LOCKED") {
+        appendLog("sync skipped: lock held by another process");
+      } else {
+        appendLog("sync failed: " + (err.message || "unknown error"));
+        adjustIntervalOnFailure();
+      }
     } finally {
-      releaseSyncLock(lock.lockPath);
+      activeWorker = null;
       activeLockPath = null;
       syncing = false;
 
@@ -501,6 +541,9 @@ function runDaemonLoop(configPath) {
       if (Date.now() - drainStart > SHUTDOWN_TIMEOUT_MS) {
         clearInterval(drainCheck);
         appendLog("daemon shutdown timeout — forcing exit");
+        if (activeWorker) {
+          try { activeWorker.kill("SIGKILL"); } catch {}
+        }
         // Best-effort lock release
         if (activeLockPath) {
           try {
@@ -537,9 +580,6 @@ function startDaemon(config) {
 
   const { getConfigPath } = require("./paths");
   const configPath = getConfigPath();
-
-  // Fork a detached child that runs the daemon loop
-  const { fork } = require("child_process");
 
   // Write the daemon entry script into the config dir (not source dir)
   const daemonScript = path.join(getConfigDir(), "auto-sync-daemon.js");
@@ -640,6 +680,7 @@ module.exports = {
   getLastSyncTime,
   touchTrigger,
   watchTrigger,
+  launchSyncWorker,
   runDaemonLoop,
   validateTimingConfig,
   TRIGGER_FILE,

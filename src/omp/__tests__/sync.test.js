@@ -6,6 +6,7 @@ const { ingestPayload } = require("../ingest");
 const { syncToServer } = require("../sync");
 const { getSyncState, getSyncStatus } = require("../sync-log");
 const { openDb } = require("../db");
+const { getDriverInfo } = require("../db-driver");
 
 function makeTempRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-test-"));
@@ -378,8 +379,8 @@ describe("syncToServer", () => {
       // Chunk 1 was accepted, so its checkpoint survives the failure of chunk 2.
       const checkpoint = await getSyncState(config);
       expect(checkpoint.lastSyncedAt).toBe(first);
-      // The accepted checkpoint and failed sync log share one transaction.
-      expect(rewrites).toBe(1);
+      // Native SQLite writes WAL pages; sql.js fallback replaces the file once.
+      expect(rewrites).toBe(getDriverInfo().native ? 0 : 1);
     } finally {
       server.close();
     }
@@ -832,8 +833,8 @@ describe("syncToServer", () => {
       renameSpy.mockRestore();
 
       expect(result.uploaded).toBe(5);
-      // The final checkpoint and completed sync log share one transaction.
-      expect(rewrites).toBe(1);
+      // Native SQLite writes WAL pages; sql.js fallback replaces the file once.
+      expect(rewrites).toBe(getDriverInfo().native ? 0 : 1);
     } finally {
       server.close();
     }
