@@ -250,6 +250,17 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 11,
+    run: (db) => {
+      // Incremental sync selects on updated_at (rows whose response landed
+      // after the checkpoint), but every index covered created_at instead, so
+      // that arm of the query scanned the table on every run.
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_prompts_updated_at ON prompts(updated_at)"
+      );
+    },
+  },
 ];
 
 /**

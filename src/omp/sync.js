@@ -9,11 +9,20 @@ const { postprocessUploadRecord } = require("./upload-postprocess");
 // record doesn't 400 the whole chunk. The local DB keeps the full list.
 const MAX_TOOLS_PER_RECORD = 1000;
 
-function fetchRows(db, since, lastId) {
+// A run with no checkpoint (a fresh device, or a cursor reset after backfill)
+// used to select the entire prompts table in one `.all()` — every row with its
+// full prompt and response text, plus every tool invocation for those rows, all
+// resident at once while holding the database lock. On a large history that is
+// gigabytes of JS objects for a job that only ever uploads 200 records at a
+// time. Page it instead: bounded memory, and the lock is released between pages
+// so capture is not starved for the length of the whole backlog.
+const SYNC_PAGE_ROWS = 2000;
+
+function fetchRows(db, since, lastId, limit) {
   if (!since) {
     return db
-      .prepare("SELECT * FROM prompts ORDER BY created_at ASC, id ASC")
-      .all();
+      .prepare("SELECT * FROM prompts ORDER BY created_at ASC, id ASC LIMIT ?")
+      .all(limit);
   }
 
   const iso = new Date(since).toISOString();
@@ -24,18 +33,20 @@ function fetchRows(db, since, lastId) {
         `SELECT * FROM prompts
          WHERE (created_at > ? OR (created_at = ? AND id > ?))
             OR (updated_at > ? AND response_text IS NOT NULL AND created_at <= ?)
-         ORDER BY created_at ASC, id ASC`
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?`
       )
-      .all(iso, iso, lastId, iso, iso);
+      .all(iso, iso, lastId, iso, iso, limit);
   }
   return db
     .prepare(
       `SELECT * FROM prompts
        WHERE created_at > ?
           OR (updated_at > ? AND response_text IS NOT NULL AND created_at <= ?)
-       ORDER BY created_at ASC, id ASC`
+       ORDER BY created_at ASC, id ASC
+       LIMIT ?`
     )
-    .all(iso, iso, iso);
+    .all(iso, iso, iso, limit);
 }
 
 function rowToUploadRecord(row, tools) {
@@ -374,25 +385,31 @@ async function syncToServer(config, options = {}) {
     );
   }
 
-  const snapshot = await withDatabaseOperation(config, (db) => {
-    const deviceId = getDeviceId(config);
-    const stateRow = db
-      .prepare("SELECT last_synced_at, last_synced_id FROM sync_state WHERE device_id = ?")
-      .get(deviceId);
-    const state = stateRow
-      ? { lastSyncedAt: stateRow.last_synced_at, lastSyncedId: stateRow.last_synced_id }
-      : { lastSyncedAt: null, lastSyncedId: null };
-    const since = options.since || state.lastSyncedAt || null;
-    const rows = fetchRows(db, since, state.lastSyncedId);
-    const toolsByPrompt = fetchToolsForPrompts(
-      db,
-      rows.map((row) => row.id),
-    );
-    return { since, rows, toolsByPrompt, state };
-  });
-  const { since, rows, toolsByPrompt, state } = snapshot;
+  const pageRows = options.maxRowsPerPage || SYNC_PAGE_ROWS;
 
-  if (rows.length === 0) {
+  async function fetchPage() {
+    return withDatabaseOperation(config, (db) => {
+      const deviceId = getDeviceId(config);
+      const stateRow = db
+        .prepare("SELECT last_synced_at, last_synced_id FROM sync_state WHERE device_id = ?")
+        .get(deviceId);
+      const state = stateRow
+        ? { lastSyncedAt: stateRow.last_synced_at, lastSyncedId: stateRow.last_synced_id }
+        : { lastSyncedAt: null, lastSyncedId: null };
+      const since = options.since || state.lastSyncedAt || null;
+      const rows = fetchRows(db, since, state.lastSyncedId, pageRows);
+      const toolsByPrompt = fetchToolsForPrompts(
+        db,
+        rows.map((row) => row.id),
+      );
+      return { since, rows, toolsByPrompt, state };
+    });
+  }
+
+  let page = await fetchPage();
+  const since = page.since;
+
+  if (page.rows.length === 0) {
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
   }
 
@@ -429,8 +446,8 @@ async function syncToServer(config, options = {}) {
   // later Stop hook — and orders them ahead of new rows because they sort by
   // created_at. Committing a chunk verbatim would drag the checkpoint backwards
   // and make every later run re-fetch from the older point.
-  let checkpointAt = state.lastSyncedAt;
-  let checkpointId = state.lastSyncedId;
+  let checkpointAt = page.state.lastSyncedAt;
+  let checkpointId = page.state.lastSyncedId;
 
   function isAhead(row) {
     if (!checkpointAt) return true;
@@ -457,6 +474,10 @@ async function syncToServer(config, options = {}) {
   }
 
   try {
+    for (;;) {
+    const { rows, toolsByPrompt } = page;
+    const pageStartedAt = checkpointAt;
+    const pageStartedId = checkpointId;
     let i = 0;
     while (i < rows.length) {
       const chunk = rows.slice(i, i + currentChunkSize);
@@ -546,6 +567,18 @@ async function syncToServer(config, options = {}) {
       if (options.onProgress) {
         options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: i });
       }
+    }
+
+      // A short page means the backlog is drained. A dry run never commits a
+      // checkpoint, so it would otherwise re-fetch the same page forever.
+      if (rows.length < pageRows || options.dryRun) break;
+      // Rows can be returned without moving the checkpoint — backfilled rows
+      // created before it are legitimately re-sent but never advance it. If a
+      // whole page failed to move the cursor, the next fetch returns the same
+      // rows, so stop instead of looping on them.
+      if (checkpointAt === pageStartedAt && checkpointId === pageStartedId) break;
+      page = await fetchPage();
+      if (page.rows.length === 0) break;
     }
 
     await finishSyncLog(config, logId, "success", null, chunks, totalAccepted);

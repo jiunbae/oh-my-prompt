@@ -533,4 +533,65 @@ describe("syncToServer", () => {
       server.close();
     }
   });
+
+  it("uploads a backlog larger than one page across successive pages", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+
+    const received = [];
+    const { server, port } = await startMockServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        const parsed = JSON.parse(body);
+        received.push(parsed);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          accepted: parsed.records.length,
+          duplicates: 0,
+          rejected: 0,
+          errors: [],
+        }));
+      });
+    });
+
+    try {
+      const config = {
+        server: { url: `http://127.0.0.1:${port}`, token: "test-token" },
+        storage: { sqlite: { path: dbPath } },
+        capture: { response: true },
+        sync: { enabled: true, deviceId: "d-page", checkpoint: "" },
+        queue: { maxBytes: 1024 * 1024 },
+      };
+
+      const total = 7;
+      for (let i = 0; i < total; i++) {
+        await ingestPayload(
+          JSON.stringify({
+            timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+            source: "test-cli",
+            session_id: "s-page",
+            role: "user",
+            text: `paged prompt ${i}`,
+            cli_name: "test",
+            turn_index: i,
+          }),
+          config
+        );
+      }
+
+      // Two rows per page forces the outer paging loop to run several times.
+      const result = await syncToServer(config, {
+        maxRowsPerPage: 2,
+        chunkSize: 2,
+      });
+
+      expect(result.uploaded).toBe(total);
+      const uploadedTexts = received.flatMap((r) => r.records.map((x) => x.prompt_text));
+      expect(new Set(uploadedTexts).size).toBe(total);
+      expect(received.length).toBeGreaterThan(1);
+    } finally {
+      server.close();
+    }
+  });
 });
