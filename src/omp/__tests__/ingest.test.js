@@ -3,6 +3,7 @@ const path = require("path");
 const os = require("os");
 const { ingestPayload, replayQueue } = require("../ingest");
 const { openDb } = require("../db");
+const { loadState } = require("../state");
 
 function makeTempRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-test-"));
@@ -57,6 +58,30 @@ describe("ingestPayload", () => {
     const replay = await replayQueue(config);
     expect(replay.failed).toBe(1);
     expect(fs.readdirSync(queueDir)).toHaveLength(1);
+  });
+
+  it("clears the stale busy error after replay drains the queue", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "database-directory");
+    fs.mkdirSync(dbPath);
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    const queued = await ingestPayload(
+      { source: "test", role: "user", text: "replay me" },
+      config
+    );
+    expect(queued.ok).toBe(false);
+    expect(loadState().lastError).toBeTruthy();
+
+    fs.rmdirSync(dbPath);
+    const replay = await replayQueue(config);
+
+    expect(replay).toEqual({ processed: 1, failed: 0 });
+    expect(loadState().lastError).toBeNull();
   });
 
   it("writes a prompt record to sqlite", async () => {
@@ -244,12 +269,131 @@ describe("ingestPayload", () => {
     renameSpy.mockRestore();
 
     expect(result.ok).toBe(true);
-    expect(rewrites).toBeLessThan(tools.length);
-    expect(rewrites).toBeLessThanOrEqual(4);
+    expect(rewrites).toBe(1);
 
     const db = await openDb(dbPath);
     const count = db.prepare("SELECT COUNT(*) as c FROM tool_invocations").get();
     db.close();
     expect(count.c).toBe(tools.length);
+  });
+
+  it("rolls back the whole turn when one tool invocation cannot be serialized", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    const circularInput = {};
+    circularInput.self = circularInput;
+    const result = await ingestPayload(
+      {
+        source: "test",
+        cli_name: "test",
+        role: "user",
+        session_id: "s-atomic",
+        text: "must be atomic",
+        tools: [
+          {
+            tool_use_id: "tu-circular",
+            tool_name: "Bash",
+            input: circularInput,
+          },
+        ],
+      },
+      config,
+      { queueOnFailure: false }
+    );
+
+    expect(result.ok).toBe(false);
+    const db = await openDb(dbPath);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM prompts").get().count).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_invocations").get().count).toBe(0);
+    db.close();
+  });
+
+  it("does not rewrite the database for an unchanged duplicate capture", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+    const payload = {
+      source: "test",
+      cli_name: "test",
+      role: "user",
+      session_id: "s-noop-duplicate",
+      text: "same capture",
+    };
+
+    await ingestPayload(payload, config);
+    const renameSpy = vi.spyOn(fs, "renameSync");
+    const duplicate = await ingestPayload(payload, config);
+    const rewrites = renameSpy.mock.calls.filter(([, dest]) => dest === dbPath).length;
+    renameSpy.mockRestore();
+
+    expect(duplicate).toMatchObject({ ok: true, deduped: true, updated: false });
+    expect(rewrites).toBe(0);
+  });
+
+  it("does not rewrite the database for a duplicate carrying the same tools", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+    const payload = {
+      source: "test",
+      cli_name: "test",
+      role: "user",
+      session_id: "s-noop-tools",
+      text: "same capture with tools",
+      tools: Array.from({ length: 20 }, (_, i) => ({
+        tool_use_id: `tu_noop_${i}`,
+        tool_name: "Bash",
+        input: { command: `echo ${i}` },
+        sequence: i,
+      })),
+    };
+
+    await ingestPayload(payload, config);
+
+    // Re-ingesting an unchanged tool-bearing turn is the common case: a Stop
+    // hook resending its tools, a replay, a backfill. The upsert's DO UPDATE
+    // counts as a modified row even when it writes identical values, which
+    // would dirty the transaction and rewrite the whole file.
+    const renameSpy = vi.spyOn(fs, "renameSync");
+    const duplicate = await ingestPayload(payload, config);
+    const rewrites = renameSpy.mock.calls.filter(([, dest]) => dest === dbPath).length;
+    renameSpy.mockRestore();
+
+    expect(duplicate).toMatchObject({ ok: true, deduped: true });
+    expect(rewrites).toBe(0);
+
+    // A genuine change must still be written.
+    const changed = {
+      ...payload,
+      tools: [{ ...payload.tools[0], input: { command: "echo changed" } }],
+    };
+    const changeSpy = vi.spyOn(fs, "renameSync");
+    await ingestPayload(changed, config);
+    const changeRewrites = changeSpy.mock.calls.filter(([, dest]) => dest === dbPath).length;
+    changeSpy.mockRestore();
+    expect(changeRewrites).toBe(1);
+
+    const db = await openDb(dbPath);
+    const stored = db
+      .prepare("SELECT input_json FROM tool_invocations WHERE tool_use_id = ?")
+      .get("tu_noop_0");
+    const total = db.prepare("SELECT COUNT(*) AS c FROM tool_invocations").get();
+    db.close();
+    expect(JSON.parse(stored.input_json)).toEqual({ command: "echo changed" });
+    expect(total.c).toBe(payload.tools.length);
   });
 });

@@ -17,36 +17,51 @@ const MAX_TOOLS_PER_RECORD = 1000;
 // time. Page it instead: bounded memory, and the lock is released between pages
 // so capture is not starved for the length of the whole backlog.
 const SYNC_PAGE_ROWS = 2000;
+const SYNC_AT_SQL =
+  "CASE WHEN response_text IS NOT NULL AND updated_at > created_at " +
+  "THEN updated_at ELSE created_at END";
 
-function fetchRows(db, since, lastId, limit) {
-  if (!since) {
-    return db
-      .prepare("SELECT * FROM prompts ORDER BY created_at ASC, id ASC LIMIT ?")
-      .all(limit);
+function fetchRows(db, since, lastId, limit, after = null) {
+  const clauses = [];
+  const params = [];
+
+  if (since) {
+    const iso = new Date(since).toISOString();
+    // Fetch new rows OR rows updated after last sync (e.g. response added later).
+    if (lastId) {
+      clauses.push(
+        `((created_at > ? OR (created_at = ? AND id > ?))
+          OR (response_text IS NOT NULL
+              AND (updated_at > ? OR (updated_at = ? AND id > ?))))`
+      );
+      params.push(iso, iso, lastId, iso, iso, lastId);
+    } else {
+      clauses.push(
+        `(created_at > ?
+          OR (response_text IS NOT NULL AND updated_at > ?))`
+      );
+      params.push(iso, iso);
+    }
   }
 
-  const iso = new Date(since).toISOString();
-  // Fetch new rows OR rows updated after last sync (e.g. response added later)
-  if (lastId) {
-    return db
-      .prepare(
-        `SELECT * FROM prompts
-         WHERE (created_at > ? OR (created_at = ? AND id > ?))
-            OR (updated_at > ? AND response_text IS NOT NULL AND created_at <= ?)
-         ORDER BY created_at ASC, id ASC
-         LIMIT ?`
-      )
-      .all(iso, iso, lastId, iso, iso, limit);
+  // This keyset cursor is local to one sync run and deliberately independent
+  // from the durable checkpoint. The run keeps its starting predicate stable
+  // while the checkpoint advances after accepted chunks; without a separate
+  // scan cursor, every page fetch would return the same first page.
+  if (after?.syncAt && after?.id) {
+    clauses.push(`(${SYNC_AT_SQL} > ? OR (${SYNC_AT_SQL} = ? AND id > ?))`);
+    params.push(after.syncAt, after.syncAt, after.id);
   }
+
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
   return db
     .prepare(
-      `SELECT * FROM prompts
-       WHERE created_at > ?
-          OR (updated_at > ? AND response_text IS NOT NULL AND created_at <= ?)
-       ORDER BY created_at ASC, id ASC
+      `SELECT *, ${SYNC_AT_SQL} AS sync_at FROM prompts
+       ${where}
+       ORDER BY sync_at ASC, id ASC
        LIMIT ?`
     )
-    .all(iso, iso, iso, limit);
+    .all(...params, limit);
 }
 
 function rowToUploadRecord(row, tools) {
@@ -74,7 +89,7 @@ function rowToUploadRecord(row, tools) {
   if (Array.isArray(tools) && tools.length > 0) {
     if (tools.length > MAX_TOOLS_PER_RECORD) {
       process.stderr.write(
-        `[omp] Record ${rec.event_id} has ${tools.length} tool invocations; uploading first ${MAX_TOOLS_PER_RECORD} (server limit)\n`
+        `[omp] Record ${rec.event_id} has more than ${MAX_TOOLS_PER_RECORD} tool invocations; uploading the first ${MAX_TOOLS_PER_RECORD} (server limit)\n`
       );
       rec.tools = tools.slice(0, MAX_TOOLS_PER_RECORD);
     } else {
@@ -90,11 +105,22 @@ function fetchToolsForPrompts(db, promptIds) {
   const rows = db
     .prepare(
       `SELECT prompt_id, tool_use_id, tool_name, sequence, input_json, program, cwd, created_at
-       FROM tool_invocations
-       WHERE prompt_id IN (${placeholders})
-       ORDER BY prompt_id, sequence`
+       FROM (
+         SELECT prompt_id, tool_use_id, tool_name, sequence, input_json, program, cwd,
+                created_at, rowid AS invocation_rowid,
+                ROW_NUMBER() OVER (
+                  PARTITION BY prompt_id
+                  ORDER BY sequence ASC, rowid ASC
+                ) AS invocation_rank
+         FROM tool_invocations
+         WHERE prompt_id IN (${placeholders})
+       )
+       WHERE invocation_rank <= ?
+       ORDER BY prompt_id, sequence, invocation_rowid`
     )
-    .all(...promptIds);
+    // Fetch one extra row so rowToUploadRecord can report truncation without
+    // materialising every invocation for an oversized prompt.
+    .all(...promptIds, MAX_TOOLS_PER_RECORD + 1);
   const grouped = new Map();
   for (const r of rows) {
     if (!grouped.has(r.prompt_id)) grouped.set(r.prompt_id, []);
@@ -385,9 +411,12 @@ async function syncToServer(config, options = {}) {
     );
   }
 
-  const pageRows = options.maxRowsPerPage || SYNC_PAGE_ROWS;
+  const requestedPageRows = Number(options.maxRowsPerPage ?? SYNC_PAGE_ROWS);
+  const pageRows = Number.isFinite(requestedPageRows)
+    ? Math.max(1, Math.floor(requestedPageRows))
+    : SYNC_PAGE_ROWS;
 
-  async function fetchPage() {
+  async function fetchPage(after = null, stableCursor = null) {
     return withDatabaseOperation(config, (db) => {
       const deviceId = getDeviceId(config);
       const stateRow = db
@@ -396,18 +425,34 @@ async function syncToServer(config, options = {}) {
       const state = stateRow
         ? { lastSyncedAt: stateRow.last_synced_at, lastSyncedId: stateRow.last_synced_id }
         : { lastSyncedAt: null, lastSyncedId: null };
-      const since = options.since || state.lastSyncedAt || null;
-      const rows = fetchRows(db, since, state.lastSyncedId, pageRows);
+      // Test for the cursor object, not for a truthy `since`. A run that starts
+      // with no lower bound — a fresh device, or the cursor reset after a
+      // backfill — has a legitimately null `since`, and `??` would fall through
+      // to the checkpoint this run just persisted. Later pages would then apply
+      // a filter the first page did not have and the run would stop early,
+      // uploading only the first page.
+      const since = stableCursor
+        ? stableCursor.since
+        : options.since ?? state.lastSyncedAt ?? null;
+      // An explicit --since starts a new range and must not inherit the id from
+      // an unrelated persisted checkpoint at the same timestamp.
+      const lastId = stableCursor
+        ? stableCursor.lastId
+        : options.since
+          ? null
+          : state.lastSyncedId;
+      const rows = fetchRows(db, since, lastId, pageRows, after);
       const toolsByPrompt = fetchToolsForPrompts(
         db,
         rows.map((row) => row.id),
       );
-      return { since, rows, toolsByPrompt, state };
+      return { since, lastId, rows, toolsByPrompt, state };
     });
   }
 
   let page = await fetchPage();
   const since = page.since;
+  const stableCursor = { since: page.since, lastId: page.lastId };
 
   if (page.rows.length === 0) {
     return { uploaded: 0, chunks: 0, duplicates: 0, since };
@@ -436,31 +481,47 @@ async function syncToServer(config, options = {}) {
   const uploadUrl = `${serverUrl.replace(/\/$/, "")}/api/sync/upload`;
   const headers = { "X-User-Token": serverToken };
 
-  // Advance the checkpoint after every chunk the server has fully accepted.
-  // A large backlog can outlive one run (throttling, a dropped connection); a
-  // single end-of-run commit would throw that progress away and make the next
-  // run replay every record from the same starting point.
+  // Stage the checkpoint after every accepted chunk, then persist it once per
+  // fetched page (and once on failure). updateSyncState rewrites the entire
+  // sql.js database, so persisting every 200-record request would reintroduce
+  // severe write amplification. A retry may resend at most one in-flight page,
+  // which is safe because the server deduplicates event ids.
   //
-  // Only ever move forward. fetchRows also returns backfilled rows — created
-  // before the checkpoint but updated after it, e.g. a response attached by a
-  // later Stop hook — and orders them ahead of new rows because they sort by
-  // created_at. Committing a chunk verbatim would drag the checkpoint backwards
-  // and make every later run re-fetch from the older point.
+  // Only ever move forward. The cursor follows each row's effective mutation
+  // time (`sync_at`): created_at for a new prompt, or the later updated_at when
+  // a response was attached by a Stop hook. Ordering and checkpointing on the
+  // same value prevents both backwards movement and repeated historical updates.
   let checkpointAt = page.state.lastSyncedAt;
   let checkpointId = page.state.lastSyncedId;
+  let persistedCheckpointAt = checkpointAt;
+  let persistedCheckpointId = checkpointId;
 
   function isAhead(row) {
+    const rowSyncAt = row.sync_at || row.created_at;
     if (!checkpointAt) return true;
-    if (row.created_at !== checkpointAt) return row.created_at > checkpointAt;
+    if (rowSyncAt !== checkpointAt) return rowSyncAt > checkpointAt;
     return !checkpointId || String(row.id) > String(checkpointId);
   }
 
-  async function commitCheckpoint(row) {
-    if (options.dryRun || !row?.created_at) return;
+  function stageCheckpoint(row) {
+    const rowSyncAt = row?.sync_at || row?.created_at;
+    if (options.dryRun || !rowSyncAt) return;
     if (!isAhead(row)) return;
-    checkpointAt = row.created_at;
+    checkpointAt = rowSyncAt;
     checkpointId = row.id;
+  }
+
+  async function persistCheckpoint() {
+    if (options.dryRun || !checkpointAt) return;
+    if (
+      checkpointAt === persistedCheckpointAt &&
+      checkpointId === persistedCheckpointId
+    ) {
+      return;
+    }
     await updateSyncState(config, checkpointAt, checkpointId);
+    persistedCheckpointAt = checkpointAt;
+    persistedCheckpointId = checkpointId;
   }
 
   function failFromStatus(status, body) {
@@ -475,109 +536,105 @@ async function syncToServer(config, options = {}) {
 
   try {
     for (;;) {
-    const { rows, toolsByPrompt } = page;
-    const pageStartedAt = checkpointAt;
-    const pageStartedId = checkpointId;
-    let i = 0;
-    while (i < rows.length) {
-      const chunk = rows.slice(i, i + currentChunkSize);
-      i += chunk.length;
-      const lastRowOfChunk = chunk[chunk.length - 1];
+      const { rows, toolsByPrompt } = page;
+      let i = 0;
+      while (i < rows.length) {
+        const chunk = rows.slice(i, i + currentChunkSize);
+        i += chunk.length;
+        const lastRowOfChunk = chunk[chunk.length - 1];
 
-      let records = chunk.map((r) => rowToUploadRecord(r, toolsByPrompt.get(r.id)));
-      records = records.map((r) => postprocessUploadRecord(r, config));
-      records = records.filter((r) => r.prompt_text && r.prompt_text.trim().length > 0);
+        let records = chunk.map((r) => rowToUploadRecord(r, toolsByPrompt.get(r.id)));
+        records = records.map((r) => postprocessUploadRecord(r, config));
+        records = records.filter((r) => r.prompt_text && r.prompt_text.trim().length > 0);
 
-      if (records.length === 0) {
-        totalSkipped += chunk.length;
-        chunks++;
-        await commitCheckpoint(lastRowOfChunk);
-        continue;
-      }
-
-      if (options.dryRun) {
-        totalAccepted += records.length;
-        chunks++;
-        continue;
-      }
-
-      const response = await postJson(uploadUrl, headers, {
-        records,
-        deviceId: getDeviceId(config),
-      }, "POST", retryOpts);
-
-      if (response.status === 401) {
-        throw new Error("Authentication failed. Check server.token.");
-      }
-
-      if (response.status === 413) {
-        // Auto-reduce chunk size and retry this chunk. Keep the smaller size for
-        // the rest of the run: re-discovering the limit on every chunk burns an
-        // extra request each time, which is what drains the rate-limit window.
-        const smallerChunk = Math.max(10, Math.floor(records.length / 4));
-        currentChunkSize = Math.min(currentChunkSize, smallerChunk);
-        process.stderr.write(
-          `[omp] Request too large (${records.length} records). Using chunks of ${smallerChunk} from here on...\n`
-        );
-        for (let j = 0; j < records.length; j += smallerChunk) {
-          const subChunk = records.slice(j, j + smallerChunk);
-          const subResp = await postJson(uploadUrl, headers, {
-            records: subChunk,
-            deviceId: getDeviceId(config),
-          }, "POST", retryOpts);
-          if (subResp.status === 413) {
-            throw new Error(`Request too large even with ${subChunk.length} records. Try reducing chunk size further.`);
-          }
-          if (subResp.status >= 400) {
-            throw failFromStatus(subResp.status, subResp.body);
-          }
-          const subResult = subResp.body;
-          totalAccepted += subResult.accepted || 0;
-          totalDuplicates += subResult.duplicates || 0;
-          totalRejected += subResult.rejected || 0;
-          if (subResult.errors?.length) errors.push(...subResult.errors);
-          // A 207 response is transport-level success but still means one or
-          // more records were not persisted. Fail the run before advancing the
-          // checkpoint; already accepted rows are safe to retry as duplicates.
-          assertUploadResultAccepted(subResult, subResp.status);
+        if (records.length === 0) {
+          totalSkipped += chunk.length;
+          chunks++;
+          stageCheckpoint(lastRowOfChunk);
+          continue;
         }
+
+        if (options.dryRun) {
+          totalAccepted += records.length;
+          chunks++;
+          continue;
+        }
+
+        const response = await postJson(uploadUrl, headers, {
+          records,
+          deviceId: getDeviceId(config),
+        }, "POST", retryOpts);
+
+        if (response.status === 401) {
+          throw new Error("Authentication failed. Check server.token.");
+        }
+
+        if (response.status === 413) {
+          // Auto-reduce chunk size and retry this chunk. Keep the smaller size for
+          // the rest of the run: re-discovering the limit on every chunk burns an
+          // extra request each time, which is what drains the rate-limit window.
+          const smallerChunk = Math.max(10, Math.floor(records.length / 4));
+          currentChunkSize = Math.min(currentChunkSize, smallerChunk);
+          process.stderr.write(
+            `[omp] Request too large (${records.length} records). Using chunks of ${smallerChunk} from here on...\n`
+          );
+          for (let j = 0; j < records.length; j += smallerChunk) {
+            const subChunk = records.slice(j, j + smallerChunk);
+            const subResp = await postJson(uploadUrl, headers, {
+              records: subChunk,
+              deviceId: getDeviceId(config),
+            }, "POST", retryOpts);
+            if (subResp.status === 413) {
+              throw new Error(`Request too large even with ${subChunk.length} records. Try reducing chunk size further.`);
+            }
+            if (subResp.status >= 400) {
+              throw failFromStatus(subResp.status, subResp.body);
+            }
+            const subResult = subResp.body;
+            totalAccepted += subResult.accepted || 0;
+            totalDuplicates += subResult.duplicates || 0;
+            totalRejected += subResult.rejected || 0;
+            if (subResult.errors?.length) errors.push(...subResult.errors);
+            // A 207 response is transport-level success but still means one or
+            // more records were not persisted. Fail the run before advancing the
+            // checkpoint; already accepted rows are safe to retry as duplicates.
+            assertUploadResultAccepted(subResult, subResp.status);
+          }
+          chunks++;
+          stageCheckpoint(lastRowOfChunk);
+          if (options.onProgress) {
+            options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: i });
+          }
+          continue;
+        }
+
+        if (response.status >= 400) {
+          throw failFromStatus(response.status, response.body);
+        }
+
+        const result = response.body;
+        totalAccepted += result.accepted || 0;
+        totalDuplicates += result.duplicates || 0;
+        totalRejected += result.rejected || 0;
+        if (result.errors?.length) {
+          errors.push(...result.errors);
+        }
+        assertUploadResultAccepted(result, response.status);
         chunks++;
-        await commitCheckpoint(lastRowOfChunk);
+        stageCheckpoint(lastRowOfChunk);
+
         if (options.onProgress) {
           options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: i });
         }
-        continue;
       }
 
-      if (response.status >= 400) {
-        throw failFromStatus(response.status, response.body);
-      }
-
-      const result = response.body;
-      totalAccepted += result.accepted || 0;
-      totalDuplicates += result.duplicates || 0;
-      totalRejected += result.rejected || 0;
-      if (result.errors?.length) {
-        errors.push(...result.errors);
-      }
-      assertUploadResultAccepted(result, response.status);
-      chunks++;
-      await commitCheckpoint(lastRowOfChunk);
-
-      if (options.onProgress) {
-        options.onProgress({ uploaded: totalAccepted, duplicates: totalDuplicates, chunks, totalRows: rows.length, sent: i });
-      }
-    }
-
-      // A short page means the backlog is drained. A dry run never commits a
-      // checkpoint, so it would otherwise re-fetch the same page forever.
-      if (rows.length < pageRows || options.dryRun) break;
-      // Rows can be returned without moving the checkpoint — backfilled rows
-      // created before it are legitimately re-sent but never advance it. If a
-      // whole page failed to move the cursor, the next fetch returns the same
-      // rows, so stop instead of looping on them.
-      if (checkpointAt === pageStartedAt && checkpointId === pageStartedId) break;
-      page = await fetchPage();
+      await persistCheckpoint();
+      if (rows.length < pageRows) break;
+      const lastScanned = rows[rows.length - 1];
+      page = await fetchPage(
+        { syncAt: lastScanned.sync_at, id: lastScanned.id },
+        stableCursor
+      );
       if (page.rows.length === 0) break;
     }
 
@@ -593,8 +650,24 @@ async function syncToServer(config, options = {}) {
       errors: errors.slice(0, 10),
     };
   } catch (error) {
-    await finishSyncLog(config, logId, "failed", error.message || "unknown", chunks, totalAccepted);
-    throw error;
+    let finalError = error;
+    try {
+      await persistCheckpoint();
+    } catch (checkpointError) {
+      finalError = new Error(
+        `${error.message || "Sync failed"}; additionally failed to persist the accepted checkpoint: ` +
+        `${checkpointError.message || "unknown error"}`
+      );
+    }
+    await finishSyncLog(
+      config,
+      logId,
+      "failed",
+      finalError.message || "unknown",
+      chunks,
+      totalAccepted
+    );
+    throw finalError;
   }
 }
 

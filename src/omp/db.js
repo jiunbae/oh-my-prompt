@@ -263,6 +263,9 @@ const MIGRATIONS = [
   },
 ];
 
+const LATEST_MIGRATION_VERSION =
+  MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;
+
 /**
  * FTS setup is intentionally skipped for sql.js.
  * sql.js FTS4 content-table mode has a broken 'delete' command that causes
@@ -359,4 +362,5 @@ module.exports = {
   nowIso,
   hashContent,
   getCurrentVersion,
+  LATEST_MIGRATION_VERSION,
 };

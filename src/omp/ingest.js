@@ -225,39 +225,40 @@ function insertToolInvocations(db, tools, promptId, record, redactOptions) {
       input_json = excluded.input_json,
       program = excluded.program,
       cwd = excluded.cwd
+    -- Skip the update when it would write back identical values. DO UPDATE
+    -- always counts as a modified row, which marks the transaction dirty and
+    -- costs a full-database rewrite — and re-ingesting the same tool-bearing
+    -- turn is the common case (a Stop hook resending its tools, replay,
+    -- backfill). IS NOT rather than <> so NULL columns compare correctly.
+    WHERE tool_invocations.prompt_id IS NOT COALESCE(tool_invocations.prompt_id, excluded.prompt_id)
+       OR tool_invocations.sequence IS NOT excluded.sequence
+       OR tool_invocations.input_json IS NOT excluded.input_json
+       OR tool_invocations.program IS NOT excluded.program
+       OR tool_invocations.cwd IS NOT excluded.cwd
   `);
-  // sql.js persists by rewriting the entire database file, so an unwrapped loop
-  // costs one full rewrite *per tool call*. A single agentic turn can carry
-  // hundreds of them (the upload schema caps a record at 1000), which on a
-  // 270MB database means hundreds of gigabytes of writes — minutes of I/O while
-  // holding the ingest lock, and far worse when the database lives on NFS.
-  // One transaction, one rewrite.
-  const insertAll = db.transaction(() => {
-    for (const t of tools) {
-      if (!t || !t.tool_use_id || !t.tool_name) continue;
-      const input = t.input != null ? t.input : null;
-      // Redact secrets inside tool inputs (Bash commands, Edit contents, WebFetch
-      // bodies, …) before storing when capture redaction is enabled. Program is
-      // derived from the original input — the command name itself is not secret
-      // and redaction could otherwise obscure it.
-      const storedInput =
-        redactOptions && input != null ? redactValue(input, redactOptions) : input;
-      stmt.run({
-        id: crypto.randomUUID(),
-        prompt_id: promptId || null,
-        session_id: record.session_id,
-        sequence: typeof t.sequence === "number" ? t.sequence : 0,
-        source: record.source || null,
-        tool_name: String(t.tool_name).slice(0, 100),
-        tool_use_id: String(t.tool_use_id).slice(0, 255),
-        input_json: storedInput != null ? JSON.stringify(storedInput) : null,
-        program: deriveProgram(t.tool_name, input),
-        cwd: t.cwd || record.cwd || null,
-        created_at: record.created_at || nowIso(),
-      });
-    }
-  });
-  insertAll();
+  for (const t of tools) {
+    if (!t || !t.tool_use_id || !t.tool_name) continue;
+    const input = t.input != null ? t.input : null;
+    // Redact secrets inside tool inputs (Bash commands, Edit contents, WebFetch
+    // bodies, …) before storing when capture redaction is enabled. Program is
+    // derived from the original input — the command name itself is not secret
+    // and redaction could otherwise obscure it.
+    const storedInput =
+      redactOptions && input != null ? redactValue(input, redactOptions) : input;
+    stmt.run({
+      id: crypto.randomUUID(),
+      prompt_id: promptId || null,
+      session_id: record.session_id,
+      sequence: typeof t.sequence === "number" ? t.sequence : 0,
+      source: record.source || null,
+      tool_name: String(t.tool_name).slice(0, 100),
+      tool_use_id: String(t.tool_use_id).slice(0, 255),
+      input_json: storedInput != null ? JSON.stringify(storedInput) : null,
+      program: deriveProgram(t.tool_name, input),
+      cwd: t.cwd || record.cwd || null,
+      created_at: record.created_at || nowIso(),
+    });
+  }
 }
 
 function ftsInsert(db, rowid, promptText, responseText) {
@@ -298,17 +299,12 @@ function insertPrompt(db, record) {
     )
     ON CONFLICT(event_id) DO NOTHING
   `);
-  // The row and its FTS mirror are one logical write. Left unwrapped, sql.js
-  // rewrites the entire database file twice for a single captured prompt.
-  const insert = db.transaction(() => {
-    const result = stmt.run(record);
-    if (result.changes > 0) {
-      const row = db.prepare("SELECT rowid FROM prompts WHERE id = ?").get(record.id);
-      if (row) ftsInsert(db, row.rowid, record.prompt_text, record.response_text);
-    }
-    return result;
-  });
-  return insert();
+  const result = stmt.run(record);
+  if (result.changes > 0) {
+    const row = db.prepare("SELECT rowid FROM prompts WHERE id = ?").get(record.id);
+    if (row) ftsInsert(db, row.rowid, record.prompt_text, record.response_text);
+  }
+  return result;
 }
 
 function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wordCount) {
@@ -326,6 +322,129 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
     promptId
   );
   ftsUpdateResponse(db, promptId, responseText);
+}
+
+// Keep every mutation for one captured turn in one SQL transaction. Besides
+// making the prompt, FTS mirror, response, and tool rows atomic, this is also
+// the persistence boundary for sql.js: DatabaseWrapper saves once after the
+// outer transaction instead of serialising the full database once per helper.
+function persistPayload(db, payload, record, toolRedact) {
+  if (record.role === "assistant" && record.session_id) {
+    let row = null;
+
+    // Precise match: use user_prompt_text content hash when available.
+    if (payload.user_prompt_text) {
+      const hash = hashContent(payload.user_prompt_text);
+      row = db
+        .prepare(
+          `SELECT id, prompt_text FROM prompts
+           WHERE session_id = ? AND role = 'user' AND content_hash = ?
+           LIMIT 1`
+        )
+        .get(record.session_id, hash);
+    }
+
+    // Fallback: match oldest unmatched user prompt in the session.
+    if (!row) {
+      row = db
+        .prepare(
+          `SELECT id, prompt_text FROM prompts
+           WHERE session_id = ? AND role = 'user' AND response_text IS NULL
+           ORDER BY created_at ASC LIMIT 1`
+        )
+        .get(record.session_id);
+    }
+
+    if (row) {
+      const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
+      if (record.capture_response === 1 && record.prompt_text) {
+        updatePromptWithResponse(
+          db,
+          row.id,
+          record.prompt_text,
+          record.token_estimate,
+          record.word_count
+        );
+      }
+      if (hasTools) {
+        insertToolInvocations(db, payload.tools, row.id, record, toolRedact);
+      }
+      if (record.prompt_text || hasTools) {
+        return {
+          result: { ok: true, id: row.id, updated: true },
+          lastCapture: record.prompt_text ? record.created_at : null,
+          touch: true,
+        };
+      }
+    }
+  }
+
+  // Content-based dedup: catch duplicates from different sources (hooks vs
+  // backfill) that have different event_ids but identical content within the
+  // same session. turn_index keeps genuinely repeated turns distinct.
+  if (record.session_id && record.content_hash) {
+    const contentDup = db
+      .prepare(
+        `SELECT id, response_text FROM prompts
+         WHERE session_id = ? AND role = ? AND content_hash = ?
+           AND (turn_index IS ? OR turn_index IS NULL OR ? IS NULL)
+         LIMIT 1`
+      )
+      .get(record.session_id, record.role, record.content_hash, record.turn_index, record.turn_index);
+    if (contentDup) {
+      insertToolInvocations(db, payload.tools, contentDup.id, record, toolRedact);
+      if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
+        updatePromptWithResponse(
+          db,
+          contentDup.id,
+          record.response_text,
+          record.token_estimate_response,
+          record.word_count_response
+        );
+        return {
+          result: { ok: true, id: contentDup.id, updated: true, deduped: true },
+          touch: true,
+        };
+      }
+      return {
+        result: { ok: true, id: contentDup.id, updated: false, deduped: true },
+      };
+    }
+  }
+
+  const insertResult = insertPrompt(db, record);
+  if (insertResult.changes === 0) {
+    const existing = db
+      .prepare("SELECT id, response_text FROM prompts WHERE event_id = ? LIMIT 1")
+      .get(record.event_id);
+    // FK is ON DELETE CASCADE; pass null prompt_id if there is no real row to
+    // point at, otherwise this would violate the foreign key.
+    const existingId = existing?.id || record.id;
+    insertToolInvocations(db, payload.tools, existing?.id || null, record, toolRedact);
+    if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
+      updatePromptWithResponse(
+        db,
+        existing.id,
+        record.response_text,
+        record.token_estimate_response,
+        record.word_count_response
+      );
+      return {
+        result: { ok: true, id: existing.id, updated: true, deduped: true },
+        touch: true,
+      };
+    }
+    return {
+      result: { ok: true, id: existingId, updated: false, deduped: true },
+    };
+  }
+
+  insertToolInvocations(db, payload.tools, record.id, record, toolRedact);
+  return {
+    result: { ok: true, id: record.id, updated: false },
+    lastCapture: record.created_at,
+    touch: true,
+  };
 }
 
 async function ingestPayload(rawPayload, config, options = {}) {
@@ -360,117 +479,12 @@ async function ingestPayload(rawPayload, config, options = {}) {
   try {
     db = db || await openDb(config.storage.sqlite.path);
     const record = normalizePayload(payload, config);
-    if (record.role === "assistant" && record.session_id) {
-      let row = null;
-
-      // Precise match: use user_prompt_text content hash when available
-      // This correctly pairs responses with their exact user prompt
-      if (payload.user_prompt_text) {
-        const hash = hashContent(payload.user_prompt_text);
-        row = db
-          .prepare(
-            `SELECT id, prompt_text FROM prompts
-             WHERE session_id = ? AND role = 'user' AND content_hash = ?
-             LIMIT 1`
-          )
-          .get(record.session_id, hash);
-      }
-
-      // Fallback: match oldest unmatched user prompt in the session
-      if (!row) {
-        row = db
-          .prepare(
-            `SELECT id, prompt_text FROM prompts
-             WHERE session_id = ? AND role = 'user' AND response_text IS NULL
-             ORDER BY created_at ASC LIMIT 1`
-          )
-          .get(record.session_id);
-      }
-
-      if (row) {
-        const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
-        if (record.capture_response === 1 && record.prompt_text) {
-          updatePromptWithResponse(
-            db,
-            row.id,
-            record.prompt_text,
-            record.token_estimate,
-            record.word_count
-          );
-        }
-        if (hasTools) {
-          insertToolInvocations(db, payload.tools, row.id, record, toolRedact);
-        }
-        if (record.prompt_text || hasTools) {
-          if (record.prompt_text) updateState({ lastCapture: record.created_at });
-          touchTrigger();
-          return { ok: true, id: row.id, updated: true };
-        }
-      }
-    }
-
-    // Content-based dedup: catch duplicates from different sources (hooks vs backfill)
-    // that have different event_ids but identical content within the same session.
-    //
-    // turn_index makes this per-turn precise: two rows are treated as the same
-    // only when their turn indices match, OR when either side has no turn index
-    // (null). That keeps cross-source dedup working (a hook row with null
-    // turn_index still dedups against a backfill row that carries one) while
-    // preserving genuinely distinct turns with identical text (e.g. repeated
-    // "continue"), which carry different non-null turn indices.
-    if (record.session_id && record.content_hash) {
-      const contentDup = db
-        .prepare(
-          `SELECT id, response_text FROM prompts
-           WHERE session_id = ? AND role = ? AND content_hash = ?
-             AND (turn_index IS ? OR turn_index IS NULL OR ? IS NULL)
-           LIMIT 1`
-        )
-        .get(record.session_id, record.role, record.content_hash, record.turn_index, record.turn_index);
-      if (contentDup) {
-        insertToolInvocations(db, payload.tools, contentDup.id, record, toolRedact);
-        if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
-          updatePromptWithResponse(
-            db,
-            contentDup.id,
-            record.response_text,
-            record.token_estimate_response,
-            record.word_count_response
-          );
-          touchTrigger();
-          return { ok: true, id: contentDup.id, updated: true, deduped: true };
-        }
-        return { ok: true, id: contentDup.id, updated: false, deduped: true };
-      }
-    }
-
-    const insertResult = insertPrompt(db, record);
-    if (insertResult.changes === 0) {
-      const existing = db
-        .prepare("SELECT id, response_text FROM prompts WHERE event_id = ? LIMIT 1")
-        .get(record.event_id);
-      // FK is ON DELETE CASCADE; pass null prompt_id if we have no real row to point at,
-      // otherwise we'd hit a foreign-key violation under PRAGMA foreign_keys=ON.
-      const existingId = existing?.id || record.id;
-      insertToolInvocations(db, payload.tools, existing?.id || null, record, toolRedact);
-      // Update response_text on existing record if it's missing and the new payload has it
-      if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
-        updatePromptWithResponse(
-          db,
-          existing.id,
-          record.response_text,
-          record.token_estimate_response,
-          record.word_count_response
-        );
-        touchTrigger();
-        return { ok: true, id: existing.id, updated: true, deduped: true };
-      }
-      return { ok: true, id: existingId, updated: false, deduped: true };
-    }
-    insertToolInvocations(db, payload.tools, record.id, record, toolRedact);
-    updateState({ lastCapture: record.created_at });
-    touchTrigger();
-    return { ok: true, id: record.id, updated: false };
+    const outcome = db.transaction(() =>
+      persistPayload(db, payload, record, toolRedact)
+    )();
+    if (outcome.lastCapture) updateState({ lastCapture: outcome.lastCapture });
+    if (outcome.touch) touchTrigger();
+    return outcome.result;
   } catch (error) {
     const queuedPayload =
       config.capture?.redact?.enabled
@@ -603,6 +617,9 @@ async function replayQueue(config) {
   updateState({
     queueCount: queueStats.count,
     queueBytes: queueStats.bytes,
+    // A successful drain resolves the previous OMP_DB_BUSY condition; keeping
+    // that stale error makes `omp status` claim capture is still unhealthy.
+    ...(failed === 0 ? { lastError: null } : {}),
     lastReplay: {
       processed,
       failed,

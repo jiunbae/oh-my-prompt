@@ -3,16 +3,15 @@ const http = require("http");
 const https = require("https");
 const path = require("path");
 const os = require("os");
-const { openDb, getCurrentVersion } = require("./db");
+const {
+  openDb,
+  getCurrentVersion,
+  LATEST_MIGRATION_VERSION,
+} = require("./db");
 const { getConfigPath, getConfigDir } = require("./paths");
 const { getQueueStats } = require("./queue");
 const { listHookStatus } = require("./hooks");
 const { getSyncStatus } = require("./sync-log");
-
-// Total number of migrations defined in db.js — keep in sync
-const TOTAL_MIGRATIONS = 4;
-
-const LATEST_MIGRATION_VERSION = TOTAL_MIGRATIONS;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -400,7 +399,7 @@ async function checkMigrations(report, config) {
 
   if (!fs.existsSync(dbPath)) {
     result.status = "new_db";
-    result.pending = TOTAL_MIGRATIONS;
+    result.pending = LATEST_MIGRATION_VERSION;
     result.currentVersion = 0;
     result.latestVersion = LATEST_MIGRATION_VERSION;
     report.checks.migrations = result;
