@@ -363,14 +363,24 @@ Generates:
 
 ### Automatic Sync
 
-Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
+On Linux, install the event-driven user service once:
 
 ```bash
-# Sync prompts every hour
-(crontab -l 2>/dev/null | grep -Fv 'omp sync' ; echo "0 * * * * /usr/local/bin/omp sync # oh-my-prompt") | crontab -
+omp sync auto install
+omp sync auto status
 ```
 
-Or use a background service (launchd on macOS, systemd on Linux).
+The service starts at login. New captures are debounced for 30 seconds, then
+synced as one batch; a one-hour interval is only a missed-event and network
+recovery safety net. To disable or remove it:
+
+```bash
+omp sync auto stop
+omp sync auto uninstall
+```
+
+On macOS, `omp sync auto` starts the event-driven daemon for the current login
+session. A launchd installer is not yet included.
 
 ### Manual Sync
 
@@ -508,4 +518,5 @@ MIT © Jiun Bae
 
 - Inspired by oh-my-zsh and prompt engineering best practices
 - Built for Claude Code, Codex, and OpenCode users
-- Uses better-sqlite3 for fast local storage
+- Uses sql.js for build-tool-free Node.js 20+ installation; see the local
+  SQLite driver ADR for the native WAL roadmap

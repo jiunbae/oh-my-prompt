@@ -72,6 +72,7 @@ ${cmd("sync flush", "Delete all server-side records (destructive)")}
 ${cmd("sync auto", "Start background auto-sync daemon")}
 ${cmd("sync auto stop", "Stop auto-sync daemon")}
 ${cmd("sync auto status", "Show auto-sync daemon status")}
+${cmd("sync auto install", "Install login-started user service")}
 
 ${cmd("backfill", "Import from Claude transcripts / Codex history")}
 ${cmd("import", "Import from external sources")}
@@ -289,7 +290,12 @@ async function handleInstall(options) {
   if (config.sync?.auto) {
     try {
       const { startDaemon } = require("./auto-sync");
-      const daemonResult = startDaemon(config);
+      const { getUserServiceStatus, startUserService } = require("./auto-sync-service");
+      const service = getUserServiceStatus();
+      const managedResult = service.installed ? startUserService() : null;
+      const daemonResult = managedResult?.started
+        ? managedResult
+        : { ...startDaemon(config), warning: managedResult?.warning };
       if (daemonResult.errors && daemonResult.errors.length) {
         console.warn("Warning: auto-sync daemon failed to start: " + daemonResult.errors.join("; "));
       }
@@ -339,9 +345,22 @@ async function handleUninstall(options) {
   const isFull = isAll && !options["hooks-only"];
   const interactive = process.stdin.isTTY && !options.yes && !options.y;
 
-  // Stop auto-sync daemon if running
+  // Stop auto-sync daemon if running. A full uninstall also removes the
+  // login-started systemd user service so it cannot recreate app state later.
   try {
     const { stopDaemon } = require("./auto-sync");
+    const {
+      getUserServiceStatus,
+      stopUserService,
+      uninstallUserService,
+    } = require("./auto-sync-service");
+    const service = getUserServiceStatus();
+    if (service.installed) {
+      if (isFull) uninstallUserService();
+      else if (service.active) stopUserService();
+    }
+    // A shell without a user D-Bus session may be using the detached fallback
+    // even though the service unit is installed.
     stopDaemon();
   } catch (err) {
     console.warn("Warning: auto-sync daemon failed to stop: " + (err.message || "unknown error"));
@@ -1161,18 +1180,100 @@ async function handleSyncFlush(options) {
 }
 
 function handleSyncAuto(options, positional) {
-  const { startDaemon, stopDaemon, daemonStatus } = require("./auto-sync");
+  const {
+    startDaemon,
+    stopDaemon,
+    daemonStatus,
+    runDaemonLoop,
+    validateTimingConfig,
+  } = require("./auto-sync");
+  const {
+    getUserServiceStatus,
+    assertSystemdAvailable,
+    installUserService,
+    uninstallUserService,
+    startUserService,
+    stopUserService,
+  } = require("./auto-sync-service");
+  const { getConfigPath } = require("./paths");
   const config = loadConfig();
   const subAction = positional[0];
 
+  // Foreground entrypoint for service managers. It intentionally never forks.
+  if (subAction === "run") {
+    const existing = daemonStatus();
+    if (existing.running) return;
+    runDaemonLoop(getConfigPath());
+    return;
+  }
+
+  if (subAction === "install") {
+    const timing = validateTimingConfig(config.sync?.debounce, config.sync?.interval);
+    if (timing.errors.length) {
+      throw new Error("Cannot install auto-sync: " + timing.errors.join("; "));
+    }
+    // Preflight before stopping a working detached daemon. On macOS or a Linux
+    // host without systemd, an unsupported install request must be non-mutating.
+    assertSystemdAvailable();
+    stopDaemon();
+    const result = installUserService({ cliPath: process.argv[1] });
+    if (!result.active) {
+      const fallback = startDaemon(config);
+      result.fallbackPid = fallback.pid || null;
+      if (!fallback.started && !fallback.alreadyRunning) {
+        throw new Error(
+          "Auto-sync service was enabled, but the current-session daemon failed to start: " +
+            (fallback.errors || ["unknown error"]).join("; ")
+        );
+      }
+    }
+    config.sync.auto = true;
+    saveConfig(config);
+    if (options.json) printJson(result);
+    else {
+      console.log(`Auto-sync user service installed: ${result.servicePath}`);
+      console.log(
+        result.active
+          ? "The event-driven service is active and will start automatically at login."
+          : "The service is enabled for the next login; a detached daemon was started for this session."
+      );
+    }
+    return;
+  }
+
+  if (subAction === "uninstall") {
+    const result = uninstallUserService();
+    stopDaemon();
+    config.sync.auto = false;
+    saveConfig(config);
+    if (options.json) printJson(result);
+    else if (result.uninstalled) console.log("Auto-sync user service uninstalled.");
+    else console.log("Auto-sync user service is not installed.");
+    return;
+  }
+
   if (subAction === "stop") {
-    const result = stopDaemon();
+    const service = getUserServiceStatus();
+    let result;
+    if (service.installed) {
+      result = stopUserService();
+      const detached = stopDaemon();
+      if (detached.wasRunning) result.pid = detached.pid;
+    } else {
+      result = stopDaemon();
+    }
+    config.sync.auto = false;
+    saveConfig(config);
     if (options.json) {
       printJson(result);
     } else if (result.stopped && result.timedOut) {
       console.log(`Auto-sync daemon force-killed after timeout (pid ${result.pid}).`);
     } else if (result.stopped) {
-      console.log(`Auto-sync daemon stopped (pid ${result.pid}).`);
+      console.log(
+        result.managed
+          ? "Auto-sync user service stopped and disabled."
+          : `Auto-sync daemon stopped (pid ${result.pid}).`
+      );
     } else {
       console.log("Auto-sync daemon is not running.");
     }
@@ -1180,7 +1281,7 @@ function handleSyncAuto(options, positional) {
   }
 
   if (subAction === "status") {
-    const status = daemonStatus();
+    const status = { ...daemonStatus(), service: getUserServiceStatus() };
     if (options.json) {
       printJson(status);
     } else {
@@ -1190,6 +1291,10 @@ function handleSyncAuto(options, positional) {
         console.log("Auto-sync daemon: not running");
       }
       console.log(`Last sync: ${status.lastSyncTime || "never"}`);
+      console.log(`Trigger: ${status.triggerMode}`);
+      console.log(
+        `User service: ${status.service.installed ? (status.service.active ? "active" : "installed, stopped") : "not installed"}`
+      );
       console.log(`PID file: ${status.pidFile}`);
       console.log(`Log file: ${status.logFile}`);
     }
@@ -1197,10 +1302,14 @@ function handleSyncAuto(options, positional) {
   }
 
   // Default: start the daemon
-  const result = startDaemon(config);
+  const service = getUserServiceStatus();
+  const managedResult = service.installed ? startUserService() : null;
+  const result = managedResult?.started
+    ? managedResult
+    : { ...startDaemon(config), warning: managedResult?.warning };
 
   // Persist sync.auto=true on successful start (consistent across output modes)
-  if (result.started) {
+  if (result.started || result.alreadyRunning) {
     config.sync.auto = true;
     saveConfig(config);
   }
@@ -1210,8 +1319,12 @@ function handleSyncAuto(options, positional) {
   } else if (result.alreadyRunning) {
     console.log(`Auto-sync daemon already running (pid ${result.pid}).`);
   } else if (result.started) {
-    console.log(`Auto-sync daemon started (pid ${result.pid}).`);
-    console.log(`Debounce: ${config.sync.debounce || 30}s, interval: ${config.sync.interval || 300}s`);
+    console.log(
+      result.managed
+        ? "Auto-sync user service started."
+        : `Auto-sync daemon started (pid ${result.pid}).`
+    );
+    console.log(`Debounce: ${config.sync.debounce || 30}s, safety interval: ${config.sync.interval || 3600}s`);
   } else if (result.errors && result.errors.length) {
     console.error("Failed to start auto-sync daemon:");
     result.errors.forEach((err) => console.error(`  - ${err}`));
@@ -2001,11 +2114,14 @@ async function main() {
     omp sync auto              Start auto-sync daemon
     omp sync auto stop         Stop auto-sync daemon
     omp sync auto status       Show auto-sync daemon status
+    omp sync auto install      Install and start a systemd user service (Linux)
+    omp sync auto uninstall    Disable and remove the systemd user service
+    omp sync auto run          Run in foreground (service-manager entrypoint)
 
   CONFIG
     sync.auto        boolean   Enable/disable auto-sync (default: false)
     sync.debounce    number    Debounce delay in seconds (default: 30)
-    sync.interval    number    Max interval between syncs in seconds (default: 300)
+    sync.interval    number    Missed-event safety interval in seconds (default: 3600)
 
   OPTIONS
     --json    Output as JSON

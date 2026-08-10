@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.810.2] - 2026-08-10
+
+### Added
+- `omp sync auto install` / `uninstall` manage a login-started systemd user service on Linux; the existing detached daemon remains the fallback when no user service manager is available
+- Architecture decision record for the local SQLite driver, including the historical `better-sqlite3` → `sql.js` rationale and criteria for a native-driver follow-up
+
+### Performance
+- Auto-sync now listens for capture-trigger changes through OS file events instead of polling every two seconds. The periodic full-database read is now a one-hour missed-event/network-recovery safety net instead of the primary five-minute scheduler
+- The final sync checkpoint and sync-log result are persisted in one transaction. A normal one-page sync now rewrites the sql.js database once instead of three times; multi-page runs persist exactly once per accepted page. On the same 325.2 MiB database used for PR #28 validation, median wall time fell from 3.671s to 1.445s (-60.6%) and bytes rewritten fell from 975.6 MiB to 325.2 MiB (-66.7%)
+
+### Fixed
+- Starting and stopping a managed auto-sync service now enables and disables login startup consistently, while still falling back to a detached daemon in shells without a systemd user bus
+
 ## [2026.810.1] - 2026-08-10
 
 ### Performance

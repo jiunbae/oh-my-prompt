@@ -41,7 +41,8 @@ Oh My Prompt는 에이전트에게 잘 명령하기 위해 내가 어떤 프롬�
 
 ## 저장소 설계
 ### 로컬 SQLite (기본)
-- WAL 모드 사용
+- 네이티브 드라이버에서는 WAL 모드 사용 (`sql.js` 배포판은 미지원,
+  [`ADR-0001`](../decisions/0001-local-sqlite-driver.md) 참고)
 - 단일 writer 상황을 고려해 짧은 트랜잭션 유지
 - 실패 시 로컬 임시 큐에 적재 후 재시도
 

@@ -36,6 +36,74 @@ function getDeviceId(config) {
   return config.server?.deviceId || config.sync?.deviceId || os.hostname();
 }
 
+function createSyncRun(config, checkpoint, storageTypeOverride) {
+  return {
+    id: crypto.randomUUID(),
+    startedAt: nowIso(),
+    deviceId: getDeviceId(config),
+    storageType: storageTypeOverride || config.storage?.type || "sqlite",
+    checkpoint: checkpoint || null,
+  };
+}
+
+function writeSyncState(db, deviceId, lastSyncedAt, lastSyncedId) {
+  db.prepare(
+    `INSERT INTO sync_state (device_id, last_synced_at, last_synced_id, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(device_id) DO UPDATE SET
+       last_synced_at = excluded.last_synced_at,
+       last_synced_id = excluded.last_synced_id,
+       updated_at = excluded.updated_at`
+  ).run(deviceId, lastSyncedAt, lastSyncedId || null, nowIso());
+}
+
+/**
+ * Persist a sync checkpoint and its log entry in one database transaction.
+ * sql.js serialises the entire DB after a transaction, so combining these
+ * logically related writes avoids one full-file rewrite per sync boundary.
+ */
+async function persistSyncRun(config, run, progress) {
+  return withDatabaseOperation(config, (db) => {
+    const persist = db.transaction(() => {
+      if (progress.persistCheckpoint) {
+        writeSyncState(
+          db,
+          run.deviceId,
+          progress.lastSyncedAt,
+          progress.lastSyncedId
+        );
+      }
+
+      const status = progress.status || "running";
+      const completedAt = status === "running" ? null : nowIso();
+      db.prepare(
+        `INSERT INTO sync_log (
+          id, started_at, completed_at, status, files_uploaded,
+          records_uploaded, error_message, device_id, storage_type, checkpoint
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          completed_at = excluded.completed_at,
+          status = excluded.status,
+          files_uploaded = excluded.files_uploaded,
+          records_uploaded = excluded.records_uploaded,
+          error_message = excluded.error_message`
+      ).run(
+        run.id,
+        run.startedAt,
+        completedAt,
+        status,
+        progress.filesUploaded ?? 0,
+        progress.recordsUploaded ?? 0,
+        progress.errorMessage || null,
+        run.deviceId,
+        run.storageType,
+        run.checkpoint
+      );
+    });
+    persist();
+  });
+}
+
 async function createSyncLog(config, checkpoint, storageTypeOverride) {
   return withDatabaseOperation(config, (db) => {
     const id = crypto.randomUUID();
@@ -90,16 +158,7 @@ async function getSyncState(config) {
 
 async function updateSyncState(config, lastSyncedAt, lastSyncedId) {
   return withDatabaseOperation(config, (db) => {
-    const deviceId = getDeviceId(config);
-    const now = nowIso();
-    db.prepare(
-      `INSERT INTO sync_state (device_id, last_synced_at, last_synced_id, updated_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(device_id) DO UPDATE SET
-         last_synced_at = excluded.last_synced_at,
-         last_synced_id = excluded.last_synced_id,
-         updated_at = excluded.updated_at`
-    ).run(deviceId, lastSyncedAt, lastSyncedId || null, now);
+    writeSyncState(db, getDeviceId(config), lastSyncedAt, lastSyncedId);
   });
 }
 
@@ -132,6 +191,8 @@ async function getSyncStatus(config, limit = 5) {
 }
 
 module.exports = {
+  createSyncRun,
+  persistSyncRun,
   createSyncLog,
   finishSyncLog,
   getSyncState,

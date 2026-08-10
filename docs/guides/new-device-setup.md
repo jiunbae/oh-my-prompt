@@ -38,7 +38,7 @@ rsync -avz --exclude='node_modules' --exclude='.next' --exclude='.git' \
 
 ```bash
 cd ~/workspace/oh-my-prompt
-npm install --legacy-peer-deps better-sqlite3
+pnpm install --frozen-lockfile
 ```
 
 ## Step 4: Make `omp` Globally Available

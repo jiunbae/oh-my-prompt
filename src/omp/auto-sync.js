@@ -8,7 +8,11 @@ const PID_FILE = path.join(getConfigDir(), "sync-daemon.pid");
 const LOG_FILE = path.join(getConfigDir(), "sync-daemon.log");
 
 const DEFAULT_DEBOUNCE_S = 30;
-const DEFAULT_INTERVAL_S = 300;
+// Captures wake the daemon through an OS file-system event, so the interval is
+// only a missed-event/network-recovery safety net. Keep it infrequent: opening
+// a sql.js database reads the whole file even when there is nothing to upload.
+const DEFAULT_INTERVAL_S = 3600;
+const WATCH_RETRY_MS = 5000;
 
 // Validation bounds (in seconds)
 const MIN_DEBOUNCE_S = 1;    // 1 000 ms
@@ -253,6 +257,19 @@ function touchTrigger() {
   }
 }
 
+function watchTrigger(onTrigger, onError = () => {}) {
+  ensureDir(getConfigDir());
+  const watcher = fs.watch(getConfigDir(), (_eventType, filename) => {
+    // filename may be null on some platforms. Scheduling in that rare case is
+    // safer than missing a capture; the daemon debounce coalesces duplicates.
+    if (filename == null || String(filename) === path.basename(TRIGGER_FILE)) {
+      onTrigger();
+    }
+  });
+  watcher.on("error", onError);
+  return watcher;
+}
+
 /**
  * Run the daemon loop in the current process.
  * This is called by the detached child process.
@@ -289,7 +306,7 @@ function runDaemonLoop(configPath) {
   writePidInfo(process.pid);
   appendLog("daemon started (pid=" + process.pid + ", debounce=" + (debounceMs / 1000) + "s, interval=" + (intervalMs / 1000) + "s)");
 
-  const MAX_BACKOFF_INTERVAL_MS = 3600 * 1000; // 1 hour max
+  const MAX_BACKOFF_INTERVAL_MS = MAX_INTERVAL_S * 1000;
   const CONSECUTIVE_FAIL_THRESHOLD = 3;
 
   let debounceTimer = null;
@@ -297,7 +314,8 @@ function runDaemonLoop(configPath) {
   let syncing = false;
   let pendingSync = false;
   let shuttingDown = false;
-  let lastTriggerMtime = 0;
+  let triggerWatcher = null;
+  let watcherRetryTimer = null;
   let activeLockPath = null;
   let consecutiveFailures = 0;
   let currentIntervalMs = intervalMs;
@@ -318,14 +336,16 @@ function runDaemonLoop(configPath) {
   }
 
   function resetIntervalOnSuccess() {
-    if (consecutiveFailures > 0) {
-      consecutiveFailures = 0;
-      if (currentIntervalMs !== intervalMs) {
-        currentIntervalMs = intervalMs;
-        appendLog("interval reset to " + (intervalMs / 1000) + "s after successful sync");
-        resetIntervalTimer();
-      }
+    const wasBackedOff = currentIntervalMs !== intervalMs;
+    consecutiveFailures = 0;
+    currentIntervalMs = intervalMs;
+    if (wasBackedOff) {
+      appendLog("interval reset to " + (intervalMs / 1000) + "s after successful sync");
     }
+    // The interval is a safety net measured from the last successful sync.
+    // Without resetting it here, an event-driven sync near the old deadline
+    // would be followed by another full-database read a few seconds later.
+    resetIntervalTimer();
   }
 
   function resetIntervalTimer() {
@@ -404,21 +424,39 @@ function runDaemonLoop(configPath) {
     }, debounceMs);
   }
 
-  // Poll the trigger file for changes
-  const pollInterval = setInterval(() => {
-    if (shuttingDown) return;
+  function startTriggerWatcher() {
+    if (shuttingDown || triggerWatcher) return;
     try {
-      if (!fs.existsSync(TRIGGER_FILE)) return;
-      const stat = fs.statSync(TRIGGER_FILE);
-      const mtime = stat.mtimeMs;
-      if (mtime > lastTriggerMtime) {
-        lastTriggerMtime = mtime;
-        scheduleDebounce();
+      triggerWatcher = watchTrigger(() => {
+        if (!shuttingDown) scheduleDebounce();
+      }, (error) => {
+        appendLog("trigger watcher error: " + (error.message || "unknown"));
+        try { triggerWatcher.close(); } catch {}
+        triggerWatcher = null;
+        if (!shuttingDown && !watcherRetryTimer) {
+          watcherRetryTimer = setTimeout(() => {
+            watcherRetryTimer = null;
+            startTriggerWatcher();
+          }, WATCH_RETRY_MS);
+        }
+      });
+      appendLog("event trigger watcher active");
+    } catch (error) {
+      appendLog("trigger watcher unavailable: " + (error.message || "unknown"));
+      if (!shuttingDown && !watcherRetryTimer) {
+        watcherRetryTimer = setTimeout(() => {
+          watcherRetryTimer = null;
+          startTriggerWatcher();
+        }, WATCH_RETRY_MS);
       }
-    } catch {
-      // ignore poll errors
     }
-  }, 2000);
+  }
+
+  // OS-backed events are the primary wake-up path. Run one debounced catch-up
+  // on startup so captures written while the daemon was down are not delayed
+  // until the safety interval.
+  startTriggerWatcher();
+  scheduleDebounce();
 
   // Max interval timer: sync at least every `interval` seconds
   resetIntervalTimer();
@@ -435,7 +473,11 @@ function runDaemonLoop(configPath) {
     // Stop accepting new work
     if (debounceTimer) clearTimeout(debounceTimer);
     if (intervalTimer) clearInterval(intervalTimer);
-    clearInterval(pollInterval);
+    if (watcherRetryTimer) clearTimeout(watcherRetryTimer);
+    if (triggerWatcher) {
+      try { triggerWatcher.close(); } catch {}
+      triggerWatcher = null;
+    }
     pendingSync = false;
 
     if (!syncing) {
@@ -582,6 +624,7 @@ function daemonStatus() {
   return {
     running: status.running,
     pid: status.pid,
+    triggerMode: "filesystem-event",
     lastSyncTime: lastSync,
     pidFile: PID_FILE,
     logFile: LOG_FILE,
@@ -596,6 +639,7 @@ module.exports = {
   isDaemonRunning,
   getLastSyncTime,
   touchTrigger,
+  watchTrigger,
   runDaemonLoop,
   validateTimingConfig,
   TRIGGER_FILE,
