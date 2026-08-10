@@ -82,7 +82,7 @@ function getSession(db, sessionId) {
 
 function searchPrompts(db, query, limit = 50) {
   if (!query || !query.trim()) return [];
-  // Sanitize FTS5 query: escape special chars
+  // Sanitize the SQLite full-text query: escape special characters.
   const sanitized = query.replace(/['"]/g, "").trim();
   if (!sanitized) return [];
 

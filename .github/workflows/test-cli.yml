@@ -13,6 +13,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22', '24']
 
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -49,4 +53,21 @@ jobs:
           tarball="$(npm pack --silent)"
           npm install --prefix "$pack_dir" "./$tarball"
           "$pack_dir/node_modules/.bin/omp" --help
+          status_json="$(XDG_CONFIG_HOME="$pack_dir/xdg-native" "$pack_dir/node_modules/.bin/omp" status --json)"
+          STATUS_JSON="$status_json" node -e "
+            const status = JSON.parse(process.env.STATUS_JSON);
+            if (status.sqliteDriver.name !== 'better-sqlite3' || status.sqliteDriver.fallback) {
+              throw new Error('expected the native SQLite driver on the supported Linux runner');
+            }
+          "
+
+          fallback_dir="$(mktemp -d)"
+          npm install --omit=optional --prefix "$fallback_dir" "./$tarball"
+          fallback_json="$(XDG_CONFIG_HOME="$fallback_dir/xdg-fallback" "$fallback_dir/node_modules/.bin/omp" status --json)"
+          STATUS_JSON="$fallback_json" node -e "
+            const status = JSON.parse(process.env.STATUS_JSON);
+            if (status.sqliteDriver.name !== 'sql.js' || !status.sqliteDriver.fallback) {
+              throw new Error('expected sql.js when optional dependencies are omitted');
+            }
+          "
           rm -f "$tarball"

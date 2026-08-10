@@ -1,5 +1,16 @@
 const { lowerBackgroundPriority } = require("./resource-priority");
 
+const HEARTBEAT_INTERVAL_MS = 30000;
+
+function sendHeartbeat(progress = null) {
+  if (!process.send || !process.connected) return;
+  try {
+    process.send({ type: "heartbeat", at: Date.now(), progress });
+  } catch {
+    // Parent may have exited while the worker was finishing.
+  }
+}
+
 async function runSyncOnce(configPath) {
   if (configPath) process.env.OMP_CONFIG_PATH = configPath;
   process.title = "omp-sync-worker";
@@ -7,7 +18,7 @@ async function runSyncOnce(configPath) {
 
   const { loadConfig } = require("./config");
   const { syncToServer } = require("./sync");
-  const { acquireSyncLock, releaseSyncLock } = require("./sync-lock");
+  const { acquireSyncLock, releaseSyncLock, refreshSyncLock } = require("./sync-lock");
   const lock = acquireSyncLock({ ttlMs: 60000 });
   if (!lock.ok) {
     const error = new Error("sync lock held by another process");
@@ -18,14 +29,40 @@ async function runSyncOnce(configPath) {
   try {
     try {
       if (process.send && process.connected) {
-        process.send({ type: "lock", lockPath: lock.lockPath });
+        process.send({ type: "lock", lockPath: lock.lockPath, lockInfo: lock.lockInfo });
       }
     } catch {
       // The parent may have exited between the connection check and send.
     }
-    return await syncToServer(loadConfig());
+    const heartbeatNow = (progress = null) => {
+      if (!refreshSyncLock(lock.lockPath, lock.lockInfo)) {
+        const error = new Error("sync lock ownership was lost");
+        error.code = "OMP_SYNC_LOCK_LOST";
+        throw error;
+      }
+      sendHeartbeat(progress);
+    };
+    heartbeatNow();
+    const heartbeat = setInterval(() => {
+      try {
+        heartbeatNow();
+      } catch {
+        // Continuing an upload after losing its lease could create concurrent
+        // sync workers. SQLite transactions and server event IDs make a hard
+        // worker exit safer; the parent will retry with bounded backoff.
+        process.exit(1);
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+    heartbeat.unref();
+    try {
+      return await syncToServer(loadConfig(), {
+        onProgress: (progress) => heartbeatNow(progress),
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
   } finally {
-    releaseSyncLock(lock.lockPath);
+    releaseSyncLock(lock.lockPath, { owner: lock.lockInfo });
   }
 }
 

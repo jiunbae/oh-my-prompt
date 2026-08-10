@@ -80,13 +80,32 @@ function validateConfig(config) {
 
   // Server sync config
   if (config.server?.url && config.server?.token) {
-    // Server sync configured - good
+    // Server sync configured - validate transport below.
   } else if (config.server?.url && !config.server?.token) {
     errors.push("server.url is set but server.token is missing");
   } else if (!config.server?.url && config.server?.token) {
     warnings.push("server.token is set but server.url is missing");
   } else {
     warnings.push("No sync configured. Set server.url and server.token for cloud sync.");
+  }
+
+  if (config.server?.url) {
+    try {
+      const parsed = new URL(config.server.url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        errors.push("server.url must use http:// or https://");
+      }
+      const hostname = parsed.hostname.toLowerCase();
+      const loopback = hostname === "localhost" || hostname === "::1" ||
+        hostname === "[::1]" || hostname.startsWith("127.");
+      if (parsed.protocol === "http:" && !loopback) {
+        warnings.push(
+          "server.url uses unencrypted HTTP for a non-loopback host; use HTTPS or a secure tunnel"
+        );
+      }
+    } catch {
+      errors.push("server.url must be a valid URL");
+    }
   }
 
   if (!config.server?.deviceId && !config.sync?.deviceId) {
@@ -261,6 +280,21 @@ async function checkDatabase(report, config) {
   }
   result.fileExists = true;
 
+  const { summarizeDatabaseBackups } = require("./db-backups");
+  const backups = summarizeDatabaseBackups(dbPath);
+  result.backups = {
+    count: backups.count,
+    totalBytes: backups.totalBytes,
+    totalBytesFormatted: formatBytes(backups.totalBytes),
+    protectedCount: backups.protectedCount,
+  };
+  if (backups.totalBytes > Math.max(result.fileSize || 0, 512 * 1024 * 1024)) {
+    report.warnings.push(
+      `db: ${backups.count} backup artifact(s) use ${formatBytes(backups.totalBytes)}; ` +
+      "review with: omp db backups"
+    );
+  }
+
   let db;
   try {
     db = await openDb(dbPath);
@@ -331,6 +365,18 @@ async function checkDatabase(report, config) {
       .all()
       .map((r) => r.name);
     result.indexes = indexes;
+
+    if (tables.includes("prompts")) {
+      const { getFtsHealth } = require("./fts");
+      result.fts = getFtsHealth(db);
+      if (result.fts.available && !result.fts.inSync) {
+        report.warnings.push(
+          `db: full-text index drift detected (${result.fts.missing} missing, ` +
+          `${result.fts.orphaned} orphaned, ${result.fts.stale} stale); ` +
+          "repair with: omp db repair"
+        );
+      }
+    }
 
     result.status = "ok";
   } catch (error) {

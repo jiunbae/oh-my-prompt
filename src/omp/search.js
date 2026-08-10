@@ -61,7 +61,7 @@ function buildFilters(options) {
 }
 
 /**
- * Search prompts using FTS5 MATCH query.
+ * Search prompts using the available SQLite full-text MATCH query.
  */
 function searchFts(db, query, options) {
   const limit = parseInt(options.limit, 10) || 10;
@@ -111,32 +111,21 @@ function searchExact(db, query, options) {
  * Get search statistics.
  */
 function getSearchStats(db) {
-  const hasFts = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='prompts_fts'")
-    .get();
-
-  let totalIndexed = { count: 0 };
-  if (hasFts) {
-    try {
-      totalIndexed = db.prepare("SELECT COUNT(*) as count FROM prompts_fts").get();
-    } catch {
-      // FTS table may exist but be broken (e.g. sql.js FTS4 content-table issues)
-    }
-  }
-
-  const totalPrompts = db
-    .prepare("SELECT COUNT(*) as count FROM prompts")
-    .get();
+  const { getFtsHealth } = require("./fts");
+  const health = getFtsHealth(db);
 
   const lastUpdated = db
     .prepare("SELECT MAX(created_at) as last FROM prompts")
     .get();
 
   return {
-    total_indexed: totalIndexed.count,
-    total_prompts: totalPrompts.count,
-    fts_available: !!hasFts,
-    in_sync: hasFts ? totalIndexed.count === totalPrompts.count : false,
+    total_indexed: health.totalIndexed,
+    total_prompts: health.totalPrompts,
+    fts_available: health.available,
+    missing: health.missing,
+    orphaned: health.orphaned,
+    stale: health.stale,
+    in_sync: health.inSync,
     last_updated: lastUpdated.last || null,
   };
 }
@@ -181,7 +170,7 @@ async function runSemanticServerSearch(query, options, config) {
     throw new Error(
       "Semantic search requires server configuration. Set server.url and server.token:\n" +
       "  omp config set server.url https://prompt.jiun.dev\n" +
-      "  omp config set server.token YOUR_TOKEN"
+      "  printf '%s' \"$OMP_TOKEN\" | omp config set server.token --stdin"
     );
   }
 
@@ -219,7 +208,7 @@ async function runSearch(query, options) {
       console.log(`  ${c.dim("Total indexed:")}  ${c.bold(String(stats.total_indexed))}`);
       console.log(`  ${c.dim("Total prompts:")}  ${c.bold(String(stats.total_prompts))}`);
       console.log(
-        `  ${c.dim("In sync:")}       ${stats.in_sync ? c.green("yes") : c.red("no (rebuild with: omp db migrate)")}`
+        `  ${c.dim("In sync:")}       ${stats.in_sync ? c.green("yes") : c.red("no (repair with: omp db repair)")}`
       );
       console.log(`  ${c.dim("Last updated:")}  ${c.bold(stats.last_updated || "never")}`);
       console.log("");
@@ -261,7 +250,7 @@ async function runSearch(query, options) {
         try {
           results = searchFts(db, query, options);
         } catch {
-          // FTS not available (e.g., fts5 table from better-sqlite3) — fall back to LIKE
+          // Full-text module unavailable or incompatible — fall back to LIKE.
           results = searchExact(db, query, options);
         }
       }

@@ -8,7 +8,7 @@ Prompts are synced directly from the CLI to the PostgreSQL database via the serv
 ### 1) Configure server connection
 ```bash
 omp config set server.url https://your-server.example.com
-omp config set server.token your-user-token
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
 omp config set server.deviceId my-macbook
 
 # Redact only when uploading to server (recommended)

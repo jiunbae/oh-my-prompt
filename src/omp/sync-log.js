@@ -27,7 +27,7 @@ async function withDatabaseOperation(config, callback) {
     try {
       if (db) db.close();
     } finally {
-      releaseSyncLock(operationLock.lockPath);
+      releaseSyncLock(operationLock.lockPath, { owner: operationLock.lockInfo });
     }
   }
 }

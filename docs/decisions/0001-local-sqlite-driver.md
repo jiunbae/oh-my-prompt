@@ -33,8 +33,9 @@ had diverged.
 - `node:sqlite` requires Node.js 22.5 or later. It became a release candidate in
   Node.js 24.15, while this CLI still supports Node 20 and Node 22 installations
   where the module is absent or experimental.
-- Both native options support real file-backed transactions and WAL, which
-  removes full-file serialisation and restores FTS5. The existing SQLite file
+- Both native options support real file-backed transactions, WAL, and FTS5.
+  The portable on-disk schema deliberately remains standalone FTS4 so the same
+  file can still be opened by the `sql.js` fallback. The existing SQLite file
   format is reusable, but driver selection, legacy FTS handling, locking,
   backup/rollback, and cross-version installation need their own test matrix.
 
