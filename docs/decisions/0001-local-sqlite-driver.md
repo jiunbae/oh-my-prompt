@@ -1,6 +1,6 @@
-# ADR-0001: Local SQLite driver and native WAL roadmap
+# ADR-0001: Native-first local SQLite with a portable fallback
 
-- Status: Accepted, with a native-driver follow-up
+- Status: Accepted and implemented in CLI 2026.810.3
 - Date: 2026-08-10
 
 ## Context
@@ -46,34 +46,46 @@ Official references:
 
 ## Decision
 
-1. Keep `sql.js` as the mandatory baseline in this change; do not reintroduce a
-   hard native dependency while Node.js 20 remains in `engines`.
-2. Reduce its cost immediately through event-driven sync and one persistence
-   transaction per accepted sync page.
-3. Implement native SQLite as a separate, benchmarked driver change. The
-   preferred design is native-first with an explicit `sql.js` fallback until
-   the minimum Node version can move to a release where `node:sqlite` is stable.
-4. Do not silently switch a user's database driver. The follow-up must include
-   backup, integrity check, rollback, and an observable driver field in
-   `omp status` / `omp doctor`.
+1. Install `better-sqlite3` 12.9.0 as an exact optional dependency and select it
+   first when its native binding can be constructed. Version 12.9.0 retains a
+   Node.js 20 prebuild; 12.10.0 deliberately removed Node.js 20 prebuilds.
+2. Keep `sql.js` as the automatic portability fallback when the optional native
+   addon cannot be installed or loaded. `OMP_SQLITE_DRIVER=sql.js` can force it
+   for diagnosis, and `OMP_SQLITE_DRIVER=native` fails explicitly if unavailable.
+3. Before the first writable native open of an existing database, create
+   `omp.db.pre-native.bak` (using a copy-on-write clone where supported), run
+   `PRAGMA quick_check`, and write `omp.db.native-driver` only after validation.
+4. Use WAL with a 15-second busy timeout for native access. Keep the existing
+   transaction-facing adapter so ingest, sync, replay, and backfill retain their
+   atomicity and bounded-batch behavior.
+5. Expose the selected driver in `omp status` and `omp doctor`. Continue running
+   auto-sync in a short-lived worker so even the sql.js fallback cannot inflate
+   the resident watcher.
 
-## Native-driver acceptance criteria
+## Native-driver verification
 
-- Installation matrix: Node 20, 22, and 24 on Linux x64/arm64 and macOS
-  x64/arm64, including a machine without compiler tools.
-- Existing sql.js-created databases open without data loss; schema v11,
-  integrity, foreign keys, late-response sync, and search all pass.
-- Concurrent hook captures and sync use WAL plus a bounded busy timeout without
-  last-writer-wins loss.
-- A one-row capture writes SQLite pages/WAL frames rather than a full database
-  image, measured on the same real-data benchmark used by PR #28.
-- If native initialisation fails, fallback is explicit and diagnostic rather
-  than silently changing durability or search behaviour.
+- Linux x64 on Node.js 24.6 loaded the published 12.9.0 prebuild without a local
+  compile, and CLI CI runs on Node.js 22. The optional dependency preserves
+  installation on Node.js 20 or any platform where no compatible binary exists;
+  those environments select the tested sql.js fallback.
+- An existing schema-v11 sql.js database with 20,035 prompts opened through the
+  native driver, passed `quick_check`, and remained queryable after a capture.
+- Adapter tests cover WAL selection, concurrent handles without last-writer-wins
+  loss, sql.js durability, batched transactions, fallback selection, ingest, and
+  sync checkpoint persistence.
+- On a 342,794,240-byte real-data clone, one unique capture completed in 9.9 ms
+  and accounted for 520,192 bytes of process writes. This is 99.85% less than a
+  sql.js full-image persistence of the same database.
+- The selected driver and fallback state are observable in both status and
+  doctor JSON output. Explicit native selection fails with
+  `OMP_NATIVE_SQLITE_UNAVAILABLE` rather than changing engines.
 
 ## Consequences
 
-The current release remains installation-portable and the event-driven daemon
-substantially reduces unnecessary reads and writes. Full-file persistence still
-exists for actual sql.js mutations; it is a known architectural limit, not a
-resolved property. Native WAL migration remains the durable fix and must be
-delivered as a separately reversible change.
+Compatible installations get native WAL page-level persistence without making a
+native addon mandatory for every supported platform. The one-time transition
+adds a backup file roughly the size of the database when the filesystem cannot
+clone it copy-on-write. The `sql.js` fallback still has full-file persistence,
+but it is now explicit in diagnostics and its memory is confined to short-lived
+workers rather than the resident watcher. The backup is intentionally retained
+for rollback and is never deleted automatically.

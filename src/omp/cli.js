@@ -545,6 +545,7 @@ async function handleStatus(options) {
     server: summary.serverUrl || "(not configured)",
     serverToken: summary.serverToken,
     storage: summary.storageType,
+    sqliteDriver: require("./db-driver").getDriverInfo(),
     sqlitePath: summary.sqlitePath,
     captureResponse: summary.captureResponse,
     hooks,
@@ -561,6 +562,7 @@ async function handleStatus(options) {
     console.log(label("Server", status.server === "(not configured)" ? c.yellow(status.server) : c.cyan(status.server)));
     console.log(label("Token", status.serverToken ? c.dim(status.serverToken) : c.yellow("(not set)")));
     console.log(label("Storage", status.storage));
+    console.log(label("SQLite driver", status.sqliteDriver.name));
     console.log(label("SQLite", c.dim(status.sqlitePath)));
     console.log(label("Capture response", status.captureResponse ? c.green("on") : c.dim("off")));
     console.log(label("Hooks", `claude=${hookIcon(hooks.claude_code)}, codex=${hookIcon(hooks.codex)}, gemini=${hookIcon(hooks.gemini)}, opencode=${hookIcon(hooks.opencode)}`));
@@ -1216,7 +1218,7 @@ function handleSyncAuto(options, positional) {
     // host without systemd, an unsupported install request must be non-mutating.
     assertSystemdAvailable();
     stopDaemon();
-    const result = installUserService({ cliPath: process.argv[1] });
+    const result = installUserService();
     if (!result.active) {
       const fallback = startDaemon(config);
       result.fallbackPid = fallback.pid || null;
@@ -1336,6 +1338,10 @@ function handleSyncAuto(options, positional) {
 }
 
 async function handleIngest(options) {
+  // Hook captures are background bookkeeping. Keep them behind the editor or
+  // build that generated the event, including full-file writes on the sql.js
+  // compatibility path.
+  require("./resource-priority").lowerBackgroundPriority();
   const config = loadConfig();
   if (options.replay) {
     const result = await replayQueue(config);

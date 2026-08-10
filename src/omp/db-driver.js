@@ -42,6 +42,45 @@ function waitForWriteLock(lockPath) {
 }
 
 let SQL = null;
+let nativeDriver;
+
+function loadNativeDriver() {
+  if (nativeDriver !== undefined) return nativeDriver;
+  try {
+    nativeDriver = require("better-sqlite3");
+    // Requiring the JS wrapper succeeds even when an install policy skipped
+    // its native binding build. Probe construction before selecting it.
+    const probe = new nativeDriver(":memory:");
+    probe.close();
+  } catch {
+    nativeDriver = null;
+  }
+  return nativeDriver;
+}
+
+function resolveDriver(requested) {
+  const preference = requested || process.env.OMP_SQLITE_DRIVER || "auto";
+  if (preference === "sql.js") return { name: "sql.js", NativeDatabase: null };
+  const NativeDatabase = loadNativeDriver();
+  if (NativeDatabase) return { name: "better-sqlite3", NativeDatabase };
+  if (preference === "native" || preference === "better-sqlite3") {
+    const error = new Error(
+      "Native SQLite was requested but better-sqlite3 is not installed for this platform"
+    );
+    error.code = "OMP_NATIVE_SQLITE_UNAVAILABLE";
+    throw error;
+  }
+  return { name: "sql.js", NativeDatabase: null };
+}
+
+function getDriverInfo(requested) {
+  const selected = resolveDriver(requested);
+  return {
+    name: selected.name,
+    native: selected.name === "better-sqlite3",
+    fallback: selected.name === "sql.js",
+  };
+}
 
 async function initDriver() {
   if (!SQL) SQL = await initSqlJs();
@@ -164,6 +203,7 @@ class DatabaseWrapper {
     this._transactionDirty = false;
     this._batchMode = false;
     this._batchDirty = false;
+    this.driver = "sql.js";
   }
 
   /** Enable batch mode: suppress auto-save after each write. Call flush() to persist. */
@@ -349,6 +389,11 @@ function sweepOrphanTemps(filePath) {
 }
 
 async function openDatabase(filePath, options = {}) {
+  const selected = resolveDriver(options.driver);
+  if (selected.NativeDatabase) {
+    const { openNativeDatabase } = require("./native-db-driver");
+    return openNativeDatabase(selected.NativeDatabase, filePath, options);
+  }
   const drv = await initDriver();
   if (filePath && !options.readonly) sweepOrphanTemps(filePath);
 
@@ -377,4 +422,4 @@ async function openDatabase(filePath, options = {}) {
   return new DatabaseWrapper(db, filePath, { ...options, diskVersion });
 }
 
-module.exports = { openDatabase, initDriver };
+module.exports = { openDatabase, initDriver, getDriverInfo };

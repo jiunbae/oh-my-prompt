@@ -3,6 +3,7 @@ const path = require("path");
 const os = require("os");
 const { ingestPayload, replayQueue } = require("../ingest");
 const { openDb } = require("../db");
+const { getDriverInfo } = require("../db-driver");
 const { loadState } = require("../state");
 
 function makeTempRoot() {
@@ -250,9 +251,9 @@ describe("ingestPayload", () => {
       sequence: i,
     }));
 
-    // sql.js serializes the whole database on every save, so a full-file
-    // rewrite is exactly one renameSync onto the db path. Pre-transaction this
-    // was one per tool call.
+    // The native driver updates WAL pages without replacing the DB file.
+    // sql.js fallback still performs exactly one full-file replacement for the
+    // transaction (pre-transaction this was one per tool call).
     const renameSpy = vi.spyOn(fs, "renameSync");
     const result = await ingestPayload(
       {
@@ -269,7 +270,7 @@ describe("ingestPayload", () => {
     renameSpy.mockRestore();
 
     expect(result.ok).toBe(true);
-    expect(rewrites).toBe(1);
+    expect(rewrites).toBe(getDriverInfo().native ? 0 : 1);
 
     const db = await openDb(dbPath);
     const count = db.prepare("SELECT COUNT(*) as c FROM tool_invocations").get();
@@ -385,7 +386,7 @@ describe("ingestPayload", () => {
     await ingestPayload(changed, config);
     const changeRewrites = changeSpy.mock.calls.filter(([, dest]) => dest === dbPath).length;
     changeSpy.mockRestore();
-    expect(changeRewrites).toBe(1);
+    expect(changeRewrites).toBe(getDriverInfo().native ? 0 : 1);
 
     const db = await openDb(dbPath);
     const stored = db

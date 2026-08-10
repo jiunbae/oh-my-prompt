@@ -286,6 +286,7 @@ function createFts() {
  * this cheaply and fail fast with an actionable message instead.
  */
 function assertNoLegacyFts5(db, dbPath) {
+  if (db.driver && db.driver !== "sql.js") return;
   let row;
   try {
     row = db

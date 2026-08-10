@@ -642,7 +642,7 @@ oh-my-prompt/
 </tr>
 <tr>
 <td><b>CLI</b></td>
-<td>Node.js · sql.js · @clack/prompts · picocolors</td>
+<td>Node.js · SQLite WAL (sql.js fallback) · @clack/prompts · picocolors</td>
 </tr>
 <tr>
 <td><b>Infra</b></td>

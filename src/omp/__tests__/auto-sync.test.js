@@ -50,4 +50,23 @@ describe("event-driven auto sync", () => {
       errors: [],
     });
   });
+
+  it("runs database-heavy sync work in a short-lived child process", async () => {
+    const configPath = path.join(process.env.XDG_CONFIG_HOME, "config.json");
+    const dbPath = path.join(process.env.XDG_CONFIG_HOME, "omp.db");
+    fs.writeFileSync(configPath, JSON.stringify({
+      server: { url: "http://127.0.0.1:9", token: "test-token" },
+      storage: { type: "sqlite", sqlite: { path: dbPath } },
+      capture: { response: true },
+      sync: { enabled: true, deviceId: "worker-test" },
+      queue: { maxBytes: 1024 * 1024 },
+    }));
+
+    const { launchSyncWorker } = require("../auto-sync");
+    const worker = launchSyncWorker(configPath);
+    const result = await worker.promise;
+
+    expect(result).toMatchObject({ uploaded: 0, chunks: 0, duplicates: 0 });
+    expect(worker.child.exitCode).toBe(0);
+  });
 });
