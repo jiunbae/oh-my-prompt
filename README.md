@@ -264,7 +264,7 @@ omp sync         # Sync captured prompts to local dashboard
 **Server Mode** — deploy once, sync from anywhere:
 ```bash
 omp config set server.url https://your-domain.com
-omp config set server.token YOUR_TOKEN
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
 omp sync         # Sync to remote server
 ```
 

@@ -130,10 +130,33 @@ function saveConfig(config) {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
+function isSensitiveConfigPath(configPath) {
+  const leaf = String(configPath || "").split(".").pop() || "";
+  return /(token|secret|password|passphrase|api[_-]?key|private[_-]?key)$/i.test(leaf);
+}
+
+function redactConfig(value, currentPath = "") {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => redactConfig(item, `${currentPath}.${index}`));
+  }
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => {
+      const childPath = currentPath ? `${currentPath}.${key}` : key;
+      if (isSensitiveConfigPath(childPath)) {
+        const empty = child === undefined || child === null || child === "";
+        return [key, empty ? child : "[REDACTED]"];
+      }
+      return [key, redactConfig(child, childPath)];
+    })
+  );
+}
+
 function getConfigSummary(config) {
   return {
     serverUrl: config.server.url,
-    serverToken: config.server.token ? config.server.token.slice(0, 8) + "..." : "(not set)",
+    serverToken: config.server.token ? "(configured)" : "(not set)",
     storageType: "sqlite",
     sqlitePath: config.storage.sqlite.path,
     captureResponse: config.capture.response,
@@ -146,4 +169,6 @@ module.exports = {
   saveConfig,
   defaultConfig,
   getConfigSummary,
+  isSensitiveConfigPath,
+  redactConfig,
 };

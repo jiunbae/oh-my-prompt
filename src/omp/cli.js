@@ -1,7 +1,13 @@
 const fs = require("fs");
 const path = require("path");
 const { c, loadClack, handleCancel, label, pass, fail, warn, info } = require("./ui");
-const { loadConfig, saveConfig, getConfigSummary } = require("./config");
+const {
+  loadConfig,
+  saveConfig,
+  getConfigSummary,
+  isSensitiveConfigPath,
+  redactConfig,
+} = require("./config");
 const {
   installClaudeHook,
   uninstallClaudeHook,
@@ -83,6 +89,7 @@ ${cmd("watch stop", "Stop file watcher")}
 ${cmd("watch status", "Show watcher status")}
 
 ${cmd("search <query>", "Full-text search prompts locally")}
+${cmd("tui", "Browse and manage prompts interactively")}
 ${cmd("stats", "Show prompt statistics")}
 ${cmd("report", "Generate summary report for a time range")}
 ${cmd("analyze [id]", "Analyze a prompt (default: most recent)")}
@@ -108,6 +115,8 @@ ${cmd("delete <prompt-id>", "Delete a prompt by ID")}
 ${cmd("tag <id> <name>", "Add/remove tags on prompts")}
 
 ${cmd("db migrate", "Run database migrations")}
+${cmd("db repair", "Repair full-text index drift")}
+${cmd("db backups", "List or prune database backup artifacts")}
 ${cmd("db flush", "Delete all local records (destructive)")}
 
   ${c.yellow("GLOBAL OPTIONS")}
@@ -168,14 +177,24 @@ function printJson(data) {
   process.stdout.write(JSON.stringify(data, null, 2) + "\n");
 }
 
-function readStdin() {
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function readStdin(options = {}) {
   return new Promise((resolve) => {
     let data = "";
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => {
       data += chunk;
     });
-    process.stdin.on("end", () => resolve(data.trim()));
+    process.stdin.on("end", () => {
+      resolve(options.preserveWhitespace ? data.replace(/\r?\n$/, "") : data.trim());
+    });
     process.stdin.resume();
   });
 }
@@ -743,22 +762,31 @@ function resolveStatsView(view, explicitGroupBy) {
   };
 }
 
-function handleConfig(options, positional) {
+async function handleConfig(options, positional) {
   const config = loadConfig();
   const action = positional[0];
   const key = positional[1];
 
   if (action === "set") {
-    const value = positional[2];
+    const value = options.stdin
+      ? await readStdin({ preserveWhitespace: true })
+      : positional[2];
     if (!key || value === undefined) {
       console.error("Usage: omp config set <path> <value>");
       process.exitCode = 2;
       return;
     }
-    setConfigValue(config, key, parseValue(value));
+    // Tokens and passphrases are opaque strings. In particular, values such as
+    // "true" or "123" must not be coerced into JSON primitives.
+    const parsedValue = isSensitiveConfigPath(key) ? value : parseValue(value);
+    setConfigValue(config, key, parsedValue);
     saveConfig(config);
     if (options.json) {
-      printJson({ ok: true, key, value: parseValue(value) });
+      printJson({
+        ok: true,
+        key,
+        value: isSensitiveConfigPath(key) ? "[REDACTED]" : parsedValue,
+      });
     } else {
       console.log(`Updated ${key}`);
     }
@@ -789,16 +817,19 @@ function handleConfig(options, positional) {
 
   if (action === "get") {
     if (!key) {
-      printJson(config);
+      printJson(options["show-secrets"] ? config : redactConfig(config));
       return;
     }
     const value = key
       .split(".")
       .reduce((acc, part) => (acc ? acc[part] : undefined), config);
+    const visibleValue = isSensitiveConfigPath(key) && !options["show-secrets"]
+      ? (value === undefined || value === null || value === "" ? value : "[REDACTED]")
+      : value;
     if (options.json) {
-      printJson({ key, value });
+      printJson({ key, value: visibleValue });
     } else {
-      console.log(value === undefined ? "" : value);
+      console.log(visibleValue === undefined ? "" : visibleValue);
     }
     return;
   }
@@ -1088,7 +1119,7 @@ async function handleSync(options) {
     if (s) s.stop(c.red("Sync failed."));
     throw err;
   } finally {
-    releaseSyncLock(lock.lockPath);
+    releaseSyncLock(lock.lockPath, { owner: lock.lockInfo });
   }
 }
 
@@ -1733,15 +1764,14 @@ async function handleDelete(options, positional) {
       }
     }
 
-    const result = db
-      .prepare("DELETE FROM prompts WHERE session_id = ?")
-      .run(sessionId);
+    const { deleteSession } = require("./db-maintenance");
+    const result = deleteSession(db, sessionId);
     db.close();
 
     if (options.json) {
-      printJson({ deleted: result.changes, session_id: sessionId });
+      printJson({ deleted: result.deleted, session_id: sessionId });
     } else {
-      console.log(pass(`Deleted ${c.bold(String(result.changes))} prompt(s) from session ${c.dim(sessionId)}`));
+      console.log(pass(`Deleted ${c.bold(String(result.deleted))} prompt(s) from session ${c.dim(sessionId)}`));
     }
     return;
   }
@@ -1776,7 +1806,8 @@ async function handleDelete(options, positional) {
     }
   }
 
-  db.prepare("DELETE FROM prompts WHERE id = ?").run(promptId);
+  const { deletePromptById } = require("./db-maintenance");
+  deletePromptById(db, promptId);
   db.close();
 
   if (options.json) {
@@ -2045,7 +2076,9 @@ async function main() {
     omp status [options]
 
   OPTIONS
-    --json    Output as JSON
+    --json          Output as JSON
+    --stdin         Read a config set value from standard input
+    --show-secrets  Reveal secret values for an explicit config get
 `);
         break;
       }
@@ -2201,7 +2234,7 @@ async function main() {
 `);
         break;
       }
-      handleConfig(options, positional);
+      await handleConfig(options, positional);
       break;
     }
     case "import": {
@@ -2364,11 +2397,15 @@ async function main() {
 
   SUBCOMMANDS
     migrate    Run database migrations
+    repair     Repair the local full-text search index
+    backups    List or explicitly prune database backup artifacts
     flush      Delete ALL local records and reset sync state
 
   OPTIONS
-    --yes, -y   Skip confirmation (flush only)
-    --json      Output as JSON
+    --yes, -y               Confirm flush or backup pruning
+    --older-than-days <n>   Prune backups at least n days old (default: 30)
+    --include-transition    Allow pruning the protected native transition backup
+    --json                  Output as JSON
 `);
         break;
       }
@@ -2383,6 +2420,71 @@ async function main() {
         }
         break;
       }
+      if (action === "repair") {
+        const config = loadConfig();
+        const db = await openDb(config.storage.sqlite.path);
+        const { repairFtsIndex } = require("./db-maintenance");
+        const result = repairFtsIndex(db);
+        db.close();
+        if (options.json) {
+          printJson(result);
+        } else if (!result.available) {
+          console.log("Full-text index is unavailable; exact search remains available.");
+        } else {
+          console.log(
+            `FTS repair complete: inserted ${result.inserted}, updated ${result.updated}, ` +
+            `deleted ${result.deleted}; missing ${result.missing}, ` +
+            `orphaned ${result.orphaned}, stale ${result.stale}.`
+          );
+        }
+        break;
+      }
+      if (action === "backups") {
+        const config = loadConfig();
+        const {
+          summarizeDatabaseBackups,
+          pruneDatabaseBackups,
+        } = require("./db-backups");
+        const backupAction = positional[1];
+        if (!backupAction || backupAction === "list") {
+          const result = summarizeDatabaseBackups(config.storage.sqlite.path);
+          if (options.json) printJson(result);
+          else {
+            console.log(
+              `Database backup artifacts: ${result.count}, ${formatBytes(result.totalBytes)}`
+            );
+            for (const file of result.files) {
+              const protection = file.protected ? " (protected)" : "";
+              console.log(`  ${file.name}  ${formatBytes(file.size)}  ${file.kind}${protection}`);
+            }
+          }
+          break;
+        }
+        if (backupAction !== "prune") {
+          console.error("Usage: omp db backups [list|prune] [options]");
+          process.exitCode = 2;
+          break;
+        }
+        const result = pruneDatabaseBackups(config.storage.sqlite.path, {
+          olderThanDays: options["older-than-days"] ?? 30,
+          includeTransition: Boolean(options["include-transition"]),
+          execute: Boolean(options.yes || options.y),
+        });
+        if (options.json) printJson(result);
+        else if (!result.executed) {
+          console.log(
+            `Dry run: ${result.candidates.length} artifact(s), ` +
+            `${formatBytes(result.bytesReclaimable)} reclaimable.`
+          );
+          console.log("Run again with --yes to delete these exact files.");
+        } else {
+          console.log(
+            `Deleted ${result.deleted.length} backup artifact(s); reclaimed ` +
+            `${formatBytes(result.bytesReclaimed)}.`
+          );
+        }
+        break;
+      }
       if (action === "flush") {
         const config = loadConfig();
         if (!options.yes && !options.y) {
@@ -2392,10 +2494,8 @@ async function main() {
           break;
         }
         const db = await openDb(config.storage.sqlite.path);
-        db.exec("DELETE FROM prompts");
-        db.exec("DELETE FROM sync_log");
-        db.exec("DELETE FROM sync_state");
-        try { db.exec("INSERT INTO prompts_fts(prompts_fts) VALUES('rebuild')"); } catch {}
+        const { flushLocalDatabase } = require("./db-maintenance");
+        flushLocalDatabase(db);
         const remaining = db.prepare("SELECT count(*) as c FROM prompts").get();
         db.close();
         if (options.json) {
@@ -2709,11 +2809,11 @@ async function main() {
     omp search --stats
 
   SEARCH MODES
-    Default: FTS5 match (supports AND, OR, NOT, "phrase queries")
+    Default: SQLite full-text MATCH (supports AND, OR, NOT, "phrase queries")
     --exact: Substring match (LIKE %query%)
 
   OPTIONS
-    --exact             Exact substring match instead of FTS5
+    --exact             Exact substring match instead of the full-text index
     --limit <n>         Max results (default: 10)
     --since <date>      Filter from date (YYYY-MM-DD or ISO)
     --until <date>      Filter to date (YYYY-MM-DD or ISO)
@@ -2958,6 +3058,29 @@ async function main() {
         console.error(fail(err.message));
         process.exitCode = 1;
       }
+      break;
+    }
+    case "tui": {
+      if (options.help || options.h) {
+        console.log(`
+  omp tui — Interactive local prompt browser
+
+  USAGE
+    omp tui
+
+  KEYS
+    j/k       Navigate
+    Enter     View prompt
+    /         Search
+    f         Toggle favorite
+    d         Delete prompt locally
+    s         Sync
+    q         Quit
+`);
+        break;
+      }
+      const { startTui } = require("./tui");
+      await startTui(loadConfig());
       break;
     }
     case "watch": {

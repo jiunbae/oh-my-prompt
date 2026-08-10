@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.810.4] - 2026-08-10
+
+### Added
+- `omp db repair` reconciles missing, orphaned, and stale standalone FTS rows; `omp doctor` and `omp search --stats` now report true index health instead of comparing row counts only
+- `omp db backups` inventories recognized recovery artifacts, while `omp db backups prune` defaults to a dry run and protects the native-transition backup unless explicitly included
+- Restore the interactive `omp tui` route with local favorites, search, confirmed deletion, and portable macOS/Linux clipboard handling
+
+### Performance
+- Migration v12 removes the superseded three-column dedup index because the four-column turn-aware index covers the same prefix. On a 329 MiB real-data clone, seven alternating 10,000-row trials reduced median write time from 269.717 ms to 241.210 ms (-10.57%) and removed a 2.55 MiB duplicate index
+- FTS mutations no longer perform an extra schema lookup on every capture; missing FTS remains an intentional exact-search fallback, while real index failures abort the prompt transaction instead of drifting silently
+
+### Reliability
+- Prompt/session deletion and database flush update the base and FTS tables in one transaction. Migration v12 repaired 89 missing and 34 stale FTS rows on the validation database; a 20,075-row copy upgraded from v11 to v13 in 1.238 s with zero drift and `PRAGMA quick_check=ok`
+- Auto-sync applies one bounded exponential retry gate to filesystem events, safety intervals, and pending work; child workers emit heartbeats, refresh owner-scoped locks, and are terminated after a five-minute liveness timeout
+- Sync locks carry a nonce so an expired worker cannot delete a replacement owner's lock. The systemd unit also limits restart bursts to five attempts per five minutes
+
+### Security
+- `omp config get` redacts tokens, passwords, passphrases, API keys, and private keys by default; `--show-secrets` is explicit, and `config set --stdin` avoids command-line secret exposure without coercing opaque values
+- `omp doctor` warns when a non-loopback sync endpoint uses plaintext HTTP, and npm publishing now requests provenance attestations
+
+### CI
+- Packed CLI installs are tested on Node.js 20, 22, and 24 with both the native `better-sqlite3` path and the `sql.js` fallback when optional dependencies are omitted
+
 ## [2026.810.3] - 2026-08-10
 
 ### Performance

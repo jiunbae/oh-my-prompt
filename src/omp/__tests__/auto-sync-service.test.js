@@ -21,6 +21,8 @@ describe("auto-sync systemd user service", () => {
       'ExecStart="/opt/node/bin/node" "/opt/omp/lib/auto-sync-daemon-entry.js" "/home/test/.config/oh-my-prompt/config.json"'
     );
     expect(unit).toContain("Restart=on-failure");
+    expect(unit).toContain("StartLimitIntervalSec=300");
+    expect(unit).toContain("StartLimitBurst=5");
     expect(unit).toContain("Nice=10");
     expect(unit).toContain("CPUWeight=10");
     expect(unit).toContain("IOWeight=10");

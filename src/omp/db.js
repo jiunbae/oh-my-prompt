@@ -2,6 +2,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { openDatabase } = require("./db-driver");
 const { ensureDir } = require("./paths");
+const { repairFtsIndex } = require("./fts");
 
 const MIGRATIONS = [
   {
@@ -259,6 +260,36 @@ const MIGRATIONS = [
       db.exec(
         "CREATE INDEX IF NOT EXISTS idx_prompts_updated_at ON prompts(updated_at)"
       );
+    },
+  },
+  {
+    version: 12,
+    run: (db) => {
+      // Migration v8's four-column index covers every query that used the
+      // original three-column prefix, so retaining both only adds write and
+      // storage amplification.
+      db.exec("DROP INDEX IF EXISTS idx_prompts_dedup");
+
+      // FTS4 is a standalone mirror for sql.js compatibility. Older delete and
+      // import paths could therefore leave missing, orphaned, or stale rows.
+      // Repair the mirror once during upgrade; normal writes maintain it
+      // transactionally.
+      repairFtsIndex(db, { transaction: false });
+    },
+  },
+  {
+    version: 13,
+    run: (db) => {
+      // The TUI has exposed favorites since 2026.505.3, but the table was
+      // missing from the local migration registry. Keep it deliberately small
+      // and let prompt deletion cascade through the relationship.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS favorite_prompts (
+          prompt_id TEXT PRIMARY KEY,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
+        )
+      `);
     },
   },
 ];

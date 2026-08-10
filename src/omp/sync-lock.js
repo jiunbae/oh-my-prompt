@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const crypto = require("crypto");
 const { getConfigDir, ensureDir } = require("./paths");
 
 function getLockPath(name) {
@@ -27,19 +28,25 @@ function isProcessAlive(pid) {
 }
 
 function getLockAgeMs(lockInfo, lockPath) {
+  let lastActivity = null;
   const createdAt = lockInfo?.createdAt;
   if (createdAt) {
     const created = Date.parse(createdAt);
     if (!Number.isNaN(created)) {
-      return Math.max(0, Date.now() - created);
+      lastActivity = created;
     }
   }
   try {
     const stat = fs.statSync(lockPath);
-    return Math.max(0, Date.now() - stat.mtimeMs);
+    // Ignore a materially future mtime (clock-skewed shared filesystems and
+    // fake-timer tests alike); otherwise a lock could remain fresh forever.
+    if (stat.mtimeMs <= Date.now() + 1000) {
+      lastActivity = Math.max(lastActivity ?? 0, stat.mtimeMs);
+    }
   } catch {
-    return null;
+    if (lastActivity === null) return null;
   }
+  return Math.max(0, Date.now() - lastActivity);
 }
 
 function isStale(lockInfo, lockPath, ttlMs) {
@@ -54,6 +61,7 @@ function tryCreateLock(lockPath) {
     pid: process.pid,
     host: os.hostname(),
     createdAt: new Date().toISOString(),
+    nonce: crypto.randomUUID(),
   };
   try {
     fs.writeFileSync(lockPath, JSON.stringify(payload), { flag: "wx", mode: 0o600 });
@@ -105,6 +113,16 @@ function releaseSyncLock(lockPath, options = {}) {
     return;
   }
   const lockInfo = readLock(lockPath);
+  if (options.owner) {
+    const expected = options.owner;
+    const sameOwner = expected.nonce
+      ? lockInfo?.nonce === expected.nonce
+      : lockInfo?.pid === expected.pid &&
+        lockInfo?.host === expected.host &&
+        lockInfo?.createdAt === expected.createdAt;
+    if (sameOwner) fs.unlinkSync(lockPath);
+    return;
+  }
   const sameOwner =
     lockInfo?.pid === process.pid && lockInfo?.host === os.hostname();
   if (sameOwner) {
@@ -112,7 +130,29 @@ function releaseSyncLock(lockPath, options = {}) {
   }
 }
 
+function refreshSyncLock(lockPath, owner) {
+  try {
+    if (!lockPath || !owner || !fs.existsSync(lockPath)) return false;
+    const current = readLock(lockPath);
+    const sameOwner = owner.nonce
+      ? current?.nonce === owner.nonce
+      : current?.pid === owner.pid &&
+        current?.host === owner.host &&
+        current?.createdAt === owner.createdAt;
+    if (!sameOwner) return false;
+    const now = new Date();
+    fs.utimesSync(lockPath, now, now);
+    return true;
+  } catch {
+    // The file may be replaced between the owner check and utimes. Treat that
+    // as lease loss instead of refreshing or deleting another owner's lock.
+    return false;
+  }
+}
+
 module.exports = {
   acquireSyncLock,
   releaseSyncLock,
+  refreshSyncLock,
+  readLock,
 };

@@ -7,6 +7,7 @@ const { updateState } = require("./state");
 const { redactText, redactValue } = require("./redact");
 const { touchTrigger } = require("./auto-sync");
 const { acquireSyncLock, releaseSyncLock } = require("./sync-lock");
+const { insertFtsRow, updateFtsResponse } = require("./fts");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -261,25 +262,6 @@ function insertToolInvocations(db, tools, promptId, record, redactOptions) {
   }
 }
 
-function ftsInsert(db, rowid, promptText, responseText) {
-  try {
-    db.prepare(
-      "INSERT INTO prompts_fts (rowid, prompt_text, response_text) VALUES (?, ?, ?)"
-    ).run(rowid, promptText || "", responseText || "");
-  } catch {
-    // FTS table missing or unsupported — search falls back to LIKE.
-  }
-}
-
-function ftsUpdateResponse(db, promptId, responseText) {
-  try {
-    db.prepare(
-      "UPDATE prompts_fts SET response_text = ? WHERE rowid = (SELECT rowid FROM prompts WHERE id = ?)"
-    ).run(responseText || "", promptId);
-  } catch {}
-}
-
-
 function insertPrompt(db, record) {
   const stmt = db.prepare(`
     INSERT INTO prompts (
@@ -302,12 +284,15 @@ function insertPrompt(db, record) {
   const result = stmt.run(record);
   if (result.changes > 0) {
     const row = db.prepare("SELECT rowid FROM prompts WHERE id = ?").get(record.id);
-    if (row) ftsInsert(db, row.rowid, record.prompt_text, record.response_text);
+    if (row) insertFtsRow(db, row.rowid, record.prompt_text, record.response_text);
   }
   return result;
 }
 
 function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wordCount) {
+  const current = db
+    .prepare("SELECT rowid, prompt_text FROM prompts WHERE id = ?")
+    .get(promptId);
   const stmt = db.prepare(`
     UPDATE prompts
     SET response_text = ?, response_length = ?, token_estimate_response = ?, word_count_response = ?, updated_at = ?
@@ -321,7 +306,9 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
     nowIso(),
     promptId
   );
-  ftsUpdateResponse(db, promptId, responseText);
+  if (current) {
+    updateFtsResponse(db, current.rowid, current.prompt_text, responseText);
+  }
 }
 
 // Keep every mutation for one captured turn in one SQL transaction. Besides
@@ -500,7 +487,9 @@ async function ingestPayload(rawPayload, config, options = {}) {
       try {
         if (db) db.close();
       } finally {
-        if (lock && lock.ok) releaseSyncLock(lock.lockPath);
+        if (lock && lock.ok) {
+          releaseSyncLock(lock.lockPath, { owner: lock.lockInfo });
+        }
       }
     }
   }
@@ -540,7 +529,7 @@ async function replayQueue(config) {
     // Unusable database: nothing can be replayed, so leave every queue file in
     // place and report the payloads as failed, exactly as the per-payload path
     // used to when each open threw on its own.
-    releaseSyncLock(lock.lockPath);
+    releaseSyncLock(lock.lockPath, { owner: lock.lockInfo });
     for (const file of files) {
       try {
         failed += fs
@@ -609,7 +598,7 @@ async function replayQueue(config) {
     try {
       db.close();
     } finally {
-      releaseSyncLock(lock.lockPath);
+      releaseSyncLock(lock.lockPath, { owner: lock.lockInfo });
     }
   }
 

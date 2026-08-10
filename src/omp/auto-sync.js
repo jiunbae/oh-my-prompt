@@ -13,6 +13,8 @@ const DEFAULT_DEBOUNCE_S = 30;
 // a sql.js database reads the whole file even when there is nothing to upload.
 const DEFAULT_INTERVAL_S = 3600;
 const WATCH_RETRY_MS = 5000;
+const WORKER_STALL_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_FAILURE_RETRY_MS = 15 * 60 * 1000;
 
 // Validation bounds (in seconds)
 const MIN_DEBOUNCE_S = 1;    // 1 000 ms
@@ -285,25 +287,52 @@ function launchSyncWorker(configPath, options = {}) {
 
   let outcome = null;
   let settled = false;
+  let stallTimer = null;
+  const stallTimeoutMs = options.stallTimeoutMs ?? WORKER_STALL_TIMEOUT_MS;
+
+  function clearStallTimer() {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = null;
+  }
+
+  function armStallTimer() {
+    clearStallTimer();
+    if (!Number.isFinite(stallTimeoutMs) || stallTimeoutMs <= 0) return;
+    stallTimer = setTimeout(() => {
+      outcome = {
+        ok: false,
+        code: "OMP_SYNC_WORKER_STALLED",
+        error: `sync worker stopped reporting progress for ${Math.round(stallTimeoutMs / 1000)}s`,
+      };
+      try { child.kill("SIGKILL"); } catch {}
+    }, stallTimeoutMs);
+  }
+
   const promise = new Promise((resolve, reject) => {
     child.on("message", (message) => {
       if (!message || typeof message !== "object") return;
       if (message.type === "lock" && message.lockPath) {
-        if (options.onLock) options.onLock(message.lockPath);
+        if (options.onLock) options.onLock(message.lockPath, message.lockInfo || null);
+        armStallTimer();
+      } else if (message.type === "heartbeat") {
+        armStallTimer();
       } else if (message.type === "result") {
         outcome = message;
+        armStallTimer();
       }
     });
 
     child.once("error", (error) => {
       if (settled) return;
       settled = true;
+      clearStallTimer();
       reject(error);
     });
 
     child.once("exit", (code, signal) => {
       if (settled) return;
       settled = true;
+      clearStallTimer();
       if (outcome?.ok) {
         resolve(outcome.result);
         return;
@@ -316,8 +345,19 @@ function launchSyncWorker(configPath, options = {}) {
       reject(error);
     });
   });
+  armStallTimer();
 
   return { child, promise };
+}
+
+function computeFailureBackoffMs(consecutiveFailures, debounceMs, intervalMs) {
+  const attempt = Math.max(1, Number(consecutiveFailures) || 1);
+  const base = Math.max(30000, Number(debounceMs) || 0);
+  const cap = Math.min(
+    MAX_FAILURE_RETRY_MS,
+    Math.max(base, Number(intervalMs) || MAX_FAILURE_RETRY_MS)
+  );
+  return Math.min(base * (2 ** Math.min(attempt - 1, 20)), cap);
 }
 
 /**
@@ -371,11 +411,39 @@ function runDaemonLoop(configPath) {
   let watcherRetryTimer = null;
   let activeWorker = null;
   let activeLockPath = null;
+  let activeLockOwner = null;
   let consecutiveFailures = 0;
   let currentIntervalMs = intervalMs;
+  let nextAllowedSyncAt = 0;
+  let retryTimer = null;
+
+  function clearRetryTimer() {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+
+  function scheduleRetry(delayMs) {
+    if (shuttingDown || retryTimer) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      requestSync("failure-backoff");
+    }, Math.max(1, delayMs));
+  }
 
   function adjustIntervalOnFailure() {
     consecutiveFailures++;
+    const retryDelay = computeFailureBackoffMs(
+      consecutiveFailures,
+      debounceMs,
+      intervalMs
+    );
+    nextAllowedSyncAt = Date.now() + retryDelay;
+    pendingSync = true;
+    scheduleRetry(retryDelay);
+    appendLog(
+      "retry backoff set to " + (retryDelay / 1000) + "s after " +
+      consecutiveFailures + " consecutive failure(s)"
+    );
     if (consecutiveFailures >= CONSECUTIVE_FAIL_THRESHOLD) {
       const newInterval = Math.min(currentIntervalMs * 2, MAX_BACKOFF_INTERVAL_MS);
       if (newInterval !== currentIntervalMs) {
@@ -393,6 +461,8 @@ function runDaemonLoop(configPath) {
     const wasBackedOff = currentIntervalMs !== intervalMs;
     consecutiveFailures = 0;
     currentIntervalMs = intervalMs;
+    nextAllowedSyncAt = 0;
+    clearRetryTimer();
     if (wasBackedOff) {
       appendLog("interval reset to " + (intervalMs / 1000) + "s after successful sync");
     }
@@ -408,12 +478,23 @@ function runDaemonLoop(configPath) {
     intervalTimer = setInterval(() => {
       if (!syncing && !shuttingDown) {
         appendLog("interval sync triggered");
-        doSync();
+        requestSync("safety-interval");
       }
     }, currentIntervalMs);
   }
 
-  async function doSync() {
+  function requestSync(reason) {
+    if (shuttingDown) return;
+    const remaining = nextAllowedSyncAt - Date.now();
+    if (remaining > 0) {
+      pendingSync = true;
+      scheduleRetry(remaining);
+      return;
+    }
+    doSync(reason);
+  }
+
+  async function doSync(reason = "event") {
     if (shuttingDown) return;
     if (syncing) {
       // Mark pending so we run again after current sync finishes
@@ -422,35 +503,49 @@ function runDaemonLoop(configPath) {
     }
     syncing = true;
     pendingSync = false;
+    const syncStartedAt = Date.now();
 
     try {
       const worker = launchSyncWorker(configPath, {
-        onLock: (lockPath) => { activeLockPath = lockPath; },
+        onLock: (lockPath, lockInfo) => {
+          activeLockPath = lockPath;
+          activeLockOwner = lockInfo;
+        },
       });
       activeWorker = worker.child;
       const result = await worker.promise;
       appendLog(
         "sync completed: uploaded=" + result.uploaded +
         " duplicates=" + (result.duplicates || 0) +
-        " chunks=" + result.chunks
+        " chunks=" + result.chunks +
+        " duration_ms=" + (Date.now() - syncStartedAt) +
+        " trigger=" + reason
       );
       resetIntervalOnSuccess();
     } catch (err) {
       if (err.code === "OMP_SYNC_LOCKED") {
         appendLog("sync skipped: lock held by another process");
+        nextAllowedSyncAt = Date.now() + WATCH_RETRY_MS;
+        pendingSync = true;
+        scheduleRetry(WATCH_RETRY_MS);
       } else {
-        appendLog("sync failed: " + (err.message || "unknown error"));
+        appendLog(
+          "sync failed: " + (err.message || "unknown error") +
+          " duration_ms=" + (Date.now() - syncStartedAt) +
+          " trigger=" + reason
+        );
         adjustIntervalOnFailure();
       }
     } finally {
       activeWorker = null;
       activeLockPath = null;
+      activeLockOwner = null;
       syncing = false;
 
       // If a sync was requested while we were busy, run it now
       if (pendingSync && !shuttingDown) {
         pendingSync = false;
-        doSync();
+        requestSync("pending-event");
       }
     }
   }
@@ -460,7 +555,7 @@ function runDaemonLoop(configPath) {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      doSync();
+      requestSync("filesystem-event");
     }, debounceMs);
   }
 
@@ -514,6 +609,7 @@ function runDaemonLoop(configPath) {
     if (debounceTimer) clearTimeout(debounceTimer);
     if (intervalTimer) clearInterval(intervalTimer);
     if (watcherRetryTimer) clearTimeout(watcherRetryTimer);
+    clearRetryTimer();
     if (triggerWatcher) {
       try { triggerWatcher.close(); } catch {}
       triggerWatcher = null;
@@ -548,7 +644,7 @@ function runDaemonLoop(configPath) {
         if (activeLockPath) {
           try {
             const { releaseSyncLock: release } = require("./sync-lock");
-            release(activeLockPath, { force: true });
+            release(activeLockPath, { owner: activeLockOwner });
           } catch {
             // ignore
           }
@@ -681,6 +777,7 @@ module.exports = {
   touchTrigger,
   watchTrigger,
   launchSyncWorker,
+  computeFailureBackoffMs,
   runDaemonLoop,
   validateTimingConfig,
   TRIGGER_FILE,

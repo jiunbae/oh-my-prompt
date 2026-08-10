@@ -30,7 +30,7 @@ async function openBackfillDb(config, dryRun) {
     db.setBatchMode(true);
     return { db, operationLock };
   } catch (error) {
-    releaseSyncLock(operationLock.lockPath);
+    releaseSyncLock(operationLock.lockPath, { owner: operationLock.lockInfo });
     throw error;
   }
 }
@@ -39,7 +39,9 @@ function closeBackfillDb(db, operationLock) {
   try {
     if (db) db.close();
   } finally {
-    if (operationLock) releaseSyncLock(operationLock.lockPath);
+    if (operationLock) {
+      releaseSyncLock(operationLock.lockPath, { owner: operationLock.lockInfo });
+    }
   }
 }
 

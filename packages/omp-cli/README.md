@@ -166,15 +166,17 @@ omp report [--format text|json] [--since 2026-01-01]
 omp analyze <prompt-id>            # Analyze prompt quality
 omp analyze --file prompt.txt      # Analyze file
 omp analyze --stdin < prompt.txt   # Analyze from stdin
+omp tui                             # Interactive local prompt browser
 ```
 
 ### Configuration
 
 ```bash
-omp config get                     # Show full config
+omp config get                     # Show config with secrets redacted
+omp config get server.token --show-secrets  # Explicitly reveal a secret
 omp config get server.url          # Get specific value
 omp config set server.url https://your-server.example.com
-omp config set server.token YOUR_TOKEN
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
 omp config validate                # Check config validity
 ```
 
@@ -182,6 +184,9 @@ omp config validate                # Check config validity
 
 ```bash
 omp db migrate                     # Run schema migrations
+omp db repair                      # Repair full-text index drift
+omp db backups                     # List database recovery artifacts
+omp db backups prune               # Dry-run safe cleanup (add --yes to execute)
 ```
 
 ### Low-level
@@ -193,7 +198,7 @@ omp ingest --replay                # Replay failed queue
 
 ## Configuration
 
-Config file: `~/.omp/config.json`
+Config file: `~/.config/oh-my-prompt/config.json` (or `$XDG_CONFIG_HOME/oh-my-prompt/config.json`)
 
 ### Server Sync (Recommended)
 
@@ -209,7 +214,7 @@ Config file: `~/.omp/config.json`
 Or via CLI:
 ```bash
 omp config set server.url https://your-server.example.com
-omp config set server.token YOUR_TOKEN
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
 ```
 
 ### Storage

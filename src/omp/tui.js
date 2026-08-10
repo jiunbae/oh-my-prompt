@@ -1,9 +1,9 @@
-const fs = require("fs");
-const path = require("path");
 const readline = require("readline");
+const { spawn, spawnSync } = require("child_process");
 const { openDb } = require("./db");
 const { c } = require("./ui");
 const { syncToServer } = require("./sync");
+const { deletePromptById } = require("./db-maintenance");
 
 const ESC = "\x1B";
 const CLEAR = ESC + "[2J";
@@ -35,6 +35,32 @@ function truncate(text, len) {
   return t.length > len ? t.slice(0, len - 3) + "..." : t;
 }
 
+function copyToClipboard(text, dependencies = {}) {
+  const platform = dependencies.platform || process.platform;
+  const run = dependencies.spawn || spawn;
+  const probe = dependencies.spawnSync || spawnSync;
+  const candidates =
+    platform === "darwin"
+      ? [["pbcopy", []]]
+      : [
+          ["wl-copy", []],
+          ["xclip", ["-selection", "clipboard"]],
+          ["xsel", ["--clipboard", "--input"]],
+        ];
+
+  for (const [command, args] of candidates) {
+    if (probe("which", [command], { stdio: "ignore" }).status !== 0) continue;
+    const child = run(command, args, { stdio: ["pipe", "ignore", "ignore"] });
+    // A clipboard utility can disappear between the availability probe and
+    // spawn. Consume both error events so the TUI stays alive in that race.
+    child.on("error", () => {});
+    child.stdin.on("error", () => {});
+    child.stdin.end(text);
+    return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Data loading
 // ---------------------------------------------------------------------------
@@ -47,7 +73,6 @@ function loadPrompts(db, limit = 100) {
                p.project, p.source, p.session_id,
                EXISTS(SELECT 1 FROM favorite_prompts fp WHERE fp.prompt_id = p.id) as favorited
         FROM prompts p
-        WHERE p.deleted_at IS NULL
         ORDER BY p.created_at DESC
         LIMIT ?
       `)
@@ -63,10 +88,10 @@ function searchPrompts(db, query, limit = 100) {
     return db
       .prepare(`
         SELECT p.id, p.created_at, p.prompt_text, p.response_text,
-               p.project, p.source, p.session_id
+               p.project, p.source, p.session_id,
+               EXISTS(SELECT 1 FROM favorite_prompts fp WHERE fp.prompt_id = p.id) as favorited
         FROM prompts p
-        WHERE p.deleted_at IS NULL
-          AND (p.prompt_text LIKE ? OR p.project LIKE ? OR p.source LIKE ?)
+        WHERE (p.prompt_text LIKE ? OR p.project LIKE ? OR p.source LIKE ?)
         ORDER BY p.created_at DESC
         LIMIT ?
       `)
@@ -78,7 +103,7 @@ function searchPrompts(db, query, limit = 100) {
 
 function getPromptCount(db) {
   try {
-    const row = db.prepare("SELECT COUNT(*) as c FROM prompts WHERE deleted_at IS NULL").get();
+    const row = db.prepare("SELECT COUNT(*) as c FROM prompts").get();
     return row?.c || 0;
   } catch {
     return 0;
@@ -109,10 +134,9 @@ function toggleFavorite(db, promptId) {
   }
 }
 
-function softDeletePrompt(db, promptId) {
+function deletePrompt(db, promptId) {
   try {
-    db.prepare("UPDATE prompts SET deleted_at = ? WHERE id = ?").run(new Date().toISOString(), promptId);
-    return true;
+    return deletePromptById(db, promptId).deleted > 0;
   } catch {
     return false;
   }
@@ -163,13 +187,13 @@ function drawPromptDetail(prompt) {
   }
 }
 
-function drawStatusBar(mode, searchQuery) {
+function drawStatusBar(mode, searchQuery, notice = null) {
   const hints = {
     list: "j/k: navigate  Enter: view  /: search  f: favorite  d: delete  s: sync  q: quit",
     detail: "j/k: scroll  Esc: back  p: copy prompt  r: copy response  q: quit",
     search: "Type to filter  Enter: select  Esc: cancel",
   };
-  const hint = hints[mode] || "";
+  const hint = notice || hints[mode] || "";
   const searchStr = searchQuery ? `  [search: ${searchQuery}]` : "";
   drawLine(c.dim("─".repeat(80)));
   drawLine(c.dim(hint + searchStr));
@@ -180,6 +204,9 @@ function drawStatusBar(mode, searchQuery) {
 // ---------------------------------------------------------------------------
 
 async function startTui(config) {
+  if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
+    throw new Error("omp tui requires an interactive terminal");
+  }
   const db = await openDb(config.storage.sqlite.path);
   let prompts = loadPrompts(db);
   let filteredPrompts = prompts;
@@ -188,7 +215,8 @@ async function startTui(config) {
   let mode = "list";
   let searchQuery = "";
   let detailScroll = 0;
-  let listHeight = process.stdout.rows - 6;
+  let pendingDeleteId = null;
+  let listHeight = Math.max(1, (process.stdout.rows || 24) - 6);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -204,7 +232,11 @@ async function startTui(config) {
 
     if (mode === "list") {
       drawPromptList(filteredPrompts, selectedIndex, scrollStart, listHeight);
-      drawStatusBar("list", searchQuery);
+      drawStatusBar(
+        "list",
+        searchQuery,
+        pendingDeleteId ? "Press d again to confirm permanent local deletion; any other key cancels" : null
+      );
     } else if (mode === "detail") {
       const prompt = filteredPrompts[selectedIndex];
       if (prompt) {
@@ -257,18 +289,19 @@ async function startTui(config) {
       } else if (key === "p") {
         const p = filteredPrompts[selectedIndex];
         if (p?.prompt_text) {
-          require("child_process").spawn("pbcopy").stdin.end(p.prompt_text);
+          copyToClipboard(p.prompt_text);
         }
       } else if (key === "r") {
         const p = filteredPrompts[selectedIndex];
         if (p?.response_text) {
-          require("child_process").spawn("pbcopy").stdin.end(p.response_text);
+          copyToClipboard(p.response_text);
         }
       }
       return;
     }
 
     // list mode
+    if (key !== "d") pendingDeleteId = null;
     if (key === "q") {
       cleanup();
       process.exit(0);
@@ -303,19 +336,24 @@ async function startTui(config) {
     } else if (key === "d") {
       const p = filteredPrompts[selectedIndex];
       if (p) {
-        softDeletePrompt(db, p.id);
-        prompts = loadPrompts(db);
-        filteredPrompts = searchQuery ? searchPrompts(db, searchQuery) : prompts;
-        clampSelection();
+        if (pendingDeleteId === p.id) {
+          deletePrompt(db, p.id);
+          pendingDeleteId = null;
+          prompts = loadPrompts(db);
+          filteredPrompts = searchQuery ? searchPrompts(db, searchQuery) : prompts;
+          clampSelection();
+        } else {
+          pendingDeleteId = p.id;
+        }
       }
     } else if (key === "s") {
-      syncToServer(config);
+      syncToServer(config).catch(() => {});
     }
   }
 
   function cleanup() {
     process.stdin.setRawMode(false);
-    process.stdin.write(SHOW_CURSOR);
+    process.stdout.write(SHOW_CURSOR);
     rl.close();
     try { db.close(); } catch {}
   }
@@ -330,7 +368,7 @@ async function startTui(config) {
   });
 
   process.stdout.on("resize", () => {
-    listHeight = process.stdout.rows - 6;
+    listHeight = Math.max(1, (process.stdout.rows || 24) - 6);
     clampSelection();
     refresh();
   });
@@ -338,4 +376,12 @@ async function startTui(config) {
   refresh();
 }
 
-module.exports = { startTui };
+module.exports = {
+  startTui,
+  loadPrompts,
+  searchPrompts,
+  getPromptCount,
+  toggleFavorite,
+  deletePrompt,
+  copyToClipboard,
+};
