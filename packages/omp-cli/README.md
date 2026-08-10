@@ -358,7 +358,7 @@ Generates:
 2. Configure sync:
    ```bash
    omp config set server.url https://your-server.example.com
-   omp config set server.token YOUR_TOKEN
+   printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
    ```
 
 3. Run initial sync:

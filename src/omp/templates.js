@@ -20,7 +20,7 @@ function requireServer(config) {
     throw new Error(
       "Server not configured. Set server.url and server.token:\n" +
         "  omp config set server.url https://prompt.jiun.dev\n" +
-        "  omp config set server.token YOUR_TOKEN"
+        "  printf '%s' \"$OMP_TOKEN\" | omp config set server.token --stdin"
     );
   }
 }

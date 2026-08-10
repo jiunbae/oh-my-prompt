@@ -505,7 +505,7 @@ omp serve
 # Dashboard is now at http://localhost:3000
 # Register an account, then:
 omp config set server.url http://localhost:3000
-omp config set server.token YOUR_TOKEN   # from Settings page
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin  # from Settings page
 omp backfill                              # import history from all agents
 omp sync                                  # sync to local dashboard
 ```
@@ -605,7 +605,7 @@ kubectl apply -k .
 
 ```bash
 omp config set server.url https://your-domain.com
-omp config set server.token YOUR_TOKEN   # from Settings page after registration
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin  # after registration
 omp backfill     # import history from Claude, Codex, OpenCode, Gemini
 omp sync         # upload to server
 ```

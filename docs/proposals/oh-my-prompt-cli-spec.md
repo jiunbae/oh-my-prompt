@@ -143,7 +143,7 @@ omp sync status --json
 omp config get
 omp config get storage.type
 omp config set server.url https://your-server.example.com
-omp config set server.token your-token
+printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
 omp config set server.deviceId my-mac
 omp config set storage.s3.bucket oh-my-prompt
 omp config validate

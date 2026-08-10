@@ -77,5 +77,10 @@ describe("configuration secret handling", () => {
     expect(stdinResult).not.toContain("true ");
     expect(JSON.parse(fs.readFileSync(path.join(configDir, "config.json"), "utf8")).server.token)
       .toBe("true ");
+
+    const configHelp = run(["config", "--help"]);
+    expect(configHelp).toContain("--stdin");
+    expect(configHelp).toContain("--show-secrets");
+    expect(run(["status", "--help"])).not.toContain("--show-secrets");
   });
 });

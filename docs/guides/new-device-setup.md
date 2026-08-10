@@ -210,4 +210,4 @@ Run `omp install claude` to install the hook.
 | `omp report` | Generate detailed report |
 | `omp doctor` | Check installation health |
 | `omp config get` | Show current configuration |
-| `omp config set server.token VALUE` | Update a config value |
+| `printf '%s' "$OMP_TOKEN" \| omp config set server.token --stdin` | Set the server token without exposing it in process arguments |

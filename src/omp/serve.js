@@ -263,7 +263,9 @@ async function startServer(config, options = {}) {
   console.log(`\nTo sync your local data:`);
   console.log(`  ${c.cyan(`omp config set server.url ${url}`)}`);
   console.log(c.dim(`  # Register at ${url}, then get your token from Settings`));
-  console.log(`  ${c.cyan("omp config set server.token YOUR_TOKEN")}`);
+  console.log(
+    `  ${c.cyan("printf '%s' \"$OMP_TOKEN\" | omp config set server.token --stdin")}`
+  );
   console.log(`  ${c.cyan("omp sync")}`);
 
   return { url, alreadyRunning: false };

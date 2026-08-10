@@ -1172,7 +1172,7 @@ async function handleSyncFlush(options) {
     console.error(
       "Server not configured. Set server.url and server.token:\n" +
         "  omp config set server.url https://prompt.jiun.dev\n" +
-        "  omp config set server.token YOUR_TOKEN"
+        "  printf '%s' \"$OMP_TOKEN\" | omp config set server.token --stdin"
     );
     process.exitCode = 1;
     return;
@@ -2076,9 +2076,7 @@ async function main() {
     omp status [options]
 
   OPTIONS
-    --json          Output as JSON
-    --stdin         Read a config set value from standard input
-    --show-secrets  Reveal secret values for an explicit config get
+    --json    Output as JSON
 `);
         break;
       }
@@ -2225,11 +2223,13 @@ async function main() {
     omp config validate         Validate configuration
 
   OPTIONS
-    --json    Output as JSON
+    --json          Output as JSON
+    --stdin         Read a config set value from standard input
+    --show-secrets  Reveal secret values for an explicit config get
 
   EXAMPLES
     omp config get server.url
-    omp config set server.token abc123
+    printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
     omp config validate
 `);
         break;

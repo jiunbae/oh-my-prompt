@@ -170,7 +170,7 @@ async function runSemanticServerSearch(query, options, config) {
     throw new Error(
       "Semantic search requires server configuration. Set server.url and server.token:\n" +
       "  omp config set server.url https://prompt.jiun.dev\n" +
-      "  omp config set server.token YOUR_TOKEN"
+      "  printf '%s' \"$OMP_TOKEN\" | omp config set server.token --stdin"
     );
   }
 
