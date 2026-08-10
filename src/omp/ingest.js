@@ -20,14 +20,42 @@ function sleep(ms) {
 // proceeding with an unlocked last-writer-wins update.
 const INGEST_LOCK = { name: "database-operation.lock", ttlMs: 60 * 1000 };
 
-async function acquireIngestLock() {
-  const deadline = Date.now() + 10 * 1000;
+// A hook has to hand control back to the editor, so it waits briefly and then
+// queues the payload for later. User-initiated commands have no such deadline
+// and should wait instead of failing: one `omp ingest` legitimately holds the
+// lock for minutes on a large database (sql.js rewrites the whole file on every
+// save), so a 10s ceiling makes `omp backfill` / `omp sync` report OMP_DB_BUSY
+// when the only problem is that capture is busy doing its job.
+const SHORT_LOCK_WAIT_MS = 10 * 1000;
+const LONG_LOCK_WAIT_MS = 15 * 60 * 1000;
+
+// Each flush rewrites the whole database, so batch the replay. Small enough
+// that a crash costs at most this many queue files' worth of re-work.
+const REPLAY_FLUSH_EVERY_FILES = 100;
+
+async function acquireIngestLock(options = {}) {
+  const waitMs = options.waitMs ?? SHORT_LOCK_WAIT_MS;
+  const deadline = Date.now() + waitMs;
+  let notified = false;
   for (;;) {
     const lock = acquireSyncLock({ name: INGEST_LOCK.name, ttlMs: INGEST_LOCK.ttlMs });
     if (lock.ok) return lock;
     if (Date.now() >= deadline) return lock;
+    if (options.onWait && !notified) {
+      notified = true;
+      options.onWait(lock.lockInfo);
+    }
     await sleep(40 + Math.floor(Math.random() * 60));
   }
+}
+
+// Waiting silently for minutes looks like a hang, so say who we are waiting on.
+function reportLockWait(label) {
+  return (lockInfo) => {
+    if (!process.stderr.isTTY) return;
+    const owner = lockInfo?.pid ? ` (held by pid ${lockInfo.pid})` : "";
+    process.stderr.write(`${label}: waiting for the local database${owner}...\n`);
+  };
 }
 
 function parsePayload(raw) {
@@ -198,29 +226,38 @@ function insertToolInvocations(db, tools, promptId, record, redactOptions) {
       program = excluded.program,
       cwd = excluded.cwd
   `);
-  for (const t of tools) {
-    if (!t || !t.tool_use_id || !t.tool_name) continue;
-    const input = t.input != null ? t.input : null;
-    // Redact secrets inside tool inputs (Bash commands, Edit contents, WebFetch
-    // bodies, …) before storing when capture redaction is enabled. Program is
-    // derived from the original input — the command name itself is not secret
-    // and redaction could otherwise obscure it.
-    const storedInput =
-      redactOptions && input != null ? redactValue(input, redactOptions) : input;
-    stmt.run({
-      id: crypto.randomUUID(),
-      prompt_id: promptId || null,
-      session_id: record.session_id,
-      sequence: typeof t.sequence === "number" ? t.sequence : 0,
-      source: record.source || null,
-      tool_name: String(t.tool_name).slice(0, 100),
-      tool_use_id: String(t.tool_use_id).slice(0, 255),
-      input_json: storedInput != null ? JSON.stringify(storedInput) : null,
-      program: deriveProgram(t.tool_name, input),
-      cwd: t.cwd || record.cwd || null,
-      created_at: record.created_at || nowIso(),
-    });
-  }
+  // sql.js persists by rewriting the entire database file, so an unwrapped loop
+  // costs one full rewrite *per tool call*. A single agentic turn can carry
+  // hundreds of them (the upload schema caps a record at 1000), which on a
+  // 270MB database means hundreds of gigabytes of writes — minutes of I/O while
+  // holding the ingest lock, and far worse when the database lives on NFS.
+  // One transaction, one rewrite.
+  const insertAll = db.transaction(() => {
+    for (const t of tools) {
+      if (!t || !t.tool_use_id || !t.tool_name) continue;
+      const input = t.input != null ? t.input : null;
+      // Redact secrets inside tool inputs (Bash commands, Edit contents, WebFetch
+      // bodies, …) before storing when capture redaction is enabled. Program is
+      // derived from the original input — the command name itself is not secret
+      // and redaction could otherwise obscure it.
+      const storedInput =
+        redactOptions && input != null ? redactValue(input, redactOptions) : input;
+      stmt.run({
+        id: crypto.randomUUID(),
+        prompt_id: promptId || null,
+        session_id: record.session_id,
+        sequence: typeof t.sequence === "number" ? t.sequence : 0,
+        source: record.source || null,
+        tool_name: String(t.tool_name).slice(0, 100),
+        tool_use_id: String(t.tool_use_id).slice(0, 255),
+        input_json: storedInput != null ? JSON.stringify(storedInput) : null,
+        program: deriveProgram(t.tool_name, input),
+        cwd: t.cwd || record.cwd || null,
+        created_at: record.created_at || nowIso(),
+      });
+    }
+  });
+  insertAll();
 }
 
 function ftsInsert(db, rowid, promptText, responseText) {
@@ -261,12 +298,17 @@ function insertPrompt(db, record) {
     )
     ON CONFLICT(event_id) DO NOTHING
   `);
-  const result = stmt.run(record);
-  if (result.changes > 0) {
-    const row = db.prepare("SELECT rowid FROM prompts WHERE id = ?").get(record.id);
-    if (row) ftsInsert(db, row.rowid, record.prompt_text, record.response_text);
-  }
-  return result;
+  // The row and its FTS mirror are one logical write. Left unwrapped, sql.js
+  // rewrites the entire database file twice for a single captured prompt.
+  const insert = db.transaction(() => {
+    const result = stmt.run(record);
+    if (result.changes > 0) {
+      const row = db.prepare("SELECT rowid FROM prompts WHERE id = ?").get(record.id);
+      if (row) ftsInsert(db, row.rowid, record.prompt_text, record.response_text);
+    }
+    return result;
+  });
+  return insert();
 }
 
 function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wordCount) {
@@ -460,35 +502,100 @@ async function replayQueue(config) {
   let processed = 0;
   let failed = 0;
 
-  for (const file of files) {
-    const filepath = path.join(queueDir, file);
-    let lines;
-    try {
-      lines = fs.readFileSync(filepath, "utf-8").split("\n").filter(Boolean);
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    let fileFailed = false;
+  if (files.length === 0) {
+    return { processed, failed };
+  }
 
-    for (const line of lines) {
-      // The source queue file remains in place on failure; do not create a
-      // second copy of the same payload on every replay attempt.
-      const result = await ingestPayload(line, config, { queueOnFailure: false });
-      if (result.ok) {
-        processed += 1;
-      } else {
-        failed += 1;
-        fileFailed = true;
+  // Replaying used to hand each payload to ingestPayload without a handle, so
+  // every queued item reopened the database, took the lock, and rewrote the
+  // whole file. A backlog of a few thousand items therefore took hours and
+  // starved backfill/sync of the lock the entire time. Take the lock once, keep
+  // one handle in batch mode, and persist in batches instead.
+  const lock = await acquireIngestLock({
+    waitMs: LONG_LOCK_WAIT_MS,
+    onWait: reportLockWait("replay"),
+  });
+  if (!lock.ok) {
+    return { processed, failed, error: "Local database is busy" };
+  }
+
+  let db;
+  try {
+    db = await openDb(config.storage.sqlite.path);
+  } catch (error) {
+    // Unusable database: nothing can be replayed, so leave every queue file in
+    // place and report the payloads as failed, exactly as the per-payload path
+    // used to when each open threw on its own.
+    releaseSyncLock(lock.lockPath);
+    for (const file of files) {
+      try {
+        failed += fs
+          .readFileSync(path.join(queueDir, file), "utf-8")
+          .split("\n")
+          .filter(Boolean).length;
+      } catch {
+        // Vanished between the listing and now — nothing to count.
       }
     }
+    updateState({ lastError: error.message || "Failed to open database" });
+    return { processed, failed, error: error.message || "Failed to open database" };
+  }
+  db.setBatchMode(true);
 
-    if (!fileFailed) {
+  // A queue file may only be deleted once its rows are durable on disk —
+  // otherwise a crash between the in-memory write and the flush loses them.
+  let pendingDeletes = [];
+  const persistAndDrop = () => {
+    if (pendingDeletes.length === 0) return;
+    db.flush();
+    for (const p of pendingDeletes) {
       try {
-        fs.unlinkSync(filepath);
+        fs.unlinkSync(p);
       } catch (error) {
         if (error.code !== "ENOENT") throw error;
       }
+    }
+    pendingDeletes = [];
+  };
+
+  try {
+    for (const file of files) {
+      const filepath = path.join(queueDir, file);
+      let lines;
+      try {
+        lines = fs.readFileSync(filepath, "utf-8").split("\n").filter(Boolean);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      let fileFailed = false;
+
+      for (const line of lines) {
+        // The source queue file remains in place on failure; do not create a
+        // second copy of the same payload on every replay attempt.
+        const result = await ingestPayload(line, config, {
+          queueOnFailure: false,
+          db,
+        });
+        if (result.ok) {
+          processed += 1;
+        } else {
+          failed += 1;
+          fileFailed = true;
+        }
+      }
+
+      if (!fileFailed) {
+        pendingDeletes.push(filepath);
+        if (pendingDeletes.length >= REPLAY_FLUSH_EVERY_FILES) persistAndDrop();
+      }
+    }
+    persistAndDrop();
+  } finally {
+    try {
+      db.close();
+    } finally {
+      releaseSyncLock(lock.lockPath);
     }
   }
 
@@ -509,4 +616,7 @@ module.exports = {
   ingestPayload,
   replayQueue,
   acquireIngestLock,
+  reportLockWait,
+  SHORT_LOCK_WAIT_MS,
+  LONG_LOCK_WAIT_MS,
 };

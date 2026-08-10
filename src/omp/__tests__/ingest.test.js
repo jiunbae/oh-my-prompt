@@ -202,4 +202,54 @@ describe("ingestPayload", () => {
     db.close();
     expect(count.c).toBe(1);
   });
+
+  it("rewrites the database once for a turn carrying many tool invocations", async () => {
+    const root = makeTempRoot();
+    const dbPath = path.join(root, "omp.db");
+    const config = {
+      storage: { sqlite: { path: dbPath } },
+      capture: { response: true },
+      queue: { maxBytes: 1024 * 1024 },
+    };
+
+    // First ingest creates the schema; measure a steady-state turn after it.
+    await ingestPayload(
+      { source: "test", cli_name: "claude", role: "user", session_id: "s-warm", text: "warm" },
+      config
+    );
+
+    const tools = Array.from({ length: 40 }, (_, i) => ({
+      tool_use_id: `tu_${i}`,
+      tool_name: "Bash",
+      input: { command: `echo ${i}` },
+      sequence: i,
+    }));
+
+    // sql.js serializes the whole database on every save, so a full-file
+    // rewrite is exactly one renameSync onto the db path. Pre-transaction this
+    // was one per tool call.
+    const renameSpy = vi.spyOn(fs, "renameSync");
+    const result = await ingestPayload(
+      {
+        source: "test",
+        cli_name: "claude",
+        role: "user",
+        session_id: "s-tools",
+        text: "turn with many tools",
+        tools,
+      },
+      config
+    );
+    const rewrites = renameSpy.mock.calls.filter(([, dest]) => dest === dbPath).length;
+    renameSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(rewrites).toBeLessThan(tools.length);
+    expect(rewrites).toBeLessThanOrEqual(4);
+
+    const db = await openDb(dbPath);
+    const count = db.prepare("SELECT COUNT(*) as c FROM tool_invocations").get();
+    db.close();
+    expect(count.c).toBe(tools.length);
+  });
 });

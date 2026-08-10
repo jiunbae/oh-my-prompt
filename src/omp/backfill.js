@@ -3,7 +3,12 @@ const path = require("path");
 const os = require("os");
 const { Worker } = require("worker_threads");
 const { openDb, hashContent } = require("./db");
-const { ingestPayload, acquireIngestLock } = require("./ingest");
+const {
+  ingestPayload,
+  acquireIngestLock,
+  reportLockWait,
+  LONG_LOCK_WAIT_MS,
+} = require("./ingest");
 const { releaseSyncLock } = require("./sync-lock");
 const {
   isRealUserMessage,
@@ -13,7 +18,10 @@ const {
 
 async function openBackfillDb(config, dryRun) {
   if (dryRun) return { db: null, operationLock: null };
-  const operationLock = await acquireIngestLock();
+  const operationLock = await acquireIngestLock({
+    waitMs: LONG_LOCK_WAIT_MS,
+    onWait: reportLockWait("backfill"),
+  });
   if (!operationLock.ok) {
     throw new Error("Local database is busy; retry the backfill after the active writer finishes");
   }
@@ -33,6 +41,21 @@ function closeBackfillDb(db, operationLock) {
   } finally {
     if (operationLock) releaseSyncLock(operationLock.lockPath);
   }
+}
+
+// A full backfill run spans four sources. Taking the lock per source means
+// dropping it three times mid-run, and a hook-spawned `omp ingest` can claim it
+// in any of those gaps — it rewrites the whole DB file, so it holds on for
+// minutes while acquireIngestLock() gives up after 10s. The remaining sources
+// then die with OMP_DB_BUSY. Open one session up front, share it across every
+// source, and release it once at the end. Batch mode also collapses the run
+// into a single flush on close instead of one per source.
+async function openBackfillSession(config, dryRun) {
+  return openBackfillDb(config, dryRun);
+}
+
+function closeBackfillSession(session) {
+  if (session) closeBackfillDb(session.db, session.operationLock);
 }
 
 function buildEventId(sessionId, userText, timestamp, turnIndex) {
@@ -121,7 +144,9 @@ async function backfillTranscripts(config, options = {}) {
   let totalDuplicates = 0;
   const fileResults = [];
   const onProgress = options.onProgress;
-  const { db, operationLock } = await openBackfillDb(config, options.dryRun);
+  const ownsSession = !options.session;
+  const { db, operationLock } =
+    options.session || (await openBackfillDb(config, options.dryRun));
 
   const workerCount =
     options.workers !== undefined
@@ -260,7 +285,7 @@ async function backfillTranscripts(config, options = {}) {
       fileResults,
     };
   } finally {
-    closeBackfillDb(db, operationLock);
+    if (ownsSession) closeBackfillDb(db, operationLock);
   }
 }
 
@@ -375,7 +400,9 @@ async function backfillCodex(config, options = {}) {
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
-  const { db, operationLock } = await openBackfillDb(config, options.dryRun);
+  const ownsSession = !options.session;
+  const { db, operationLock } =
+    options.session || (await openBackfillDb(config, options.dryRun));
 
   try {
   // Group history entries by session to match with transcript turns
@@ -469,7 +496,7 @@ async function backfillCodex(config, options = {}) {
     sessions: sessionResponses.size,
   };
   } finally {
-    closeBackfillDb(db, operationLock);
+    if (ownsSession) closeBackfillDb(db, operationLock);
   }
 }
 
@@ -488,12 +515,15 @@ async function backfillOpenCode(config, options = {}) {
 
   const { openDatabase } = require("./db-driver");
   const ocDb = await openDatabase(dbPath, { readonly: true });
-  let target;
-  try {
-    target = await openBackfillDb(config, options.dryRun);
-  } catch (error) {
-    ocDb.close();
-    throw error;
+  const ownsSession = !options.session;
+  let target = options.session;
+  if (!target) {
+    try {
+      target = await openBackfillDb(config, options.dryRun);
+    } catch (error) {
+      ocDb.close();
+      throw error;
+    }
   }
   const { db: ompDb, operationLock } = target;
   let imported = 0;
@@ -598,7 +628,7 @@ async function backfillOpenCode(config, options = {}) {
   return { sessions: sessions.length, imported, skipped, duplicates };
   } finally {
     ocDb.close();
-    closeBackfillDb(ompDb, operationLock);
+    if (ownsSession) closeBackfillDb(ompDb, operationLock);
   }
 }
 
@@ -688,7 +718,9 @@ async function backfillGemini(config, options = {}) {
   let skipped = 0;
   let duplicates = 0;
   let sessionCount = 0;
-  const { db, operationLock } = await openBackfillDb(config, options.dryRun);
+  const ownsSession = !options.session;
+  const { db, operationLock } =
+    options.session || (await openBackfillDb(config, options.dryRun));
 
   try {
   for (const { path: filePath, projectHash } of chatFiles) {
@@ -780,7 +812,7 @@ async function backfillGemini(config, options = {}) {
 
   return { sessions: sessionCount, imported, skipped, duplicates };
   } finally {
-    closeBackfillDb(db, operationLock);
+    if (ownsSession) closeBackfillDb(db, operationLock);
   }
 }
 
@@ -789,6 +821,8 @@ module.exports = {
   backfillCodex,
   backfillOpenCode,
   backfillGemini,
+  openBackfillSession,
+  closeBackfillSession,
   isRealUserMessage,
   extractText,
   parseTranscript,

@@ -2127,7 +2127,14 @@ async function main() {
 `);
         break;
       }
-      const { backfillTranscripts, backfillCodex, backfillOpenCode, backfillGemini } = require("./backfill");
+      const {
+        backfillTranscripts,
+        backfillCodex,
+        backfillOpenCode,
+        backfillGemini,
+        openBackfillSession,
+        closeBackfillSession,
+      } = require("./backfill");
       const config = loadConfig();
       const dryRun = !!options["dry-run"];
       const claudeOnly = !!options["claude-only"];
@@ -2141,25 +2148,34 @@ async function main() {
       let opencodeResult = null;
       let geminiResult = null;
 
-      if (!hasFilter || claudeOnly) {
-        const showProgress = !options.json && process.stderr.isTTY;
-        claudeResult = await backfillTranscripts(config, {
-          path: options.path,
-          dryRun,
-          onProgress: showProgress ? ({ fileIdx, totalFiles, totalImported, totalDuplicates }) => {
-            process.stderr.write(`\r[Claude] ${fileIdx}/${totalFiles} files processed (${totalImported} new, ${totalDuplicates} dedup)    `);
-          } : undefined,
-        });
-        if (showProgress) process.stderr.write("\n");
-      }
-      if ((!hasFilter || codexOnly) && !options.path) {
-        codexResult = await backfillCodex(config, { dryRun });
-      }
-      if ((!hasFilter || opencodeOnly) && !options.path) {
-        opencodeResult = await backfillOpenCode(config, { dryRun });
-      }
-      if ((!hasFilter || geminiOnly) && !options.path) {
-        geminiResult = await backfillGemini(config, { dryRun });
+      // Hold the DB lock for the whole run. Acquiring it per source let a
+      // hook-spawned `omp ingest` slip into the gaps between them and fail the
+      // rest of the run with OMP_DB_BUSY.
+      const session = await openBackfillSession(config, dryRun);
+      try {
+        if (!hasFilter || claudeOnly) {
+          const showProgress = !options.json && process.stderr.isTTY;
+          claudeResult = await backfillTranscripts(config, {
+            path: options.path,
+            dryRun,
+            session,
+            onProgress: showProgress ? ({ fileIdx, totalFiles, totalImported, totalDuplicates }) => {
+              process.stderr.write(`\r[Claude] ${fileIdx}/${totalFiles} files processed (${totalImported} new, ${totalDuplicates} dedup)    `);
+            } : undefined,
+          });
+          if (showProgress) process.stderr.write("\n");
+        }
+        if ((!hasFilter || codexOnly) && !options.path) {
+          codexResult = await backfillCodex(config, { dryRun, session });
+        }
+        if ((!hasFilter || opencodeOnly) && !options.path) {
+          opencodeResult = await backfillOpenCode(config, { dryRun, session });
+        }
+        if ((!hasFilter || geminiOnly) && !options.path) {
+          geminiResult = await backfillGemini(config, { dryRun, session });
+        }
+      } finally {
+        closeBackfillSession(session);
       }
 
       if (options.json) {

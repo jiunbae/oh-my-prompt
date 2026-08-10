@@ -233,7 +233,13 @@ class DatabaseWrapper {
       self._inTransaction = false;
       // Persist after leaving the SQL transaction. A disk-version conflict is
       // not a SQL rollback condition and must propagate with its original code.
-      self._save();
+      // Batch mode still wins: a caller that opted into deferring writes (e.g.
+      // backfill) must not get a full-file rewrite per transaction.
+      if (self._batchMode) {
+        self._batchDirty = true;
+      } else {
+        self._save();
+      }
       return result;
     };
     return wrapper;
@@ -295,8 +301,41 @@ class DatabaseWrapper {
   }
 }
 
+// A writer killed mid-save (SIGKILL, OOM, a dead terminal) never reaches the
+// cleanup in _save's catch, leaving a full-size `omp.db.tmp-<pid>` behind. They
+// are never reclaimed otherwise and each one is as large as the database, so a
+// few dozen quietly cost gigabytes. Sweep them when opening for writing.
+//
+// Age, not liveness, decides: PIDs get recycled, so a live /proc/<pid> says
+// nothing about whether *this* process wrote the file. No legitimate save takes
+// an hour, so anything older than that is abandoned.
+const TEMP_ORPHAN_AGE_MS = 60 * 60 * 1000;
+
+function sweepOrphanTemps(filePath) {
+  const dir = path.dirname(filePath);
+  const prefix = `${path.basename(filePath)}.tmp-`;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - TEMP_ORPHAN_AGE_MS;
+  const own = `${prefix}${process.pid}`;
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || entry === own) continue;
+    const candidate = path.join(dir, entry);
+    try {
+      if (fs.statSync(candidate).mtimeMs < cutoff) fs.unlinkSync(candidate);
+    } catch {
+      // Racing another sweep, or not ours to remove — leave it.
+    }
+  }
+}
+
 async function openDatabase(filePath, options = {}) {
   const drv = await initDriver();
+  if (filePath && !options.readonly) sweepOrphanTemps(filePath);
 
   let db;
   let diskVersion = null;
