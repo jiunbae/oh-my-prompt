@@ -6,6 +6,9 @@
 - 검색(FTS5)과 인사이트 계산에 필요한 최소 구조 제공
 
 ## 기본 설정
+- 현재 배포 드라이버는 빌드 도구가 필요 없는 `sql.js`이므로 아래 WAL
+  설정은 적용되지 않는다. 배경과 네이티브 드라이버 복귀 조건은
+  [`ADR-0001`](../decisions/0001-local-sqlite-driver.md)을 참고한다.
 - `PRAGMA journal_mode = WAL;`
 - `PRAGMA synchronous = NORMAL;`
 - `PRAGMA foreign_keys = ON;`

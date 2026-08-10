@@ -370,11 +370,16 @@ describe("syncToServer", () => {
         }), config);
       }
 
+      const renameSpy = vi.spyOn(fs, "renameSync");
       await expect(syncToServer(config, { chunkSize: 1 })).rejects.toThrow("Rate limited");
+      const rewrites = renameSpy.mock.calls.filter(([, dest]) => dest === dbPath).length;
+      renameSpy.mockRestore();
 
       // Chunk 1 was accepted, so its checkpoint survives the failure of chunk 2.
       const checkpoint = await getSyncState(config);
       expect(checkpoint.lastSyncedAt).toBe(first);
+      // The accepted checkpoint and failed sync log share one transaction.
+      expect(rewrites).toBe(1);
     } finally {
       server.close();
     }
@@ -760,12 +765,18 @@ describe("syncToServer", () => {
       );
 
       received.length = 0;
+      const noOpRenameSpy = vi.spyOn(fs, "renameSync");
       const repeated = await syncToServer(config, {
         maxRowsPerPage: 2,
         chunkSize: 2,
       });
+      const noOpRewrites = noOpRenameSpy.mock.calls.filter(
+        ([, dest]) => dest === dbPath
+      ).length;
+      noOpRenameSpy.mockRestore();
       expect(repeated.uploaded).toBe(0);
       expect(received).toHaveLength(0);
+      expect(noOpRewrites).toBe(0);
     } finally {
       server.close();
     }
@@ -821,8 +832,8 @@ describe("syncToServer", () => {
       renameSpy.mockRestore();
 
       expect(result.uploaded).toBe(5);
-      // One sync-log start, one page checkpoint, one sync-log finish.
-      expect(rewrites).toBe(3);
+      // The final checkpoint and completed sync log share one transaction.
+      expect(rewrites).toBe(1);
     } finally {
       server.close();
     }

@@ -1,6 +1,11 @@
 const http = require("http");
 const https = require("https");
-const { createSyncLog, finishSyncLog, updateSyncState, getDeviceId, withDatabaseOperation } = require("./sync-log");
+const {
+  createSyncRun,
+  persistSyncRun,
+  getDeviceId,
+  withDatabaseOperation,
+} = require("./sync-log");
 const { postprocessUploadRecord } = require("./upload-postprocess");
 
 // The server upload schema rejects records with more than 1000 tool
@@ -477,14 +482,14 @@ async function syncToServer(config, options = {}) {
     ),
   };
 
-  const logId = await createSyncLog(config, since, "server");
+  const syncRun = createSyncRun(config, since, "server");
   const uploadUrl = `${serverUrl.replace(/\/$/, "")}/api/sync/upload`;
   const headers = { "X-User-Token": serverToken };
 
-  // Stage the checkpoint after every accepted chunk, then persist it once per
-  // fetched page (and once on failure). updateSyncState rewrites the entire
-  // sql.js database, so persisting every 200-record request would reintroduce
-  // severe write amplification. A retry may resend at most one in-flight page,
+  // Stage the checkpoint after every accepted chunk, then persist intermediate
+  // pages once each. The final checkpoint and sync-log result share one SQL
+  // transaction, so the common one-page sync rewrites the sql.js database once
+  // instead of three times. A retry may resend at most one in-flight page,
   // which is safe because the server deduplicates event ids.
   //
   // Only ever move forward. The cursor follows each row's effective mutation
@@ -511,17 +516,24 @@ async function syncToServer(config, options = {}) {
     checkpointId = row.id;
   }
 
-  async function persistCheckpoint() {
-    if (options.dryRun || !checkpointAt) return;
-    if (
-      checkpointAt === persistedCheckpointAt &&
-      checkpointId === persistedCheckpointId
-    ) {
-      return;
+  async function persistRun(status, errorMessage = null) {
+    if (options.dryRun) return;
+    const persistCheckpoint = Boolean(checkpointAt) && (
+      checkpointAt !== persistedCheckpointAt || checkpointId !== persistedCheckpointId
+    );
+    await persistSyncRun(config, syncRun, {
+      status,
+      errorMessage,
+      filesUploaded: chunks,
+      recordsUploaded: totalAccepted,
+      persistCheckpoint,
+      lastSyncedAt: checkpointAt,
+      lastSyncedId: checkpointId,
+    });
+    if (persistCheckpoint) {
+      persistedCheckpointAt = checkpointAt;
+      persistedCheckpointId = checkpointId;
     }
-    await updateSyncState(config, checkpointAt, checkpointId);
-    persistedCheckpointAt = checkpointAt;
-    persistedCheckpointId = checkpointId;
   }
 
   function failFromStatus(status, body) {
@@ -628,17 +640,21 @@ async function syncToServer(config, options = {}) {
         }
       }
 
-      await persistCheckpoint();
       if (rows.length < pageRows) break;
       const lastScanned = rows[rows.length - 1];
-      page = await fetchPage(
+      const nextPage = await fetchPage(
         { syncAt: lastScanned.sync_at, id: lastScanned.id },
         stableCursor
       );
-      if (page.rows.length === 0) break;
+      if (nextPage.rows.length === 0) break;
+      // Intermediate pages preserve durable progress. The final page is
+      // committed together with the completed log below, so a one-page sync
+      // needs exactly one full-database rewrite.
+      await persistRun("running");
+      page = nextPage;
     }
 
-    await finishSyncLog(config, logId, "success", null, chunks, totalAccepted);
+    await persistRun("success");
     return {
       uploaded: totalAccepted,
       duplicates: totalDuplicates,
@@ -652,21 +668,13 @@ async function syncToServer(config, options = {}) {
   } catch (error) {
     let finalError = error;
     try {
-      await persistCheckpoint();
-    } catch (checkpointError) {
+      await persistRun("failed", error.message || "unknown");
+    } catch (persistError) {
       finalError = new Error(
-        `${error.message || "Sync failed"}; additionally failed to persist the accepted checkpoint: ` +
-        `${checkpointError.message || "unknown error"}`
+        `${error.message || "Sync failed"}; additionally failed to persist sync progress: ` +
+          `${persistError.message || "unknown error"}`
       );
     }
-    await finishSyncLog(
-      config,
-      logId,
-      "failed",
-      finalError.message || "unknown",
-      chunks,
-      totalAccepted
-    );
     throw finalError;
   }
 }

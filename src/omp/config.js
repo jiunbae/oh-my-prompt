@@ -40,7 +40,9 @@ function defaultConfig() {
       enabled: false,
       auto: false,
       debounce: 30,
-      interval: 300,
+      // OS file events trigger normal syncs; this is only a missed-event and
+      // network-recovery safety interval.
+      interval: 3600,
       retries: 3,
       retryBaseDelay: 1000,
       // Server allows 100 req/min per user; stay under it and wait out any 429
