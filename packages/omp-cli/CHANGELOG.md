@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.810.1] - 2026-08-10
+
+### Performance
+- Capture no longer rewrites the whole database several times per turn. sql.js serialises the entire file on every save outside a transaction, and the `tool_invocations` insert loop did one save *per tool call* — a single agentic turn could write hundreds of gigabytes and hold the ingest lock for minutes. The prompt, FTS mirror, response, and every tool invocation now share one atomic transaction: 42 full-file rewrites for a 40-tool turn became exactly 1, unchanged duplicate captures perform no rewrite, and a 200-tool capture went from ~9 minutes to 18.6s on a 285MB database
+- `transaction()` now honours batch mode instead of forcing a save, so the above does not make `omp backfill` persist once per file
+- `omp ingest --replay` took the lock and reopened the database for every queued payload — roughly 55 items/hour, starving `omp backfill` and `omp sync` of the lock throughout. It now takes the lock once and keeps a single handle in batch mode: a 2141-item queue went from an estimated 39 hours to 1m27s
+- `omp sync` no longer loads the entire prompts table into memory when it has no checkpoint (a fresh device, or the cursor reset after a backfill). Rows are fetched 2000 at a time and the lock is released between pages. A separate keyset scan cursor ensures historical rows updated after the checkpoint cannot fill the first page and permanently starve later rows; dry runs now traverse every page too
+- Sync loads at most the server-supported tool-invocation limit plus one marker row per prompt instead of materialising an unbounded tool history only to truncate it before upload
+- Sync checkpoints follow the later of a prompt's creation or response-update time, so late responses upload once instead of being re-sent on every run. Checkpoints are persisted once per fetched page (and on failure) rather than once per HTTP chunk, avoiding repeated full-database rewrites while preserving accepted progress
+- Index `prompts(updated_at)` (migration v11). Incremental sync selects on it to find rows whose response arrived after the checkpoint, but every existing index covered `created_at`, so that arm of the query scanned the table
+
+### Fixed
+- `omp backfill` released the database lock between each of its four sources, so a hook-spawned `omp ingest` could claim it in a gap and fail the rest of the run with `OMP_DB_BUSY`. One session is now held for the whole run
+- Separate the lock-acquisition deadline by caller. Hooks still give up after 10s and queue the payload, because the editor is blocked on them; `omp backfill` and `omp sync` now wait up to 15 minutes and report what they are waiting on, instead of failing while capture is simply busy
+- Delete a replayed queue file only after its rows are flushed to disk. The previous order could lose payloads if the process died between the in-memory write and the flush
+- Sweep abandoned `omp.db.tmp-<pid>` files. A writer killed mid-save never reaches its own cleanup, and each leftover is as large as the database; 63 had accumulated to 9.0GB. Files are judged by age rather than whether their PID is alive, because PIDs get recycled
+- Clear a stale `OMP_DB_BUSY` status after the ingest queue drains successfully, and have `omp doctor` derive its latest migration version from the database migration registry instead of reporting the obsolete hard-coded v4
+
 ## [2026.805.4] - 2026-08-05
 
 ### Fixed

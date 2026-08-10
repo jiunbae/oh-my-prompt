@@ -20,14 +20,42 @@ function sleep(ms) {
 // proceeding with an unlocked last-writer-wins update.
 const INGEST_LOCK = { name: "database-operation.lock", ttlMs: 60 * 1000 };
 
-async function acquireIngestLock() {
-  const deadline = Date.now() + 10 * 1000;
+// A hook has to hand control back to the editor, so it waits briefly and then
+// queues the payload for later. User-initiated commands have no such deadline
+// and should wait instead of failing: one `omp ingest` legitimately holds the
+// lock for minutes on a large database (sql.js rewrites the whole file on every
+// save), so a 10s ceiling makes `omp backfill` / `omp sync` report OMP_DB_BUSY
+// when the only problem is that capture is busy doing its job.
+const SHORT_LOCK_WAIT_MS = 10 * 1000;
+const LONG_LOCK_WAIT_MS = 15 * 60 * 1000;
+
+// Each flush rewrites the whole database, so batch the replay. Small enough
+// that a crash costs at most this many queue files' worth of re-work.
+const REPLAY_FLUSH_EVERY_FILES = 100;
+
+async function acquireIngestLock(options = {}) {
+  const waitMs = options.waitMs ?? SHORT_LOCK_WAIT_MS;
+  const deadline = Date.now() + waitMs;
+  let notified = false;
   for (;;) {
     const lock = acquireSyncLock({ name: INGEST_LOCK.name, ttlMs: INGEST_LOCK.ttlMs });
     if (lock.ok) return lock;
     if (Date.now() >= deadline) return lock;
+    if (options.onWait && !notified) {
+      notified = true;
+      options.onWait(lock.lockInfo);
+    }
     await sleep(40 + Math.floor(Math.random() * 60));
   }
+}
+
+// Waiting silently for minutes looks like a hang, so say who we are waiting on.
+function reportLockWait(label) {
+  return (lockInfo) => {
+    if (!process.stderr.isTTY) return;
+    const owner = lockInfo?.pid ? ` (held by pid ${lockInfo.pid})` : "";
+    process.stderr.write(`${label}: waiting for the local database${owner}...\n`);
+  };
 }
 
 function parsePayload(raw) {
@@ -197,6 +225,16 @@ function insertToolInvocations(db, tools, promptId, record, redactOptions) {
       input_json = excluded.input_json,
       program = excluded.program,
       cwd = excluded.cwd
+    -- Skip the update when it would write back identical values. DO UPDATE
+    -- always counts as a modified row, which marks the transaction dirty and
+    -- costs a full-database rewrite — and re-ingesting the same tool-bearing
+    -- turn is the common case (a Stop hook resending its tools, replay,
+    -- backfill). IS NOT rather than <> so NULL columns compare correctly.
+    WHERE tool_invocations.prompt_id IS NOT COALESCE(tool_invocations.prompt_id, excluded.prompt_id)
+       OR tool_invocations.sequence IS NOT excluded.sequence
+       OR tool_invocations.input_json IS NOT excluded.input_json
+       OR tool_invocations.program IS NOT excluded.program
+       OR tool_invocations.cwd IS NOT excluded.cwd
   `);
   for (const t of tools) {
     if (!t || !t.tool_use_id || !t.tool_name) continue;
@@ -286,6 +324,129 @@ function updatePromptWithResponse(db, promptId, responseText, tokenEstimate, wor
   ftsUpdateResponse(db, promptId, responseText);
 }
 
+// Keep every mutation for one captured turn in one SQL transaction. Besides
+// making the prompt, FTS mirror, response, and tool rows atomic, this is also
+// the persistence boundary for sql.js: DatabaseWrapper saves once after the
+// outer transaction instead of serialising the full database once per helper.
+function persistPayload(db, payload, record, toolRedact) {
+  if (record.role === "assistant" && record.session_id) {
+    let row = null;
+
+    // Precise match: use user_prompt_text content hash when available.
+    if (payload.user_prompt_text) {
+      const hash = hashContent(payload.user_prompt_text);
+      row = db
+        .prepare(
+          `SELECT id, prompt_text FROM prompts
+           WHERE session_id = ? AND role = 'user' AND content_hash = ?
+           LIMIT 1`
+        )
+        .get(record.session_id, hash);
+    }
+
+    // Fallback: match oldest unmatched user prompt in the session.
+    if (!row) {
+      row = db
+        .prepare(
+          `SELECT id, prompt_text FROM prompts
+           WHERE session_id = ? AND role = 'user' AND response_text IS NULL
+           ORDER BY created_at ASC LIMIT 1`
+        )
+        .get(record.session_id);
+    }
+
+    if (row) {
+      const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
+      if (record.capture_response === 1 && record.prompt_text) {
+        updatePromptWithResponse(
+          db,
+          row.id,
+          record.prompt_text,
+          record.token_estimate,
+          record.word_count
+        );
+      }
+      if (hasTools) {
+        insertToolInvocations(db, payload.tools, row.id, record, toolRedact);
+      }
+      if (record.prompt_text || hasTools) {
+        return {
+          result: { ok: true, id: row.id, updated: true },
+          lastCapture: record.prompt_text ? record.created_at : null,
+          touch: true,
+        };
+      }
+    }
+  }
+
+  // Content-based dedup: catch duplicates from different sources (hooks vs
+  // backfill) that have different event_ids but identical content within the
+  // same session. turn_index keeps genuinely repeated turns distinct.
+  if (record.session_id && record.content_hash) {
+    const contentDup = db
+      .prepare(
+        `SELECT id, response_text FROM prompts
+         WHERE session_id = ? AND role = ? AND content_hash = ?
+           AND (turn_index IS ? OR turn_index IS NULL OR ? IS NULL)
+         LIMIT 1`
+      )
+      .get(record.session_id, record.role, record.content_hash, record.turn_index, record.turn_index);
+    if (contentDup) {
+      insertToolInvocations(db, payload.tools, contentDup.id, record, toolRedact);
+      if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
+        updatePromptWithResponse(
+          db,
+          contentDup.id,
+          record.response_text,
+          record.token_estimate_response,
+          record.word_count_response
+        );
+        return {
+          result: { ok: true, id: contentDup.id, updated: true, deduped: true },
+          touch: true,
+        };
+      }
+      return {
+        result: { ok: true, id: contentDup.id, updated: false, deduped: true },
+      };
+    }
+  }
+
+  const insertResult = insertPrompt(db, record);
+  if (insertResult.changes === 0) {
+    const existing = db
+      .prepare("SELECT id, response_text FROM prompts WHERE event_id = ? LIMIT 1")
+      .get(record.event_id);
+    // FK is ON DELETE CASCADE; pass null prompt_id if there is no real row to
+    // point at, otherwise this would violate the foreign key.
+    const existingId = existing?.id || record.id;
+    insertToolInvocations(db, payload.tools, existing?.id || null, record, toolRedact);
+    if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
+      updatePromptWithResponse(
+        db,
+        existing.id,
+        record.response_text,
+        record.token_estimate_response,
+        record.word_count_response
+      );
+      return {
+        result: { ok: true, id: existing.id, updated: true, deduped: true },
+        touch: true,
+      };
+    }
+    return {
+      result: { ok: true, id: existingId, updated: false, deduped: true },
+    };
+  }
+
+  insertToolInvocations(db, payload.tools, record.id, record, toolRedact);
+  return {
+    result: { ok: true, id: record.id, updated: false },
+    lastCapture: record.created_at,
+    touch: true,
+  };
+}
+
 async function ingestPayload(rawPayload, config, options = {}) {
   const payload = typeof rawPayload === "string" ? parsePayload(rawPayload) : rawPayload;
   if (!payload) {
@@ -318,117 +479,12 @@ async function ingestPayload(rawPayload, config, options = {}) {
   try {
     db = db || await openDb(config.storage.sqlite.path);
     const record = normalizePayload(payload, config);
-    if (record.role === "assistant" && record.session_id) {
-      let row = null;
-
-      // Precise match: use user_prompt_text content hash when available
-      // This correctly pairs responses with their exact user prompt
-      if (payload.user_prompt_text) {
-        const hash = hashContent(payload.user_prompt_text);
-        row = db
-          .prepare(
-            `SELECT id, prompt_text FROM prompts
-             WHERE session_id = ? AND role = 'user' AND content_hash = ?
-             LIMIT 1`
-          )
-          .get(record.session_id, hash);
-      }
-
-      // Fallback: match oldest unmatched user prompt in the session
-      if (!row) {
-        row = db
-          .prepare(
-            `SELECT id, prompt_text FROM prompts
-             WHERE session_id = ? AND role = 'user' AND response_text IS NULL
-             ORDER BY created_at ASC LIMIT 1`
-          )
-          .get(record.session_id);
-      }
-
-      if (row) {
-        const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
-        if (record.capture_response === 1 && record.prompt_text) {
-          updatePromptWithResponse(
-            db,
-            row.id,
-            record.prompt_text,
-            record.token_estimate,
-            record.word_count
-          );
-        }
-        if (hasTools) {
-          insertToolInvocations(db, payload.tools, row.id, record, toolRedact);
-        }
-        if (record.prompt_text || hasTools) {
-          if (record.prompt_text) updateState({ lastCapture: record.created_at });
-          touchTrigger();
-          return { ok: true, id: row.id, updated: true };
-        }
-      }
-    }
-
-    // Content-based dedup: catch duplicates from different sources (hooks vs backfill)
-    // that have different event_ids but identical content within the same session.
-    //
-    // turn_index makes this per-turn precise: two rows are treated as the same
-    // only when their turn indices match, OR when either side has no turn index
-    // (null). That keeps cross-source dedup working (a hook row with null
-    // turn_index still dedups against a backfill row that carries one) while
-    // preserving genuinely distinct turns with identical text (e.g. repeated
-    // "continue"), which carry different non-null turn indices.
-    if (record.session_id && record.content_hash) {
-      const contentDup = db
-        .prepare(
-          `SELECT id, response_text FROM prompts
-           WHERE session_id = ? AND role = ? AND content_hash = ?
-             AND (turn_index IS ? OR turn_index IS NULL OR ? IS NULL)
-           LIMIT 1`
-        )
-        .get(record.session_id, record.role, record.content_hash, record.turn_index, record.turn_index);
-      if (contentDup) {
-        insertToolInvocations(db, payload.tools, contentDup.id, record, toolRedact);
-        if (!contentDup.response_text && record.response_text && record.capture_response === 1) {
-          updatePromptWithResponse(
-            db,
-            contentDup.id,
-            record.response_text,
-            record.token_estimate_response,
-            record.word_count_response
-          );
-          touchTrigger();
-          return { ok: true, id: contentDup.id, updated: true, deduped: true };
-        }
-        return { ok: true, id: contentDup.id, updated: false, deduped: true };
-      }
-    }
-
-    const insertResult = insertPrompt(db, record);
-    if (insertResult.changes === 0) {
-      const existing = db
-        .prepare("SELECT id, response_text FROM prompts WHERE event_id = ? LIMIT 1")
-        .get(record.event_id);
-      // FK is ON DELETE CASCADE; pass null prompt_id if we have no real row to point at,
-      // otherwise we'd hit a foreign-key violation under PRAGMA foreign_keys=ON.
-      const existingId = existing?.id || record.id;
-      insertToolInvocations(db, payload.tools, existing?.id || null, record, toolRedact);
-      // Update response_text on existing record if it's missing and the new payload has it
-      if (existing && !existing.response_text && record.response_text && record.capture_response === 1) {
-        updatePromptWithResponse(
-          db,
-          existing.id,
-          record.response_text,
-          record.token_estimate_response,
-          record.word_count_response
-        );
-        touchTrigger();
-        return { ok: true, id: existing.id, updated: true, deduped: true };
-      }
-      return { ok: true, id: existingId, updated: false, deduped: true };
-    }
-    insertToolInvocations(db, payload.tools, record.id, record, toolRedact);
-    updateState({ lastCapture: record.created_at });
-    touchTrigger();
-    return { ok: true, id: record.id, updated: false };
+    const outcome = db.transaction(() =>
+      persistPayload(db, payload, record, toolRedact)
+    )();
+    if (outcome.lastCapture) updateState({ lastCapture: outcome.lastCapture });
+    if (outcome.touch) touchTrigger();
+    return outcome.result;
   } catch (error) {
     const queuedPayload =
       config.capture?.redact?.enabled
@@ -460,35 +516,100 @@ async function replayQueue(config) {
   let processed = 0;
   let failed = 0;
 
-  for (const file of files) {
-    const filepath = path.join(queueDir, file);
-    let lines;
-    try {
-      lines = fs.readFileSync(filepath, "utf-8").split("\n").filter(Boolean);
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    let fileFailed = false;
+  if (files.length === 0) {
+    return { processed, failed };
+  }
 
-    for (const line of lines) {
-      // The source queue file remains in place on failure; do not create a
-      // second copy of the same payload on every replay attempt.
-      const result = await ingestPayload(line, config, { queueOnFailure: false });
-      if (result.ok) {
-        processed += 1;
-      } else {
-        failed += 1;
-        fileFailed = true;
+  // Replaying used to hand each payload to ingestPayload without a handle, so
+  // every queued item reopened the database, took the lock, and rewrote the
+  // whole file. A backlog of a few thousand items therefore took hours and
+  // starved backfill/sync of the lock the entire time. Take the lock once, keep
+  // one handle in batch mode, and persist in batches instead.
+  const lock = await acquireIngestLock({
+    waitMs: LONG_LOCK_WAIT_MS,
+    onWait: reportLockWait("replay"),
+  });
+  if (!lock.ok) {
+    return { processed, failed, error: "Local database is busy" };
+  }
+
+  let db;
+  try {
+    db = await openDb(config.storage.sqlite.path);
+  } catch (error) {
+    // Unusable database: nothing can be replayed, so leave every queue file in
+    // place and report the payloads as failed, exactly as the per-payload path
+    // used to when each open threw on its own.
+    releaseSyncLock(lock.lockPath);
+    for (const file of files) {
+      try {
+        failed += fs
+          .readFileSync(path.join(queueDir, file), "utf-8")
+          .split("\n")
+          .filter(Boolean).length;
+      } catch {
+        // Vanished between the listing and now — nothing to count.
       }
     }
+    updateState({ lastError: error.message || "Failed to open database" });
+    return { processed, failed, error: error.message || "Failed to open database" };
+  }
+  db.setBatchMode(true);
 
-    if (!fileFailed) {
+  // A queue file may only be deleted once its rows are durable on disk —
+  // otherwise a crash between the in-memory write and the flush loses them.
+  let pendingDeletes = [];
+  const persistAndDrop = () => {
+    if (pendingDeletes.length === 0) return;
+    db.flush();
+    for (const p of pendingDeletes) {
       try {
-        fs.unlinkSync(filepath);
+        fs.unlinkSync(p);
       } catch (error) {
         if (error.code !== "ENOENT") throw error;
       }
+    }
+    pendingDeletes = [];
+  };
+
+  try {
+    for (const file of files) {
+      const filepath = path.join(queueDir, file);
+      let lines;
+      try {
+        lines = fs.readFileSync(filepath, "utf-8").split("\n").filter(Boolean);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      let fileFailed = false;
+
+      for (const line of lines) {
+        // The source queue file remains in place on failure; do not create a
+        // second copy of the same payload on every replay attempt.
+        const result = await ingestPayload(line, config, {
+          queueOnFailure: false,
+          db,
+        });
+        if (result.ok) {
+          processed += 1;
+        } else {
+          failed += 1;
+          fileFailed = true;
+        }
+      }
+
+      if (!fileFailed) {
+        pendingDeletes.push(filepath);
+        if (pendingDeletes.length >= REPLAY_FLUSH_EVERY_FILES) persistAndDrop();
+      }
+    }
+    persistAndDrop();
+  } finally {
+    try {
+      db.close();
+    } finally {
+      releaseSyncLock(lock.lockPath);
     }
   }
 
@@ -496,6 +617,9 @@ async function replayQueue(config) {
   updateState({
     queueCount: queueStats.count,
     queueBytes: queueStats.bytes,
+    // A successful drain resolves the previous OMP_DB_BUSY condition; keeping
+    // that stale error makes `omp status` claim capture is still unhealthy.
+    ...(failed === 0 ? { lastError: null } : {}),
     lastReplay: {
       processed,
       failed,
@@ -509,4 +633,7 @@ module.exports = {
   ingestPayload,
   replayQueue,
   acquireIngestLock,
+  reportLockWait,
+  SHORT_LOCK_WAIT_MS,
+  LONG_LOCK_WAIT_MS,
 };

@@ -104,8 +104,12 @@ class StatementWrapper {
       this._db.run(this._sql);
     }
     const changes = this._db.getRowsModified();
-    // Auto-save after writes (outside transactions, not in batch mode)
-    if (!this._wrapper._inTransaction) {
+    // Auto-save after writes (outside transactions, not in batch mode). A
+    // transaction tracks whether anything actually changed so a read-only
+    // transaction or INSERT ... DO NOTHING does not rewrite the whole file.
+    if (this._wrapper._inTransaction) {
+      if (changes > 0) this._wrapper._transactionDirty = true;
+    } else {
       if (this._wrapper._batchMode) {
         this._wrapper._batchDirty = true;
       } else {
@@ -157,6 +161,7 @@ class DatabaseWrapper {
     this._readonly = !!options.readonly;
     this._diskVersion = options.diskVersion ?? null;
     this._inTransaction = false;
+    this._transactionDirty = false;
     this._batchMode = false;
     this._batchDirty = false;
   }
@@ -184,7 +189,9 @@ class DatabaseWrapper {
 
   exec(sql) {
     this._db.exec(sql);
-    if (!this._inTransaction) {
+    if (this._inTransaction) {
+      this._transactionDirty = true;
+    } else {
       if (this._batchMode) {
         this._batchDirty = true;
       } else {
@@ -219,6 +226,7 @@ class DatabaseWrapper {
     const wrapper = function (...args) {
       self._db.run("BEGIN");
       self._inTransaction = true;
+      self._transactionDirty = false;
       let result;
       try {
         result = fn.apply(this, args);
@@ -228,12 +236,24 @@ class DatabaseWrapper {
           self._db.run("ROLLBACK");
         } catch {}
         self._inTransaction = false;
+        self._transactionDirty = false;
         throw err;
       }
       self._inTransaction = false;
+      const dirty = self._transactionDirty;
+      self._transactionDirty = false;
       // Persist after leaving the SQL transaction. A disk-version conflict is
       // not a SQL rollback condition and must propagate with its original code.
-      self._save();
+      // Batch mode still wins: a caller that opted into deferring writes (e.g.
+      // backfill) must not get a full-file rewrite per transaction.
+      if (!dirty) {
+        return result;
+      }
+      if (self._batchMode) {
+        self._batchDirty = true;
+      } else {
+        self._save();
+      }
       return result;
     };
     return wrapper;
@@ -295,8 +315,42 @@ class DatabaseWrapper {
   }
 }
 
+// A writer killed mid-save (SIGKILL, OOM, a dead terminal) never reaches the
+// cleanup in _save's catch, leaving a full-size `omp.db.tmp-<pid>` behind. They
+// are never reclaimed otherwise and each one is as large as the database, so a
+// few dozen quietly cost gigabytes. Sweep them when opening for writing.
+//
+// Age, not liveness, decides: PIDs get recycled, so a live /proc/<pid> says
+// nothing about whether *this* process wrote the file. No legitimate save takes
+// an hour, so anything older than that is abandoned.
+const TEMP_ORPHAN_AGE_MS = 60 * 60 * 1000;
+
+function sweepOrphanTemps(filePath) {
+  const dir = path.dirname(filePath);
+  const prefix = `${path.basename(filePath)}.tmp-`;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - TEMP_ORPHAN_AGE_MS;
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || !/^\d+$/.test(entry.slice(prefix.length))) {
+      continue;
+    }
+    const candidate = path.join(dir, entry);
+    try {
+      if (fs.statSync(candidate).mtimeMs < cutoff) fs.unlinkSync(candidate);
+    } catch {
+      // Racing another sweep, or not ours to remove — leave it.
+    }
+  }
+}
+
 async function openDatabase(filePath, options = {}) {
   const drv = await initDriver();
+  if (filePath && !options.readonly) sweepOrphanTemps(filePath);
 
   let db;
   let diskVersion = null;

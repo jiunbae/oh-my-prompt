@@ -250,7 +250,21 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 11,
+    run: (db) => {
+      // Incremental sync selects on updated_at (rows whose response landed
+      // after the checkpoint), but every index covered created_at instead, so
+      // that arm of the query scanned the table on every run.
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_prompts_updated_at ON prompts(updated_at)"
+      );
+    },
+  },
 ];
+
+const LATEST_MIGRATION_VERSION =
+  MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;
 
 /**
  * FTS setup is intentionally skipped for sql.js.
@@ -348,4 +362,5 @@ module.exports = {
   nowIso,
   hashContent,
   getCurrentVersion,
+  LATEST_MIGRATION_VERSION,
 };

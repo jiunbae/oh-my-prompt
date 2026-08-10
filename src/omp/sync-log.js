@@ -1,11 +1,18 @@
 const crypto = require("crypto");
 const os = require("os");
 const { openDb, nowIso } = require("./db");
-const { acquireIngestLock } = require("./ingest");
+const {
+  acquireIngestLock,
+  reportLockWait,
+  LONG_LOCK_WAIT_MS,
+} = require("./ingest");
 const { releaseSyncLock } = require("./sync-lock");
 
 async function withDatabaseOperation(config, callback) {
-  const operationLock = await acquireIngestLock();
+  const operationLock = await acquireIngestLock({
+    waitMs: LONG_LOCK_WAIT_MS,
+    onWait: reportLockWait("sync"),
+  });
   if (!operationLock.ok) {
     const error = new Error("Local database is busy; sync will retry later");
     error.code = "OMP_DB_BUSY";
