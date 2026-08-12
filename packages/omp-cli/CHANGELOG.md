@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.812.1] - 2026-08-12
+
+### Fixed
+- Prevent Codex notify integrations from chaining an escaped, nested reference to OMP's own wrapper. Reinstalling also removes previously written self-referential chains, and the runtime wrapper caps same-event chain re-entry to prevent detached fork loops
+
 ## [2026.810.4] - 2026-08-10
 
 ### Added

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { createHash } = require("crypto");
 const { spawnSync } = require("child_process");
 const { pathToFileURL } = require("url");
 const {
@@ -229,8 +230,102 @@ describe("hooks", () => {
     });
   });
 
+  it("does not chain an escaped nested reference to its own codex wrapper", () => {
+    withTempEnv(({ codexHome }) => {
+      const codexConfigPath = path.join(codexHome, "config.toml");
+      const first = installCodexHook();
+      const escapedPreviousNotify = JSON.stringify([process.execPath, first.wrapperPath]).replace(
+        /\//g,
+        "\\/"
+      );
+      const externalNotify = [
+        "/Applications/SkyComputerUseClient",
+        "turn-ended",
+        "--previous-notify",
+        escapedPreviousNotify,
+      ];
+      const externalConfig = `notify = ${JSON.stringify(externalNotify)}\n`;
+      expect(externalConfig).not.toContain(first.wrapperPath);
+      fs.writeFileSync(codexConfigPath, externalConfig);
+
+      const second = installCodexHook();
+      expect(second.configured).toBe(true);
+      expect(second.conflict).toBe(false);
+      expect(second.merged).toBe(false);
+      expect(fs.readFileSync(codexConfigPath, "utf-8")).toBe(externalConfig);
+      expect(fs.existsSync(second.chainPath)).toBe(false);
+      expect(listHookStatus().codex).toBe(true);
+
+      uninstallCodexHook();
+    });
+  });
+
+  it("removes an existing self-referential codex notify chain on reinstall", () => {
+    withTempEnv(({ codexHome }) => {
+      const codexConfigPath = path.join(codexHome, "config.toml");
+      fs.writeFileSync(codexConfigPath, 'notify = ["/usr/bin/external-notify", "turn-ended"]\n');
+      const first = installCodexHook();
+      expect(first.merged).toBe(true);
+      expect(fs.existsSync(first.chainPath)).toBe(true);
+
+      fs.writeFileSync(
+        first.chainPath,
+        JSON.stringify({
+          original: [
+            "/Applications/SkyComputerUseClient",
+            "--previous-notify",
+            JSON.stringify([process.execPath, first.wrapperPath]).replace(/\//g, "\\/"),
+          ],
+        })
+      );
+
+      const second = installCodexHook();
+      expect(second.merged).toBe(false);
+      expect(fs.existsSync(second.chainPath)).toBe(false);
+
+      uninstallCodexHook();
+    });
+  });
+
+  it("stops the same codex notify event from re-entering through its chain", () => {
+    withTempEnv(({ root }) => {
+      const installResult = installCodexHook();
+      const chainedMarker = path.join(root, "reentered-chain");
+      fs.writeFileSync(
+        installResult.chainPath,
+        JSON.stringify({
+          original: [
+            process.execPath,
+            "-e",
+            `require("fs").writeFileSync(${JSON.stringify(chainedMarker)}, "ran")`,
+          ],
+        })
+      );
+
+      const raw = JSON.stringify({
+        type: "agent-turn-complete",
+        "thread-id": "thr-loop-guard",
+        "turn-id": "turn-loop-guard",
+      });
+      const chainEvent = createHash("sha256").update(raw).digest("hex");
+      const result = spawnSync(process.execPath, [installResult.wrapperPath, raw], {
+        env: {
+          ...process.env,
+          OMP_CODEX_NOTIFY_CHAIN_EVENT: chainEvent,
+          OMP_CODEX_NOTIFY_CHAIN_DEPTH: "1",
+        },
+        encoding: "utf-8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(fs.existsSync(chainedMarker)).toBe(false);
+
+      uninstallCodexHook();
+    });
+  });
+
   it("gemini hook script mines toolCalls from the chat session JSON and emits tools[]", () => {
-    withTempEnv(({ root, codexHome }) => {
+    withTempEnv(({ root }) => {
       const geminiHome = path.join(root, ".gemini");
       fs.mkdirSync(geminiHome, { recursive: true });
       const prevGeminiHome = process.env.GEMINI_HOME;
