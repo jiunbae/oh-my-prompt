@@ -459,6 +459,7 @@ function codexWrapperScript(chainPath, notifyScriptPath) {
   return `#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
+const { createHash } = require("crypto");
 const { spawn, spawnSync } = require("child_process");
 
 // Codex may spawn notify without a login-shell PATH (launched from a GUI, for
@@ -470,6 +471,17 @@ if (!process.env.OMP_BIN) process.env.OMP_BIN = path.join(nodeBin, "omp");
 
 const raw = process.argv[2];
 if (!raw) process.exit(0);
+
+// A malformed chain can point back to this wrapper. Mark detached descendants
+// with both the event and its depth so the same notification cannot recurse,
+// while a resident notifier can still deliver a later, different event.
+const chainEvent = createHash("sha256").update(raw).digest("hex");
+const inheritedDepth =
+  process.env.OMP_CODEX_NOTIFY_CHAIN_EVENT === chainEvent
+    ? Number.parseInt(process.env.OMP_CODEX_NOTIFY_CHAIN_DEPTH || "0", 10)
+    : 0;
+const chainDepth = Number.isFinite(inheritedDepth) && inheritedDepth > 0 ? inheritedDepth : 0;
+if (chainDepth >= 1) process.exit(0);
 
 let chain = null;
 try {
@@ -496,7 +508,15 @@ function runDetached(cmdSpec) {
     } else {
       return;
     }
-    const child = spawn(file, args, { stdio: "ignore", detached: true });
+    const child = spawn(file, args, {
+      stdio: "ignore",
+      detached: true,
+      env: {
+        ...process.env,
+        OMP_CODEX_NOTIFY_CHAIN_EVENT: chainEvent,
+        OMP_CODEX_NOTIFY_CHAIN_DEPTH: String(chainDepth + 1),
+      },
+    });
     child.on("error", () => {});
     child.unref();
   } catch (error) {
@@ -914,6 +934,81 @@ function buildNotifyLine(cmdArray) {
   return `[${arr.map((token) => JSON.stringify(String(token))).join(", ")}]`;
 }
 
+function normalizeEscapedSlashes(value) {
+  let normalized = value;
+  // Nested JSON command arguments can escape the same slash more than once.
+  // Peel one layer at a time without broadly interpreting shell escapes.
+  for (let depth = 0; depth < 8; depth += 1) {
+    const next = normalized.replace(/\\\//g, "/");
+    if (next === normalized) break;
+    normalized = next;
+  }
+  return normalized;
+}
+
+function notifySpecReferencesPaths(value, ownedPaths, depth = 0, seen = new Set()) {
+  if (depth > 8) return false;
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => notifySpecReferencesPaths(entry, ownedPaths, depth + 1, seen));
+  }
+  if (typeof value !== "string") return false;
+
+  const normalized = normalizeEscapedSlashes(value);
+  if (ownedPaths.some((ownedPath) => normalized.includes(ownedPath))) return true;
+
+  // Some integrations store the previous notify argv as a JSON string inside
+  // their own argv. Parse those strings recursively instead of inspecting only
+  // the outer TOML representation.
+  if (seen.has(value)) return false;
+  seen.add(value);
+  try {
+    const nested = JSON.parse(value);
+    if (nested !== value) {
+      return notifySpecReferencesPaths(nested, ownedPaths, depth + 1, seen);
+    }
+  } catch {
+    // Not JSON; the normalized string check above is sufficient.
+  }
+  return false;
+}
+
+function findDirectOwnedNotifyPath(value, ownedPaths) {
+  if (Array.isArray(value)) {
+    const executable =
+      typeof value[0] === "string" ? normalizeEscapedSlashes(value[0]) : "";
+    const executableMatch = ownedPaths.find((ownedPath) => executable === ownedPath);
+    if (executableMatch) return executableMatch;
+
+    const script = typeof value[1] === "string" ? normalizeEscapedSlashes(value[1]) : "";
+    const scriptMatch = ownedPaths.find((ownedPath) => script === ownedPath);
+    const interpreter = path.basename(executable).toLowerCase();
+    if (scriptMatch && (interpreter === "node" || interpreter === "node.exe")) {
+      return scriptMatch;
+    }
+    return null;
+  }
+  if (typeof value === "string") {
+    const normalized = normalizeEscapedSlashes(value);
+    return ownedPaths.find((ownedPath) => normalized.includes(ownedPath)) || null;
+  }
+  return null;
+}
+
+function removeSelfReferentialCodexChain(chainPath, ownedPaths) {
+  if (!fs.existsSync(chainPath)) return false;
+  try {
+    const chain = JSON.parse(fs.readFileSync(chainPath, "utf-8"));
+    if (chain && notifySpecReferencesPaths(chain.original, ownedPaths)) {
+      fs.unlinkSync(chainPath);
+      return true;
+    }
+  } catch {
+    // Leave unrelated malformed state untouched; the wrapper already ignores it.
+  }
+  return false;
+}
+
 function opencodePluginScript() {
   return `import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -1168,11 +1263,19 @@ function ensureCodexNotifyConfig(scriptPath, wrapperPath, chainPath) {
     return { configPath, configured: true, conflict: false, merged: false };
   }
 
-  if (info.line.includes(scriptPath) || info.line.includes(wrapperPath)) {
+  const parsed = parseTomlValue(info.value);
+  const ownedPaths = [scriptPath, wrapperPath];
+  const directOwnedPath = findDirectOwnedNotifyPath(parsed, ownedPaths);
+
+  // Repair chain files written by affected releases before considering the
+  // current notify value. Keeping one around would leave a latent runtime loop.
+  removeSelfReferentialCodexChain(chainPath, ownedPaths);
+
+  if (directOwnedPath) {
     // Already ours. Rewrite anyway when the interpreter drifted — earlier
     // installs wrote a bare "node", and re-pointing it must not re-chain the
     // line into notify-chain.json (that would nest the wrapper inside itself).
-    const desiredLine = info.line.includes(wrapperPath) ? wrapperLine : notifyLine;
+    const desiredLine = directOwnedPath === wrapperPath ? wrapperLine : notifyLine;
     if (info.value.trim() !== desiredLine) {
       const newContent = setTomlLine(content, notifyKey, desiredLine, OMP_MARKER);
       ensureDir(path.dirname(configPath));
@@ -1181,7 +1284,12 @@ function ensureCodexNotifyConfig(scriptPath, wrapperPath, chainPath) {
     return { configPath, configured: true, conflict: false, merged: false };
   }
 
-  const parsed = parseTomlValue(info.value);
+  // Another notifier may embed our previous argv as escaped JSON. It already
+  // reaches omp, so preserve that integration and never store it as our chain.
+  if (notifySpecReferencesPaths(parsed, ownedPaths)) {
+    return { configPath, configured: true, conflict: false, merged: false };
+  }
+
   const mergeable = Array.isArray(parsed) || (typeof parsed === "string" && parsed.trim());
   if (!mergeable) {
     return { configPath, configured: false, conflict: true, merged: false };
@@ -1212,10 +1320,17 @@ function restoreCodexNotifyConfig(scriptPath, wrapperPath, chainPath) {
     return { configPath, restored: false, removed: false };
   }
 
-  const isOurLine = info.line.includes(scriptPath) || info.line.includes(wrapperPath);
+  const ownedPaths = [scriptPath, wrapperPath];
+  const isOurLine = Boolean(
+    findDirectOwnedNotifyPath(parseTomlValue(info.value), ownedPaths)
+  );
   if (!isOurLine) {
     return { configPath, restored: false, removed: false };
   }
+
+  // An affected install may be uninstalled before it is reinstalled. Never
+  // restore a chain that points back to files this operation is removing.
+  removeSelfReferentialCodexChain(chainPath, ownedPaths);
 
   let restored = false;
   let removed = false;
@@ -1230,7 +1345,7 @@ function restoreCodexNotifyConfig(scriptPath, wrapperPath, chainPath) {
         content = setTomlLine(content, "notify", restoredLine, "");
         restored = true;
       }
-    } catch (error) {
+    } catch {
       // ignore
     }
   }
@@ -1380,7 +1495,10 @@ function listHookStatus() {
     if (info) {
       const scriptPath = getCodexNotifyScriptPath();
       const wrapperPath = getCodexWrapperScriptPath();
-      codexConfigured = info.line.includes(scriptPath) || info.line.includes(wrapperPath);
+      codexConfigured = notifySpecReferencesPaths(parseTomlValue(info.value), [
+        scriptPath,
+        wrapperPath,
+      ]);
     }
   }
 
