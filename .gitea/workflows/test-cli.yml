@@ -1,5 +1,11 @@
 name: Test CLI
 
+# GitHub Actions is retired for this repo. Gitea (jiunbae/oh-my-prompt) mirrors
+# GitHub on every push via webhook and runs CI on the jiun-mini runner, where
+# `ubuntu-latest` maps to catthehacker/ubuntu:act-latest.
+#
+# Mirrors are read-only, so `workflow_dispatch` is the only way to re-run.
+
 on:
   push:
     branches: [main]
@@ -7,8 +13,8 @@ on:
       - 'src/omp/**'
       - 'packages/omp-cli/**'
       - 'scripts/build-cli.sh'
-  pull_request:
-    branches: [main]
+      - '.gitea/workflows/test-cli.yml'
+  workflow_dispatch:
 
 jobs:
   test:
@@ -19,11 +25,13 @@ jobs:
         node-version: ['20', '22', '24']
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
