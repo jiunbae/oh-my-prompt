@@ -17,6 +17,9 @@ on:
       - "pnpm-workspace.yaml"
       - "next.config.ts"
       - "tsconfig.json"
+      - "eslint.config.mjs"
+      - "vitest.config.ts"
+      - "packages/**"
       - ".gitea/workflows/**"
 
 env:

@@ -1,0 +1,167 @@
+name: Publish CLI to npm
+
+# GitHub Actions is retired for this repo; publishing runs on Gitea instead.
+# Two differences from the old GitHub workflow are deliberate:
+#
+#   * `npm publish --provenance` is dropped. Provenance needs an OIDC token
+#     from GitHub's own attestation service, which Gitea Actions cannot mint.
+#   * The GitHub release is created with a plain api.github.com call using
+#     GH_RELEASE_TOKEN, because `secrets.GITHUB_TOKEN` on Gitea resolves to a
+#     *Gitea* token and would silently target the wrong host.
+#
+# Both npm publish and the GitHub release are skipped (not failed) when their
+# secret is absent, so the build half of this workflow stays useful on its own.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          if [ "$TAG_VERSION" = "$GITHUB_REF" ]; then
+            echo "This workflow must run on a v* tag; got '$GITHUB_REF'" >&2
+            exit 1
+          fi
+          echo "tag=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Convert date-based tag (YYYY.M.D.N) to semver (YYYY.MDD.N)
+          # e.g., 2026.2.9.1 → 2026.209.1
+          NPM_VERSION=$(echo "$TAG_VERSION" | node -e "
+            const parts = require('fs').readFileSync('/dev/stdin','utf8').trim().split('.');
+            if (parts.length === 4) {
+              const [y, m, d, n] = parts;
+              console.log(y + '.' + m + d.padStart(2,'0') + '.' + n);
+            } else {
+              console.log(parts.join('.'));
+            }
+          ")
+          echo "npm=$NPM_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG_VERSION → npm: $NPM_VERSION"
+
+      - name: Update package.json version
+        run: |
+          cd packages/omp-cli
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${{ steps.version.outputs.npm }}';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            console.log('Set version to ' + pkg.version);
+          "
+
+      - name: Build CLI package
+        run: |
+          chmod +x scripts/build-cli.sh
+          ./scripts/build-cli.sh
+
+      - name: Verify build
+        run: node packages/omp-cli/scripts/verify-build.js
+
+      - name: Create tarball (dry run)
+        run: |
+          cd packages/omp-cli
+          npm pack --dry-run
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_VERSION: ${{ steps.version.outputs.npm }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN secret not set on this Gitea repo; skipping npm publish."
+            exit 0
+          fi
+          # Granular npm tokens lack the user:read scope `npm whoami` needs, so
+          # write the authToken directly and let `npm publish` surface auth errors.
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+          echo "always-auth=true" >> ~/.npmrc
+
+          if npm view "oh-my-prompt@$NPM_VERSION" version >/dev/null 2>&1; then
+            echo "↩ skip oh-my-prompt@$NPM_VERSION (already on registry)"
+            exit 0
+          fi
+          cd packages/omp-cli
+          npm publish --access public
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+          TAG_VERSION: ${{ steps.version.outputs.tag }}
+          NPM_VERSION: ${{ steps.version.outputs.npm }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "GH_RELEASE_TOKEN secret not set on this Gitea repo; skipping GitHub release."
+            exit 0
+          fi
+          REPO="jiunbae/oh-my-prompt"
+          TAG="v$TAG_VERSION"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf -- "$TMP"' EXIT
+
+          LOOKUP_STATUS="$(curl --silent --show-error --location \
+            --output "$TMP/release.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$REPO/releases/tags/$TAG")"
+
+          if [ "$LOOKUP_STATUS" = 200 ]; then
+            echo "↩ release $TAG already exists; nothing to do."
+            exit 0
+          fi
+          if [ "$LOOKUP_STATUS" != 404 ]; then
+            echo "GitHub release lookup failed with HTTP $LOOKUP_STATUS" >&2
+            jq -r '.message // "Invalid JSON error response"' "$TMP/release.json" >&2 || true
+            exit 1
+          fi
+
+          BODY=$(printf '## Installation\n```bash\nnpm install -g oh-my-prompt@%s\n```\n\nnpm version: `%s`\n' \
+            "$NPM_VERSION" "$NPM_VERSION")
+          PAYLOAD="$(jq -nc --arg tag "$TAG" --arg name "$TAG_VERSION" --arg body "$BODY" \
+            '{tag_name:$tag,name:$name,body:$body,draft:false,prerelease:false}')"
+
+          CREATE_STATUS="$(curl --silent --show-error --location \
+            --output "$TMP/created.json" --write-out '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "https://api.github.com/repos/$REPO/releases")"
+          if [ "$CREATE_STATUS" != 201 ]; then
+            echo "GitHub release creation failed with HTTP $CREATE_STATUS" >&2
+            jq -r '.message // "Invalid JSON error response"' "$TMP/created.json" >&2 || true
+            exit 1
+          fi
+          jq -er '.html_url' "$TMP/created.json"
