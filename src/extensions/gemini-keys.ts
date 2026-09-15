@@ -12,9 +12,16 @@
  *    only once every free key is parked. Reaching it is a signal that the free
  *    pool ran dry, which is exactly what the usage dashboard is there to show.
  *
- * Labels are `key_1` through `key_6` for the free projects and `key_99` for the
- * paid one, matching Vault and what the jiun-api usage contract expects in
- * `apiKeyLabel`, so per-key quota is watchable without anyone holding a key.
+ * Labels are `free-1` through `free-6` for the free projects and `paid-1` for
+ * the paid one -- the vocabulary fixed by the jiun-api usage contract's
+ * "Label vocabulary" section, NOT the Vault field names and not our own
+ * internal naming. (`key_1`/`key_99` were the earlier form and are retired.)
+ *
+ * The labels have to be identical across services or the per-credential view
+ * splits one key into several Prometheus series, the same failure shape as
+ * spelling a provider two ways: "which key is near its limit" then has no
+ * answer. The `free-`/`paid-` split also reads directly on the dashboard --
+ * `paid-1` climbing means real money.
  *
  * This mirrors kongbu's rotation so the two services behave the same way.
  */
@@ -22,7 +29,7 @@
 import { logger } from "@/lib/logger";
 
 export interface GeminiKey {
-  /** Contract label (`key_1` … `key_6`, or `key_99`). Never the key itself. */
+  /** Contract label (`free-1` … `free-6`, or `paid-1`). Never the key itself. */
   label: string;
   apiKey: string;
   /** True for the paid key, which is only ever reached as a last resort. */
@@ -40,8 +47,9 @@ const state = new Map<string, KeyState>();
 
 /**
  * Parse the configured free keys. Order is meaningful: the first key is
- * `key_1`, matching the Vault naming, so a label always points at the same
- * credential across restarts and across services.
+ * `free-1`, so a label always points at the same credential across restarts
+ * and, as long as every service is given the keys in the same order, across
+ * services too.
  */
 export function getGeminiKeys(): GeminiKey[] {
   const raw = process.env.OMP_GEMINI_API_KEYS || "";
@@ -50,13 +58,13 @@ export function getGeminiKeys(): GeminiKey[] {
     .map((k) => k.trim())
     .filter(Boolean);
 
-  return keys.map((apiKey, i) => ({ label: `key_${i + 1}`, apiKey, isPaid: false }));
+  return keys.map((apiKey, i) => ({ label: `free-${i + 1}`, apiKey, isPaid: false }));
 }
 
-/** The paid key, or null when none is configured. Always labelled `key_99`. */
+/** The paid key, or null when none is configured. Always labelled `paid-1`. */
 export function getPaidGeminiKey(): GeminiKey | null {
   const apiKey = (process.env.OMP_GEMINI_API_KEY_PAID || "").trim();
-  return apiKey ? { label: "key_99", apiKey, isPaid: true } : null;
+  return apiKey ? { label: "paid-1", apiKey, isPaid: true } : null;
 }
 
 /** Round-robin cursor. Per process, which is enough — each pod spreads its own load. */

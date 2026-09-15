@@ -26,22 +26,22 @@ afterEach(() => {
 });
 
 describe("key labels", () => {
-  it("labels keys key_1..key_6 in configured order, matching Vault and the usage contract", () => {
+  it("labels keys free-1..free-6 in configured order, per the contract label vocabulary", () => {
     expect(getGeminiKeys().map((k) => k.label)).toEqual([
-      "key_1",
-      "key_2",
-      "key_3",
-      "key_4",
-      "key_5",
-      "key_6",
+      "free-1",
+      "free-2",
+      "free-3",
+      "free-4",
+      "free-5",
+      "free-6",
     ]);
   });
 
   it("ignores blanks and surrounding whitespace", () => {
     process.env.OMP_GEMINI_API_KEYS = " a , ,b ,";
     expect(getGeminiKeys()).toEqual([
-      { label: "key_1", apiKey: "a", isPaid: false },
-      { label: "key_2", apiKey: "b", isPaid: false },
+      { label: "free-1", apiKey: "a", isPaid: false },
+      { label: "free-2", apiKey: "b", isPaid: false },
     ]);
   });
 
@@ -54,20 +54,20 @@ describe("key labels", () => {
 
 describe("round robin", () => {
   it("starts each request on the next key so load spreads across projects", () => {
-    expect(availableKeys()[0].label).toBe("key_1");
-    expect(availableKeys()[0].label).toBe("key_2");
-    expect(availableKeys()[0].label).toBe("key_3");
+    expect(availableKeys()[0].label).toBe("free-1");
+    expect(availableKeys()[0].label).toBe("free-2");
+    expect(availableKeys()[0].label).toBe("free-3");
   });
 
   it("still offers every key as a fallback, in wrap-around order", () => {
-    availableKeys(); // advance past key_1
+    availableKeys(); // advance past free-1
     expect(availableKeys().map((k) => k.label)).toEqual([
-      "key_2",
-      "key_3",
-      "key_4",
-      "key_5",
-      "key_6",
-      "key_1",
+      "free-2",
+      "free-3",
+      "free-4",
+      "free-5",
+      "free-6",
+      "free-1",
     ]);
   });
 });
@@ -75,20 +75,20 @@ describe("round robin", () => {
 describe("parking a key after a 429", () => {
   it("parks a per-minute breach briefly, using the provider's retryDelay", () => {
     const now = Date.now();
-    parkKey("key_1", "GenerateRequestsPerMinutePerProjectPerModel", 30);
+    parkKey("free-1", "GenerateRequestsPerMinutePerProjectPerModel", 30);
 
-    expect(availableKeys(now).map((k) => k.label)).not.toContain("key_1");
+    expect(availableKeys(now).map((k) => k.label)).not.toContain("free-1");
     // Clears on its own well before the day is out.
-    expect(availableKeys(now + 40_000).map((k) => k.label)).toContain("key_1");
+    expect(availableKeys(now + 40_000).map((k) => k.label)).toContain("free-1");
   });
 
   it("parks a per-day breach until the Pacific reset, not for seconds", () => {
     const now = Date.now();
-    parkKey("key_2", "GenerateRequestsPerDayPerProjectPerModel", 30);
+    parkKey("free-2", "GenerateRequestsPerDayPerProjectPerModel", 30);
 
-    expect(availableKeys(now + 60_000).map((k) => k.label)).not.toContain("key_2");
+    expect(availableKeys(now + 60_000).map((k) => k.label)).not.toContain("free-2");
 
-    const status = poolStatus(now).find((s) => s.label === "key_2");
+    const status = poolStatus(now).find((s) => s.label === "free-2");
     expect(status?.available).toBe(false);
     expect(status?.reason).toBe("daily quota exhausted");
     // Somewhere within the next 24h, never a few seconds.
@@ -97,24 +97,24 @@ describe("parking a key after a 429", () => {
   });
 
   it("keeps the rest of the pool usable when one project is exhausted", () => {
-    parkKey("key_1", "GenerateRequestsPerDayPerProjectPerModel", null);
+    parkKey("free-1", "GenerateRequestsPerDayPerProjectPerModel", null);
     const labels = availableKeys().map((k) => k.label);
-    expect(labels).not.toContain("key_1");
+    expect(labels).not.toContain("free-1");
     expect(labels).toHaveLength(5);
   });
 
   it("empties the pool when every key is parked and no paid key is configured", () => {
-    for (const label of ["key_1", "key_2", "key_3", "key_4", "key_5", "key_6"]) {
+    for (const label of ["free-1", "free-2", "free-3", "free-4", "free-5", "free-6"]) {
       parkKey(label, "GenerateRequestsPerDayPerProjectPerModel", null);
     }
     expect(availableKeys()).toEqual([]);
   });
 
   it("releases a key once it serves a request again", () => {
-    parkKey("key_3", "GenerateRequestsPerMinutePerProjectPerModel", 600);
-    expect(availableKeys().map((k) => k.label)).not.toContain("key_3");
-    releaseKey("key_3");
-    expect(availableKeys().map((k) => k.label)).toContain("key_3");
+    parkKey("free-3", "GenerateRequestsPerMinutePerProjectPerModel", 600);
+    expect(availableKeys().map((k) => k.label)).not.toContain("free-3");
+    releaseKey("free-3");
+    expect(availableKeys().map((k) => k.label)).toContain("free-3");
   });
 });
 
@@ -144,8 +144,8 @@ describe("parsing Gemini 429 bodies", () => {
     // An unparseable body must not park a key until tomorrow.
     expect(parseQuotaError("<html>502</html>")).toEqual({ quotaId: "", retryDelaySec: null });
     const now = Date.now();
-    parkKey("key_4", "", null);
-    expect(poolStatus(now).find((s) => s.label === "key_4")?.reason).toBe("per-minute quota");
+    parkKey("free-4", "", null);
+    expect(poolStatus(now).find((s) => s.label === "free-4")?.reason).toBe("per-minute quota");
   });
 });
 
@@ -154,8 +154,8 @@ describe("paid key as last resort", () => {
     process.env.OMP_GEMINI_API_KEY_PAID = "paid";
   });
 
-  it("labels the paid key key_99, matching Vault and the dashboard", () => {
-    expect(getPaidGeminiKey()).toEqual({ label: "key_99", apiKey: "paid", isPaid: true });
+  it("labels the paid key paid-1, per the contract label vocabulary", () => {
+    expect(getPaidGeminiKey()).toEqual({ label: "paid-1", apiKey: "paid", isPaid: true });
   });
 
   it("is absent when not configured", () => {
@@ -165,30 +165,30 @@ describe("paid key as last resort", () => {
 
   it("is NOT offered while any free key is usable", () => {
     // This is the property that keeps the paid key from becoming a standing route.
-    for (const label of ["key_1", "key_2", "key_3", "key_4", "key_5"]) {
+    for (const label of ["free-1", "free-2", "free-3", "free-4", "free-5"]) {
       parkKey(label, "GenerateRequestsPerDayPerProjectPerModel", null);
     }
     const labels = availableKeys().map((k) => k.label);
-    expect(labels).toEqual(["key_6"]);
-    expect(labels).not.toContain("key_99");
+    expect(labels).toEqual(["free-6"]);
+    expect(labels).not.toContain("paid-1");
   });
 
   it("is offered only once every free key is parked", () => {
-    for (const label of ["key_1", "key_2", "key_3", "key_4", "key_5", "key_6"]) {
+    for (const label of ["free-1", "free-2", "free-3", "free-4", "free-5", "free-6"]) {
       parkKey(label, "GenerateRequestsPerDayPerProjectPerModel", null);
     }
-    expect(availableKeys().map((k) => k.label)).toEqual(["key_99"]);
+    expect(availableKeys().map((k) => k.label)).toEqual(["paid-1"]);
   });
 
   it("empties the pool when the paid key is parked too", () => {
-    for (const label of ["key_1", "key_2", "key_3", "key_4", "key_5", "key_6", "key_99"]) {
+    for (const label of ["free-1", "free-2", "free-3", "free-4", "free-5", "free-6", "paid-1"]) {
       parkKey(label, "GenerateRequestsPerDayPerProjectPerModel", null);
     }
     expect(availableKeys()).toEqual([]);
   });
 
   it("shows the paid key in the diagnostics snapshot", () => {
-    expect(poolStatus().map((s) => s.label)).toContain("key_99");
+    expect(poolStatus().map((s) => s.label)).toContain("paid-1");
   });
 });
 
@@ -208,5 +208,31 @@ describe("per-minute backoff", () => {
       expect(perMinuteBackoffMs(attempt, 600)).toBeLessThanOrEqual(MAX_PER_MINUTE_WAIT_MS);
       expect(perMinuteBackoffMs(attempt, null)).toBeLessThanOrEqual(MAX_PER_MINUTE_WAIT_MS);
     }
+  });
+});
+
+describe("labels satisfy the contract's validation rules", () => {
+  // The vocabulary is free-1..free-6 / paid-1. These must survive the same
+  // checks jiun-api applies, or a correct rotation would be 400'd away.
+  it("every emitted label passes validateApiKeyLabel", async () => {
+    process.env.OMP_GEMINI_API_KEY_PAID = "paid";
+    const { validateApiKeyLabel } = await import("@/lib/usage/contract");
+
+    for (const key of [...getGeminiKeys(), getPaidGeminiKey()!]) {
+      expect(validateApiKeyLabel(key.label)).toEqual({ label: key.label });
+    }
+  });
+
+  it("uses the contract vocabulary, not the retired key_N form", () => {
+    process.env.OMP_GEMINI_API_KEY_PAID = "paid";
+    expect(getGeminiKeys().map((k) => k.label)).toEqual([
+      "free-1",
+      "free-2",
+      "free-3",
+      "free-4",
+      "free-5",
+      "free-6",
+    ]);
+    expect(getPaidGeminiKey()!.label).toBe("paid-1");
   });
 });

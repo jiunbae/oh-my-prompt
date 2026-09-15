@@ -130,27 +130,40 @@ jitter (capped at 8s per wait, two retries) before the key is parked and the
 next project is tried — the quota is about to clear on its own, and spending
 another project's daily allowance on it would be waste.
 
-The paid key (`key_99`) is a **last resort, not a standing route**: it is only
+The paid key (`paid-1`) is a **last resort, not a standing route**: it is only
 offered once every free key is parked, and `availableKeys` enforces that. If it
 starts appearing in the aggregate, the free pool ran dry — which is precisely
-the signal this dashboard exists to surface.
+the signal this dashboard exists to surface, and it means real money.
 
-Each attempt reports the credential that served it as `apiKeyLabel` (`key_1` …
-`key_6`), which is what makes per-key quota readable on the dashboard. The 429s
-that get retried are reported too — they are real provider calls that consumed a
-quota slot, and omitting them would make the pool look healthier than it is.
+Each attempt reports the credential that served it as `apiKeyLabel` (`free-1` …
+`free-6`, `paid-1`), which is what makes per-key quota readable on the
+dashboard. The 429s that get retried are reported too — they are real provider
+calls that consumed a quota slot, and omitting them would make the pool look
+healthier than it is.
 
 A single `OMP_LLM_API_KEY` still works and is what a self-hosted install uses;
 the pool only engages when `OMP_GEMINI_API_KEYS` is set.
 
 ### Credential labels
 
-`JIUN_USAGE_API_KEY_LABEL` is a label such as `key_1`, matching the name in
-Vault. It must never be a key. The value is stored in MongoDB and exported as
+`apiKeyLabel` is a first-class contract field: the server validates it, it is an
+aggregation dimension, and it is exported as the Prometheus label `api_key`.
+
+The vocabulary is fixed by the contract's *Label vocabulary* section and is
+**not** the Vault field name or any service-local naming: `free-1` … `free-6`
+for the free Gemini keys, `paid-1` for the paid one. `key_1`/`key_99` were the
+earlier form and are retired — the server still accepts them so that a service
+that has not migrated does not lose already-consumed usage to a 400, but
+nothing new should send them. Two names for one key split it into several
+Prometheus series, the same failure shape as spelling a provider two ways.
+
+For the rotating pool the label comes from the key that actually served the
+request. `JIUN_USAGE_API_KEY_LABEL` remains as a static fallback for
+deployments with a single credential. It must never be a key. The value is stored in MongoDB and exported as
 the Prometheus `api_key` label, which puts it in front of everyone who can open
 a dashboard; a credential that arrived there could not be recalled from either.
 
-`validateApiKeyLabel` therefore refuses anything that is not 1–32 characters of
+`validateApiKeyLabel` refuses anything that is not 1–32 characters of
 lowercase letters, digits, underscore or hyphen, or that starts like a known
 credential (`AIza`, `sk-`, `ghp_`, `xoxb-`, `AKIA`, …). A rejected value is
 dropped, not sent, and never written to the log — it may be the credential.
