@@ -96,6 +96,11 @@ export interface RecordUsageInput {
   latencyMs?: number;
   /** The provider's own request ID, when the response carried one. */
   providerRequestId?: string | null;
+  /**
+   * Credential label for this specific call. Overrides the static
+   * JIUN_USAGE_API_KEY_LABEL, which cannot describe a rotating pool.
+   */
+  apiKeyLabel?: string;
   occurredAt?: Date;
 }
 
@@ -129,6 +134,21 @@ export async function recordUsage(input: RecordUsageInput): Promise<void> {
 
     const eventId = buildEventId(config.serviceId, input.providerRequestId);
 
+    // A per-call label wins over the static one, but is validated the same way:
+    // a rotating pool must not become a hole in the credential-shape check.
+    let apiKeyLabel = config.apiKeyLabel ?? null;
+    if (input.apiKeyLabel) {
+      const checked = validateApiKeyLabel(input.apiKeyLabel);
+      if (checked.label !== null) {
+        apiKeyLabel = checked.label;
+      } else {
+        logger.error(
+          { reason: checked.reason },
+          "Per-call apiKeyLabel rejected; falling back to the configured label"
+        );
+      }
+    }
+
     await db
       .insert(schema.llmUsageEvents)
       .values({
@@ -136,7 +156,7 @@ export async function recordUsage(input: RecordUsageInput): Promise<void> {
         occurredAt: input.occurredAt ?? new Date(),
         provider: input.provider,
         model: input.model,
-        apiKeyLabel: config.apiKeyLabel ?? null,
+        apiKeyLabel,
         inputTokens: input.tokens.inputTokens,
         outputTokens: input.tokens.outputTokens,
         cachedInputTokens: input.tokens.cachedInputTokens,

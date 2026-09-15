@@ -75,7 +75,7 @@ The service's own `OMP_LLM_PROVIDER` vocabulary is **not** the contract's.
 
 | `OMP_LLM_PROVIDER` | Reported `provider` |
 |---|---|
-| `gemini` | `google` |
+| `gemini` | `google` (model `gemini-3.5-flash-lite`) |
 | `azure` | `openai` |
 | `anthropic` | `anthropic` |
 | `openai` | `openai` |
@@ -112,6 +112,36 @@ Failed calls are reported with `status: "error"` and zero tokens: a non-2xx
 response body is not parsed for usage, and the contract accepts `0` for
 unavailable counts. The latency is still reported, which is the point — a
 failure that burned a quota slot is otherwise invisible.
+
+### Gemini key rotation
+
+Production runs `gemini-3.5-flash-lite` against six free keys, each on its own
+GCP project, so each carries an independent per-project quota for that model.
+`src/extensions/gemini-keys.ts` round-robins across them and parks a key when
+the provider says to:
+
+- a **per-minute** 429 parks the key for the `retryDelay` the response carried,
+  plus jitter;
+- a **per-day** 429 parks it until midnight America/Los_Angeles, because
+  retrying that project before the reset only burns latency.
+
+A per-minute breach is retried on the **same** key with exponential backoff and
+jitter (capped at 8s per wait, two retries) before the key is parked and the
+next project is tried — the quota is about to clear on its own, and spending
+another project's daily allowance on it would be waste.
+
+The paid key (`key_99`) is a **last resort, not a standing route**: it is only
+offered once every free key is parked, and `availableKeys` enforces that. If it
+starts appearing in the aggregate, the free pool ran dry — which is precisely
+the signal this dashboard exists to surface.
+
+Each attempt reports the credential that served it as `apiKeyLabel` (`key_1` …
+`key_6`), which is what makes per-key quota readable on the dashboard. The 429s
+that get retried are reported too — they are real provider calls that consumed a
+quota slot, and omitting them would make the pool look healthier than it is.
+
+A single `OMP_LLM_API_KEY` still works and is what a self-hosted install uses;
+the pool only engages when `OMP_GEMINI_API_KEYS` is set.
 
 ### Credential labels
 

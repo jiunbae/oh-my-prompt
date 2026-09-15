@@ -2,6 +2,16 @@ import type { LLMConfig } from "./types";
 import { logger } from "@/lib/logger";
 import { emptyTokens, resolveUsageProvider, toTokenCount, type UsageTokens } from "@/lib/usage/contract";
 import { recordUsage } from "@/lib/usage/report";
+import {
+  availableKeys,
+  getGeminiKeys,
+  getPaidGeminiKey,
+  parkKey,
+  parseQuotaError,
+  perMinuteBackoffMs,
+  releaseKey,
+  PER_MINUTE_RETRIES,
+} from "./gemini-keys";
 
 /**
  * Lightweight LLM client that supports multiple providers.
@@ -88,7 +98,9 @@ function getDefaultModel(provider: string): string {
     case "azure":
       return "gpt-4o-mini";
     case "gemini":
-      return "gemini-2.5-flash";
+      // The house standard (~/.agents/AI_API.md). Pinned to an exact stable ID
+      // rather than a -latest alias so the target never changes unannounced.
+      return "gemini-3.5-flash-lite";
     case "ollama":
       return "llama3.2";
     default:
@@ -125,6 +137,12 @@ interface LLMMessage {
  */
 interface ProviderUsage {
   tokens: UsageTokens;
+  /**
+   * Which credential served the request. With the Gemini pool rotating across
+   * six keys, a single static label would make per-key quota unreadable, which
+   * is the one thing `apiKeyLabel` exists for.
+   */
+  apiKeyLabel?: string;
   /**
    * The provider's own request ID. Used as the idempotency key so a retried
    * report lands on the same event instead of double-counting the call.
@@ -176,6 +194,7 @@ export async function callLLM(
       status: "success",
       latencyMs: Date.now() - startedAt,
       providerRequestId: response.usage?.providerRequestId,
+      apiKeyLabel: response.usage?.apiKeyLabel,
       occurredAt,
     });
 
@@ -190,6 +209,10 @@ export async function callLLM(
       tokens: emptyTokens(),
       status: "error",
       latencyMs: Date.now() - startedAt,
+      // Present when a rotating pool served the attempt, so a key that is
+      // failing shows up against that key rather than against the service.
+      apiKeyLabel:
+        error instanceof GeminiCallError ? error.apiKeyLabel : undefined,
       occurredAt,
     });
     throw error;
@@ -420,12 +443,135 @@ async function callAzureOpenAI(
 
 // ── Google Gemini ──────────────────────────────────────────────────
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Error carrying the credential label of the attempt that failed. */
+class GeminiCallError extends Error {
+  constructor(message: string, readonly apiKeyLabel?: string) {
+    super(message);
+    this.name = "GeminiCallError";
+  }
+}
+
+/** A 429 from Gemini, with the quota fields that decide how long to park the key. */
+class GeminiQuotaError extends Error {
+  constructor(
+    message: string,
+    readonly quotaId: string,
+    readonly retryDelaySec: number | null,
+  ) {
+    super(message);
+    this.name = "GeminiQuotaError";
+  }
+}
+
+/**
+ * Run a Gemini request against the free key pool.
+ *
+ * Each key is a separate GCP project with its own quota, so a 429 on one says
+ * nothing about the next. Intermediate 429s are reported here as their own
+ * usage events -- they are real provider calls that consumed a quota slot, and
+ * leaving them out would make the per-key picture look healthier than it is.
+ * The final attempt, success or failure, is reported by callLLM.
+ *
+ * The paid key is offered only after every free key is parked, so it is a last
+ * resort rather than a standing route: see gemini-keys.ts.
+ */
 async function callGemini(
   messages: LLMMessage[],
   cfg: LLMConfig,
 ): Promise<LLMResponse> {
+  const pool = availableKeys();
+
+  // A single OMP_LLM_API_KEY still works: that is what a self-hosted install
+  // has, and what every non-rotating provider uses.
+  if (pool.length === 0) {
+    if (cfg.apiKey) return callGeminiOnce(messages, cfg, cfg.apiKey, undefined);
+    const configured = getGeminiKeys().length + (getPaidGeminiKey() ? 1 : 0);
+    throw new GeminiCallError(
+      configured === 0
+        ? "No Gemini API key configured. Set OMP_GEMINI_API_KEYS or OMP_LLM_API_KEY."
+        : `All ${configured} Gemini keys are rate-limited, including the paid key.`,
+    );
+  }
+
+  let lastError: unknown;
+
+  for (let i = 0; i < pool.length; i++) {
+    const key = pool[i];
+    const isLast = i === pool.length - 1;
+    const startedAt = Date.now();
+    const occurredAt = new Date();
+
+    let quotaFailure: GeminiQuotaError | null = null;
+
+    // A per-minute breach clears in seconds, so the standard is to retry the
+    // SAME key with exponential backoff and jitter rather than burn a different
+    // project's daily quota on a problem that is about to resolve itself.
+    for (let attempt = 0; attempt <= PER_MINUTE_RETRIES; attempt++) {
+      try {
+        const response = await callGeminiOnce(messages, cfg, key.apiKey, key.label);
+        releaseKey(key.label);
+        return response;
+      } catch (error) {
+        lastError = error;
+
+        if (!(error instanceof GeminiQuotaError)) {
+          // Not a quota problem -- a bad request or a network fault will not be
+          // fixed by waiting, nor by trying another project's key.
+          throw error instanceof GeminiCallError
+            ? error
+            : new GeminiCallError(
+                error instanceof Error ? error.message : String(error),
+                key.label,
+              );
+        }
+
+        quotaFailure = error;
+        const perDay = /PerDay/i.test(error.quotaId);
+        if (perDay || attempt === PER_MINUTE_RETRIES) break;
+
+        await sleep(perMinuteBackoffMs(attempt, error.retryDelaySec));
+      }
+    }
+
+    if (!quotaFailure) continue;
+
+    parkKey(key.label, quotaFailure.quotaId, quotaFailure.retryDelaySec);
+
+    if (isLast) {
+      throw new GeminiCallError(quotaFailure.message, key.label);
+    }
+
+    // Exhausting a key is itself a provider call that consumed a quota slot.
+    // Reporting it here is what makes a key running dry visible per key;
+    // the final attempt is reported by callLLM.
+    await recordUsage({
+      provider: "google",
+      model: cfg.model,
+      tokens: emptyTokens(),
+      status: "error",
+      latencyMs: Date.now() - startedAt,
+      apiKeyLabel: key.label,
+      occurredAt,
+    });
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new GeminiCallError("Gemini request failed against every free key");
+}
+
+async function callGeminiOnce(
+  messages: LLMMessage[],
+  cfg: LLMConfig,
+  apiKey: string,
+  apiKeyLabel: string | undefined,
+): Promise<LLMResponse> {
   const baseUrl = cfg.baseUrl || "https://generativelanguage.googleapis.com/v1beta";
-  const model = cfg.model || "gemini-2.5-flash";
+  const model = cfg.model || "gemini-3.5-flash-lite";
 
   // Convert messages to Gemini format
   const systemMsg = messages.find((m) => m.role === "system");
@@ -446,7 +592,7 @@ async function callGemini(
     body.systemInstruction = { parts: [{ text: systemMsg.content }] };
   }
 
-  const url = `${baseUrl.replace(/\/$/, "")}/models/${model}:generateContent?key=${cfg.apiKey}`;
+  const url = `${baseUrl.replace(/\/$/, "")}/models/${model}:generateContent?key=${apiKey}`;
 
   const res = await fetchWithTimeout(url, {
     method: "POST",
@@ -456,7 +602,22 @@ async function callGemini(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Gemini API error (${res.status}): ${text.slice(0, 200)}`);
+
+    // A 429 is the pool's business: which quota was hit decides whether this
+    // key is parked for seconds or until the Pacific midnight reset.
+    if (res.status === 429) {
+      const { quotaId, retryDelaySec } = parseQuotaError(text);
+      throw new GeminiQuotaError(
+        `Gemini rate limit (429)${quotaId ? ` on ${quotaId}` : ""}`,
+        quotaId,
+        retryDelaySec,
+      );
+    }
+
+    throw new GeminiCallError(
+      `Gemini API error (${res.status}): ${text.slice(0, 200)}`,
+      apiKeyLabel,
+    );
   }
 
   const data = await res.json();
@@ -491,6 +652,7 @@ async function callGemini(
             : inputTokens + outputTokens,
       },
       providerRequestId: typeof data.responseId === "string" ? data.responseId : null,
+      apiKeyLabel,
     },
   };
 }
