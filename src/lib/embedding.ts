@@ -1,12 +1,32 @@
 import { logger } from "@/lib/logger";
+import {
+  emptyTokens,
+  resolveUsageProviderFromUrl,
+  toTokenCount,
+  type UsageTokens,
+} from "@/lib/usage/contract";
+import { recordUsage } from "@/lib/usage/report";
 
 const EMBEDDING_API_URL = process.env.EMBEDDING_API_URL;
 const EMBEDDING_API_KEY = process.env.EMBEDDING_API_KEY;
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || "all-minilm";
 const EMBEDDING_DIMENSIONS = 384;
 
+/**
+ * An embedding call is a billable provider request, so it reports usage like
+ * any other. The result carries whatever usage metadata the endpoint returned;
+ * Ollama returns none, which the contract covers with zeros.
+ */
+interface EmbeddingResult {
+  embedding: number[];
+  tokens: UsageTokens;
+}
+
 interface EmbeddingProvider {
-  generate(text: string): Promise<number[]>;
+  /** Model ID to report, and the endpoint that determines the vendor. */
+  readonly model: string;
+  readonly url: string;
+  generate(text: string): Promise<EmbeddingResult>;
 }
 
 /**
@@ -14,15 +34,15 @@ interface EmbeddingProvider {
  * Expects endpoint like http://localhost:11434
  */
 class OllamaEmbeddingProvider implements EmbeddingProvider {
-  private url: string;
-  private model: string;
+  readonly url: string;
+  readonly model: string;
 
   constructor(url: string, model: string) {
     this.url = url.replace(/\/$/, "");
     this.model = model;
   }
 
-  async generate(text: string): Promise<number[]> {
+  async generate(text: string): Promise<EmbeddingResult> {
     const response = await fetch(`${this.url}/api/embeddings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -38,7 +58,9 @@ class OllamaEmbeddingProvider implements EmbeddingProvider {
     if (!Array.isArray(data.embedding)) {
       throw new Error("Invalid Ollama embedding response: missing embedding array");
     }
-    return data.embedding;
+    // /api/embeddings reports no token counts. Zeros are the contract's
+    // documented answer for "the provider did not tell us".
+    return { embedding: data.embedding, tokens: emptyTokens() };
   }
 }
 
@@ -47,9 +69,9 @@ class OllamaEmbeddingProvider implements EmbeddingProvider {
  * Works with OpenAI, Azure OpenAI, and any compatible API.
  */
 class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
-  private url: string;
+  readonly url: string;
+  readonly model: string;
   private apiKey: string;
-  private model: string;
 
   constructor(url: string, apiKey: string, model: string) {
     this.url = url.replace(/\/$/, "");
@@ -57,7 +79,7 @@ class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
     this.model = model;
   }
 
-  async generate(text: string): Promise<number[]> {
+  async generate(text: string): Promise<EmbeddingResult> {
     const response = await fetch(`${this.url}/v1/embeddings`, {
       method: "POST",
       headers: {
@@ -81,7 +103,20 @@ class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
     if (!Array.isArray(embedding)) {
       throw new Error("Invalid embedding API response: missing embedding array");
     }
-    return embedding;
+    // Embedding responses have no completion tokens; everything billed is input.
+    const inputTokens = toTokenCount(data.usage?.prompt_tokens);
+    return {
+      embedding,
+      tokens: {
+        inputTokens,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        totalTokens:
+          data.usage?.total_tokens != null
+            ? toTokenCount(data.usage.total_tokens)
+            : inputTokens,
+      },
+    };
   }
 }
 
@@ -115,8 +150,22 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
   // Truncate very long inputs (most embedding models have ~512-8192 token limits)
   const truncated = text.slice(0, 8000);
 
+  const usageProvider = resolveUsageProviderFromUrl(provider.url);
+  const occurredAt = new Date();
+  const startedAt = Date.now();
+
   try {
-    const embedding = await provider.generate(truncated);
+    const { embedding, tokens } = await provider.generate(truncated);
+
+    await recordUsage({
+      provider: usageProvider,
+      model: provider.model,
+      tokens,
+      status: "success",
+      latencyMs: Date.now() - startedAt,
+      occurredAt,
+    });
+
     if (embedding.length !== EMBEDDING_DIMENSIONS) {
       logger.warn(
         { expected: EMBEDDING_DIMENSIONS, actual: embedding.length },
@@ -125,6 +174,14 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
     }
     return embedding;
   } catch (error) {
+    await recordUsage({
+      provider: usageProvider,
+      model: provider.model,
+      tokens: emptyTokens(),
+      status: "error",
+      latencyMs: Date.now() - startedAt,
+      occurredAt,
+    });
     logger.error({ err: error }, "Failed to generate embedding");
     return null;
   }

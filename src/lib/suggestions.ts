@@ -4,6 +4,13 @@ import { sql, eq, and, isNull } from "drizzle-orm";
 import { extractRows } from "@/lib/drizzle-utils";
 import { logger } from "@/lib/logger";
 import { env } from "@/env";
+import {
+  emptyTokens,
+  resolveUsageProviderFromUrl,
+  toTokenCount,
+  type UsageTokens,
+} from "@/lib/usage/contract";
+import { recordUsage } from "@/lib/usage/report";
 
 const SUGGESTION_PROVIDER_URL = env.SUGGESTION_PROVIDER || env.EMBEDDING_API_URL || "";
 const SUGGESTION_API_KEY = env.EMBEDDING_API_KEY || "";
@@ -120,6 +127,12 @@ export async function suggestRewrite(
 
   const instruction = `Rewrite the following prompt to improve ${goal}. Original: ${promptText}`;
 
+  const usageProvider = resolveUsageProviderFromUrl(provider.url);
+  const occurredAt = new Date();
+  const startedAt = Date.now();
+  let tokens: UsageTokens = emptyTokens();
+  let providerRequestId: string | null = null;
+
   try {
     let suggestion: string;
 
@@ -144,6 +157,19 @@ export async function suggestRewrite(
 
       const data = await response.json();
       suggestion = data.choices?.[0]?.message?.content ?? "";
+
+      const inputTokens = toTokenCount(data.usage?.prompt_tokens);
+      const outputTokens = toTokenCount(data.usage?.completion_tokens);
+      tokens = {
+        inputTokens,
+        outputTokens,
+        cachedInputTokens: toTokenCount(data.usage?.prompt_tokens_details?.cached_tokens),
+        totalTokens:
+          data.usage?.total_tokens != null
+            ? toTokenCount(data.usage.total_tokens)
+            : inputTokens + outputTokens,
+      };
+      providerRequestId = typeof data.id === "string" ? data.id : null;
     } else {
       const response = await fetch(`${provider.url}/api/generate`, {
         method: "POST",
@@ -162,7 +188,27 @@ export async function suggestRewrite(
 
       const data = await response.json();
       suggestion = data.response ?? "";
+
+      // Ollama's /api/generate reports counts under its own names.
+      const inputTokens = toTokenCount(data.prompt_eval_count);
+      const outputTokens = toTokenCount(data.eval_count);
+      tokens = {
+        inputTokens,
+        outputTokens,
+        cachedInputTokens: 0,
+        totalTokens: inputTokens + outputTokens,
+      };
     }
+
+    await recordUsage({
+      provider: usageProvider,
+      model: provider.model,
+      tokens,
+      status: "success",
+      latencyMs: Date.now() - startedAt,
+      providerRequestId,
+      occurredAt,
+    });
 
     return {
       original: promptText,
@@ -170,6 +216,14 @@ export async function suggestRewrite(
       goal,
     };
   } catch (error) {
+    await recordUsage({
+      provider: usageProvider,
+      model: provider.model,
+      tokens: emptyTokens(),
+      status: "error",
+      latencyMs: Date.now() - startedAt,
+      occurredAt,
+    });
     logger.error({ err: error }, "Failed to generate rewrite suggestion");
     return null;
   }

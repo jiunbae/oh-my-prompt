@@ -1,5 +1,7 @@
 import type { LLMConfig } from "./types";
 import { logger } from "@/lib/logger";
+import { emptyTokens, resolveUsageProvider, toTokenCount, type UsageTokens } from "@/lib/usage/contract";
+import { recordUsage } from "@/lib/usage/report";
 
 /**
  * Lightweight LLM client that supports multiple providers.
@@ -117,10 +119,25 @@ interface LLMMessage {
   content: string;
 }
 
+/**
+ * Usage metadata harvested from a provider response, in the shape the jiun-api
+ * usage contract wants. Each adapter fills this in; `callLLM` reports it.
+ */
+interface ProviderUsage {
+  tokens: UsageTokens;
+  /**
+   * The provider's own request ID. Used as the idempotency key so a retried
+   * report lands on the same event instead of double-counting the call.
+   */
+  providerRequestId?: string | null;
+}
+
 interface LLMResponse {
   content: string;
   model: string;
   tokensUsed?: number;
+  /** Not consumed by callers; `callLLM` forwards it to the usage reporter. */
+  usage?: ProviderUsage;
 }
 
 /**
@@ -138,6 +155,48 @@ export async function callLLM(
     );
   }
 
+  // `provider` in the usage contract names the billing vendor, which is not
+  // the same vocabulary this service uses internally: "gemini" is reported as
+  // "google", "azure" as "openai", and "ollama"/"custom" resolve by endpoint.
+  // resolveUsageProvider owns that translation.
+  const usageProvider = resolveUsageProvider(cfg.provider, cfg.baseUrl);
+  const occurredAt = new Date();
+  const startedAt = Date.now();
+
+  try {
+    const response = await dispatchLLM(messages, cfg);
+
+    // Awaited, not fired and forgotten: the outbox write is what makes the
+    // event survive a crash, and it cannot throw. Network delivery inside it
+    // is asynchronous and cannot delay or fail this call.
+    await recordUsage({
+      provider: usageProvider,
+      model: response.model || cfg.model,
+      tokens: response.usage?.tokens ?? emptyTokens(),
+      status: "success",
+      latencyMs: Date.now() - startedAt,
+      providerRequestId: response.usage?.providerRequestId,
+      occurredAt,
+    });
+
+    return response;
+  } catch (error) {
+    // Failures are reported too — they carry latency and they are the only
+    // record that the quota was spent on nothing. Token counts are 0 because a
+    // non-2xx response body is not parsed for usage.
+    await recordUsage({
+      provider: usageProvider,
+      model: cfg.model,
+      tokens: emptyTokens(),
+      status: "error",
+      latencyMs: Date.now() - startedAt,
+      occurredAt,
+    });
+    throw error;
+  }
+}
+
+function dispatchLLM(messages: LLMMessage[], cfg: LLMConfig): Promise<LLMResponse> {
   switch (cfg.provider) {
     case "anthropic":
       return callAnthropic(messages, cfg);
@@ -199,12 +258,30 @@ async function callAnthropic(
       .map((b: { text: string }) => b.text)
       .join("") || "";
 
+  // Anthropic reports cache tokens OUTSIDE input_tokens, unlike OpenAI and
+  // Gemini. Adding them back in keeps one counting convention across every
+  // provider this service reports: inputTokens includes its cached subset.
+  const cacheRead = toTokenCount(data.usage?.cache_read_input_tokens);
+  const cacheWrite = toTokenCount(data.usage?.cache_creation_input_tokens);
+  const inputTokens = toTokenCount(data.usage?.input_tokens) + cacheRead + cacheWrite;
+  const outputTokens = toTokenCount(data.usage?.output_tokens);
+
   return {
     content,
     model: data.model || cfg.model,
     tokensUsed: data.usage
       ? (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0)
       : undefined,
+    usage: {
+      // Anthropic has no total field, so we sum under our own convention.
+      tokens: {
+        inputTokens,
+        outputTokens,
+        cachedInputTokens: cacheRead,
+        totalTokens: inputTokens + outputTokens,
+      },
+      providerRequestId: typeof data.id === "string" ? data.id : null,
+    },
   };
 }
 
@@ -266,6 +343,38 @@ async function callOpenAICompatible(
     tokensUsed: data.usage
       ? (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0)
       : undefined,
+    usage: openAIUsage(data),
+  };
+}
+
+/**
+ * Usage from an OpenAI-shaped response. `prompt_tokens` already includes the
+ * cached tokens, so the cached figure is reported as a subset, not an addition.
+ */
+function openAIUsage(data: {
+  id?: unknown;
+  usage?: {
+    prompt_tokens?: unknown;
+    completion_tokens?: unknown;
+    total_tokens?: unknown;
+    prompt_tokens_details?: { cached_tokens?: unknown };
+  };
+}): ProviderUsage {
+  const usage = data.usage;
+  const inputTokens = toTokenCount(usage?.prompt_tokens);
+  const outputTokens = toTokenCount(usage?.completion_tokens);
+
+  return {
+    tokens: {
+      inputTokens,
+      outputTokens,
+      cachedInputTokens: toTokenCount(usage?.prompt_tokens_details?.cached_tokens),
+      totalTokens:
+        usage?.total_tokens != null
+          ? toTokenCount(usage.total_tokens)
+          : inputTokens + outputTokens,
+    },
+    providerRequestId: typeof data.id === "string" ? data.id : null,
   };
 }
 
@@ -305,6 +414,7 @@ async function callAzureOpenAI(
     tokensUsed: data.usage
       ? (data.usage.prompt_tokens || 0) + (data.usage.completion_tokens || 0)
       : undefined,
+    usage: openAIUsage(data),
   };
 }
 
@@ -355,11 +465,32 @@ async function callGemini(
       ?.map((p: { text?: string }) => p.text || "")
       .join("") || "";
 
+  // promptTokenCount already includes cachedContentTokenCount, so the cached
+  // figure is a subset. Thinking tokens are billed as output but reported in
+  // their own field, and totalTokenCount counts them — folding them into
+  // outputTokens keeps input + output consistent with the provider's total.
+  const meta = data.usageMetadata;
+  const inputTokens = toTokenCount(meta?.promptTokenCount);
+  const outputTokens =
+    toTokenCount(meta?.candidatesTokenCount) + toTokenCount(meta?.thoughtsTokenCount);
+
   return {
     content,
     model: model,
     tokensUsed: data.usageMetadata
       ? (data.usageMetadata.promptTokenCount || 0) + (data.usageMetadata.candidatesTokenCount || 0)
       : undefined,
+    usage: {
+      tokens: {
+        inputTokens,
+        outputTokens,
+        cachedInputTokens: toTokenCount(meta?.cachedContentTokenCount),
+        totalTokens:
+          meta?.totalTokenCount != null
+            ? toTokenCount(meta.totalTokenCount)
+            : inputTokens + outputTokens,
+      },
+      providerRequestId: typeof data.responseId === "string" ? data.responseId : null,
+    },
   };
 }
