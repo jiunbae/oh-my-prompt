@@ -60,6 +60,18 @@ export const env = createEnv({
     SUGGESTION_PROVIDER: z.string().url().optional(),
     SUGGESTION_MODEL: z.string().default(""),
     SUGGESTION_MAX_TOKENS: z.coerce.number().default(500),
+    // jiun-api LLM usage reporting (docs/USAGE_EVENTS.md). Reporting stays off
+    // unless both the service ID and the key are present, so a self-hosted
+    // install that was never given a key sends nothing.
+    JIUN_USAGE_API_URL: z.string().url().default("https://api.jiun.dev"),
+    // Registered service ID in jiun-api's JIUN_SERVICES. Configurable rather
+    // than a constant because the same image is what anyone self-hosting runs.
+    JIUN_USAGE_SERVICE_ID: z.string().default("oh-my-prompt"),
+    JIUN_USAGE_KEY: z.string().default(""),
+    // A Vault credential label such as "key_1" — never an API key. Rejected
+    // values are dropped rather than sent; see src/lib/usage/contract.ts.
+    JIUN_USAGE_API_KEY_LABEL: z.string().default(""),
+    JIUN_USAGE_TIMEOUT_MS: z.coerce.number().default(5_000),
   },
   client: {
   },
@@ -93,6 +105,11 @@ export const env = createEnv({
     SUGGESTION_PROVIDER: process.env.SUGGESTION_PROVIDER,
     SUGGESTION_MODEL: process.env.SUGGESTION_MODEL,
     SUGGESTION_MAX_TOKENS: process.env.SUGGESTION_MAX_TOKENS,
+    JIUN_USAGE_API_URL: process.env.JIUN_USAGE_API_URL,
+    JIUN_USAGE_SERVICE_ID: process.env.JIUN_USAGE_SERVICE_ID,
+    JIUN_USAGE_KEY: process.env.JIUN_USAGE_KEY,
+    JIUN_USAGE_API_KEY_LABEL: process.env.JIUN_USAGE_API_KEY_LABEL,
+    JIUN_USAGE_TIMEOUT_MS: process.env.JIUN_USAGE_TIMEOUT_MS,
   },
   skipValidation: isTest || !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,

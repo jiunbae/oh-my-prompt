@@ -197,6 +197,13 @@
       "when": 1784107506000,
       "tag": "0031_repair_pgvector_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1789000000000,
+      "tag": "0032_add_llm_usage_outbox",
+      "breakpoints": true
     }
   ]
 }

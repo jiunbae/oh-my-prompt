@@ -1189,3 +1189,52 @@ export type PromptExperiment = typeof promptExperiments.$inferSelect;
 export type NewPromptExperiment = typeof promptExperiments.$inferInsert;
 export type ExperimentResult = typeof experimentResults.$inferSelect;
 export type NewExperimentResult = typeof experimentResults.$inferInsert;
+
+// ── LLM usage reporting outbox ───────────────────────────────────
+
+/**
+ * Durable outbox for jiun-api LLM usage events.
+ *
+ * A provider call that succeeded must never be re-run because the usage report
+ * failed, so the event is written here first and delivered separately. Rows are
+ * metadata only: token counts, latency, model and vendor. Prompts, completions,
+ * and credentials never reach this table.
+ *
+ * `eventId` is the contract's idempotency key and is unique here for the same
+ * reason it is unique there — a retry reuses the row rather than creating a
+ * second one.
+ */
+export const llmUsageEvents = pgTable(
+  "llm_usage_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    eventId: varchar("event_id", { length: 255 }).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    model: varchar("model", { length: 255 }).notNull(),
+    apiKeyLabel: varchar("api_key_label", { length: 32 }),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    latencyMs: integer("latency_ms"),
+    status: varchar("status", { length: 16 }).notNull().default("success"),
+    /** Delivery state of the report itself: "pending" or "sent". */
+    deliveryStatus: varchar("delivery_status", { length: 16 }).notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("llm_usage_events_event_id_unique").on(table.eventId),
+    index("idx_llm_usage_events_pending").on(table.deliveryStatus, table.nextAttemptAt),
+    index("idx_llm_usage_events_delivered").on(table.deliveredAt),
+  ]
+);
+
+export type LlmUsageEvent = typeof llmUsageEvents.$inferSelect;
+export type NewLlmUsageEvent = typeof llmUsageEvents.$inferInsert;
