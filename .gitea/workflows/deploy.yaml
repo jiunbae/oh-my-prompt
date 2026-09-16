@@ -22,14 +22,6 @@ on:
       - "packages/**"
       - ".gitea/workflows/**"
 
-# One build of this workflow per ref at a time. Two concurrent runs put two
-# multi-platform builds in the same 3 GiB DinD parent, which is the condition
-# the max-parallelism setting below exists to avoid; a superseded run is also
-# building a commit nobody is waiting for any more.
-concurrency:
-  group: ${{ gitea.workflow }}-${{ gitea.ref }}
-  cancel-in-progress: true
-
 env:
   REGISTRY: registry.jiun.dev
   IMAGE_NAME: oh-my-prompt
@@ -78,20 +70,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          # Build the two platforms one at a time instead of together.
-          #
-          # This job runs inside a DinD parent capped at 3 GiB. With the
-          # default parallelism buildx runs the amd64 and arm64 legs at once,
-          # so two `next build` processes are resident together; a measurement
-          # during run 1831 caught them at 1.8 GiB + 138 MiB with a further
-          # 641 MiB node process, anon 3,176,968,192 against the cap and
-          # memory.events max climbing past 2.3M with oom_kill still 0 --
-          # sustained reclaim rather than a crash, which shows up as a very
-          # slow build rather than a failure.
-          #
-          # Serialising trades wall-clock for headroom and leaves the cap
-          # alone. Both platforms are still built: the dev k3s node is amd64
-          # and prod OrbStack is arm64, so neither can be dropped.
+          # This job builds inside a DinD parent capped at 3 GiB. By default
+          # buildx runs the amd64 and arm64 legs together, so two `next build`
+          # processes sit in that cap at once and it spends the build in
+          # reclaim. Serialise them; both platforms are still needed (dev k3s
+          # is amd64, prod OrbStack is arm64).
           buildkitd-config-inline: |
             [worker.oci]
               max-parallelism = 1
