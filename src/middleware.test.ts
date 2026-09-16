@@ -71,3 +71,51 @@ describe("middleware", () => {
     });
   });
 });
+
+describe("scheduler routes", () => {
+  // These handlers implement SCHEDULER_TOKEN auth themselves, but the proxy
+  // runs first. Before this passthrough existed it answered 401 for every
+  // cookie-less /api/ request, so a cron could not reach them at all and
+  // scheduled work silently never ran.
+  const schedulerPaths = ["/api/admin/scheduled-jobs/run", "/api/admin/usage/flush"];
+
+  for (const path of schedulerPaths) {
+    it(`lets ${path} through when X-Scheduler-Token is present`, async () => {
+      const response = await proxy(request(path, { "X-Scheduler-Token": "whatever" }));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+    });
+
+    it(`lets ${path} through with a bearer token`, async () => {
+      const response = await proxy(request(path, { Authorization: "Bearer whatever" }));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+    });
+
+    it(`still rejects ${path} with no credential at all`, async () => {
+      // Passing through is not authenticating -- without a header there is
+      // nothing for the handler to check, so the proxy answers as before.
+      const response = await proxy(request(path));
+
+      expect(response.status).toBe(401);
+    });
+  }
+
+  it("does not open neighbouring admin routes", async () => {
+    const response = await proxy(
+      request("/api/admin/diagnostics", { "X-Scheduler-Token": "whatever" })
+    );
+
+    expect(response.status).toBe(401);
+  });
+
+  it("does not open a path that merely starts with a scheduler route name", async () => {
+    const response = await proxy(
+      request("/api/admin/usage/flush-everything", { "X-Scheduler-Token": "whatever" })
+    );
+
+    expect(response.status).toBe(401);
+  });
+});

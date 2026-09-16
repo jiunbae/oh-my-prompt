@@ -106,6 +106,21 @@ const publicRoutes = [
 const tokenAuthRoutes = ["/api/sync", "/api/auth/me", "/api/search/semantic"];
 
 /**
+ * Routes a system cron calls with SCHEDULER_TOKEN instead of a session.
+ *
+ * These handlers already implement that path themselves
+ * (authorizeSchedulerTrigger: constant-time token compare, falling back to an
+ * admin session). But this proxy runs first and rejects every cookie-less
+ * /api/ request, so the token branch was unreachable from outside the pod and
+ * scheduled work never ran in production.
+ *
+ * As with tokenAuthRoutes, passing through is not authenticating: the handler
+ * still does the comparison and still 401s on a wrong token. The proxy only
+ * declines to answer on its behalf.
+ */
+const schedulerAuthRoutes = ["/api/admin/scheduled-jobs/run", "/api/admin/usage/flush"];
+
+/**
  * Prefix match that respects path segment boundaries so that, e.g., `/login`
  * does not match `/loginanything` and `/share` does not match `/share-admin`.
  */
@@ -129,6 +144,17 @@ export async function proxy(request: NextRequest) {
       return NextResponse.next();
     }
     // Fall through to cookie auth if no token header
+  }
+
+  // Allow scheduler routes when a scheduler credential is presented. The
+  // handler validates it; an absent header falls through to cookie auth so an
+  // admin can still trigger these from the dashboard.
+  if (schedulerAuthRoutes.some((route) => matchesRoute(pathname, route))) {
+    const authHeader = request.headers.get("authorization");
+    const hasBearer = authHeader?.toLowerCase().startsWith("bearer ") ?? false;
+    if (hasBearer || request.headers.get("x-scheduler-token")) {
+      return NextResponse.next();
+    }
   }
 
   // Allow static files
