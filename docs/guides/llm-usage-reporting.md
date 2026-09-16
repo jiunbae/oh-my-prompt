@@ -39,7 +39,7 @@ to report anything.
 | `JIUN_USAGE_API_URL` | Defaults to `https://api.jiun.dev`. |
 | `JIUN_USAGE_SERVICE_ID` | Defaults to `oh-my-prompt`. Must match the ID registered in `JIUN_SERVICES`. |
 | `JIUN_USAGE_KEY` | The service usage key. **Inject as a secret.** Never commit or log it. |
-| `JIUN_USAGE_API_KEY_LABEL` | Optional Vault credential *label* (`key_1`, `key_99`). Never a key. |
+| `JIUN_USAGE_API_KEY_LABEL` | Optional static label (`free-1`…`free-6`, `paid-1`) for a single-credential deployment. Never a key. |
 | `JIUN_USAGE_TIMEOUT_MS` | Delivery timeout, default 5000. |
 
 `JIUN_USAGE_SERVICE_ID` is configuration rather than a constant in the source,
@@ -141,8 +141,24 @@ dashboard. The 429s that get retried are reported too — they are real provider
 calls that consumed a quota slot, and omitting them would make the pool look
 healthier than it is.
 
+Keys arrive in `GEMINI_API_KEYS` as a JSON object keyed by label:
+
+```
+GEMINI_API_KEYS={"free-1":"…","free-2":"…", … ,"paid-1":"…"}
+```
+
+A map rather than an ordered list, deliberately. With a positional list, one
+missing or reordered key shifts every label after it onto the wrong GCP account
+— the dashboard then attributes real quota to a project that never served it,
+and nothing looks broken. Here the label travels with its own key, so a gap
+stays a gap. `paid-1` shares the map but is excluded from the free rotation by
+label, or round-robin would bill it one request in seven.
+
+The number-to-account mapping is pinned in IaC `docs/ai-api-keys-reference.md`.
+A malformed value empties the pool and logs an error rather than throwing.
+
 A single `OMP_LLM_API_KEY` still works and is what a self-hosted install uses;
-the pool only engages when `OMP_GEMINI_API_KEYS` is set.
+the pool only engages when `GEMINI_API_KEYS` is set.
 
 ### Credential labels
 
@@ -151,10 +167,11 @@ aggregation dimension, and it is exported as the Prometheus label `api_key`.
 
 The vocabulary is fixed by the contract's *Label vocabulary* section and is
 **not** the Vault field name or any service-local naming: `free-1` … `free-6`
-for the free Gemini keys, `paid-1` for the paid one. `key_1`/`key_99` were the
-earlier form and are retired — the server still accepts them so that a service
-that has not migrated does not lose already-consumed usage to a 400, but
-nothing new should send them. Two names for one key split it into several
+for the free Gemini keys, `paid-1` for the paid one. The number-to-account
+mapping is pinned in IaC `docs/ai-api-keys-reference.md`. The earlier `key_N`
+form is retired — the server still accepts it so a service that has not
+migrated does not lose already-consumed usage to a 400, but nothing new
+should send it. Two names for one key split it into several
 Prometheus series, the same failure shape as spelling a provider two ways.
 
 For the rotating pool the label comes from the key that actually served the

@@ -90,10 +90,20 @@ describe("provider vocabulary", () => {
  * public Prometheus `api_key` label, where it cannot be recalled from either.
  */
 describe("credential labels", () => {
-  it("accepts the Vault-style labels the rotation uses", () => {
+  it("accepts the contract vocabulary the rotation emits", () => {
+    expect(validateApiKeyLabel("free-1")).toEqual({ label: "free-1" });
+    expect(validateApiKeyLabel("free-6")).toEqual({ label: "free-6" });
+    expect(validateApiKeyLabel("paid-1")).toEqual({ label: "paid-1" });
+    expect(validateApiKeyLabel(" free-3 ")).toEqual({ label: "free-3" });
+  });
+
+  it("still accepts the retired key_N shape without endorsing it", () => {
+    // This validator checks the SHAPE the endpoint enforces, not the
+    // vocabulary. jiun-api kept accepting key_N so an unmigrated sender does
+    // not lose already-consumed usage to a 400; rejecting it here would be
+    // stricter than the contract for no gain. What we EMIT is pinned by the
+    // pool's own test instead.
     expect(validateApiKeyLabel("key_1")).toEqual({ label: "key_1" });
-    expect(validateApiKeyLabel("key_99")).toEqual({ label: "key_99" });
-    expect(validateApiKeyLabel(" key_6 ")).toEqual({ label: "key_6" });
   });
 
   it("refuses anything shaped like a live credential", () => {

@@ -1,7 +1,7 @@
 -- Outbox for jiun-api LLM usage reports.
 -- Metadata only: token counts, latency, model and vendor. No prompt text,
--- no completion text, no credentials. `api_key_label` is a Vault label
--- (key_1, key_99, ...), never a key.
+-- no completion text, no credentials. `api_key_label` is a contract label
+-- (free-1..free-6, paid-1), never a key and never a Vault field name.
 CREATE TABLE IF NOT EXISTS "llm_usage_events" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "event_id" varchar(255) NOT NULL,

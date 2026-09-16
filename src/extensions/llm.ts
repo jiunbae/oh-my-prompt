@@ -492,7 +492,7 @@ async function callGemini(
     const configured = getGeminiKeys().length + (getPaidGeminiKey() ? 1 : 0);
     throw new GeminiCallError(
       configured === 0
-        ? "No Gemini API key configured. Set OMP_GEMINI_API_KEYS or OMP_LLM_API_KEY."
+        ? "No Gemini API key configured. Set GEMINI_API_KEYS or OMP_LLM_API_KEY."
         : `All ${configured} Gemini keys are rate-limited, including the paid key.`,
     );
   }

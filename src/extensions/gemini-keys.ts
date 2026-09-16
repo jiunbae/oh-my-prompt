@@ -15,13 +15,20 @@
  * Labels are `free-1` through `free-6` for the free projects and `paid-1` for
  * the paid one -- the vocabulary fixed by the jiun-api usage contract's
  * "Label vocabulary" section, NOT the Vault field names and not our own
- * internal naming. (`key_1`/`key_99` were the earlier form and are retired.)
+ * internal naming. The number-to-account mapping is pinned in IaC
+ * `docs/ai-api-keys-reference.md`.
  *
  * The labels have to be identical across services or the per-credential view
  * splits one key into several Prometheus series, the same failure shape as
  * spelling a provider two ways: "which key is near its limit" then has no
  * answer. The `free-`/`paid-` split also reads directly on the dashboard --
  * `paid-1` climbing means real money.
+ *
+ * Keys arrive as a JSON map keyed by label, not as an ordered list. That is the
+ * point: with a positional list, one missing or reordered key silently shifts
+ * every label after it onto the wrong GCP account, and the usage dashboard
+ * would attribute real quota to the wrong project with nothing looking broken.
+ * Here the label travels with its own key.
  *
  * This mirrors kongbu's rotation so the two services behave the same way.
  */
@@ -45,26 +52,72 @@ interface KeyState {
 
 const state = new Map<string, KeyState>();
 
+const FREE_LABEL = /^free-(\d+)$/;
+const PAID_LABEL = "paid-1";
+
+let loggedParseFailure = false;
+
 /**
- * Parse the configured free keys. Order is meaningful: the first key is
- * `free-1`, so a label always points at the same credential across restarts
- * and, as long as every service is given the keys in the same order, across
- * services too.
+ * Parse `GEMINI_API_KEYS`, a JSON object mapping contract label to key:
+ *
+ *   {"free-1":"...","free-2":"...", ... ,"paid-1":"..."}
+ *
+ * Returns an empty map rather than throwing: a malformed value must not take
+ * the service down, it must make the pool empty and loud.
+ */
+function parseKeyMap(): Record<string, string> {
+  const raw = (process.env.GEMINI_API_KEYS || "").trim();
+  if (!raw) return {};
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("expected a JSON object");
+    }
+
+    const out: Record<string, string> = {};
+    for (const [label, value] of Object.entries(parsed)) {
+      // Never log the value, and never log an unexpected label either -- a
+      // malformed map could put a key where a label belongs.
+      if (typeof value === "string" && value.trim()) out[label] = value.trim();
+    }
+    return out;
+  } catch (error) {
+    if (!loggedParseFailure) {
+      loggedParseFailure = true;
+      logger.error(
+        { reason: error instanceof Error ? error.message : "unparseable" },
+        "GEMINI_API_KEYS is not a valid JSON object; Gemini key pool is empty"
+      );
+    }
+    return {};
+  }
+}
+
+/**
+ * The free keys, ordered by their label number.
+ *
+ * The label comes from the map key, never from position, so a gap in the
+ * numbering leaves a gap rather than renaming everything after it. `paid-1` is
+ * excluded here by construction: it must not enter the free rotation.
  */
 export function getGeminiKeys(): GeminiKey[] {
-  const raw = process.env.OMP_GEMINI_API_KEYS || "";
-  const keys = raw
-    .split(",")
-    .map((k) => k.trim())
-    .filter(Boolean);
-
-  return keys.map((apiKey, i) => ({ label: `free-${i + 1}`, apiKey, isPaid: false }));
+  return Object.entries(parseKeyMap())
+    .map(([label, apiKey]) => ({ label, apiKey, match: FREE_LABEL.exec(label) }))
+    .filter((entry) => entry.match !== null)
+    .sort((a, b) => Number(a.match![1]) - Number(b.match![1]))
+    .map(({ label, apiKey }) => ({ label, apiKey, isPaid: false }));
 }
 
 /** The paid key, or null when none is configured. Always labelled `paid-1`. */
 export function getPaidGeminiKey(): GeminiKey | null {
-  const apiKey = (process.env.OMP_GEMINI_API_KEY_PAID || "").trim();
-  return apiKey ? { label: "paid-1", apiKey, isPaid: true } : null;
+  const apiKey = parseKeyMap()[PAID_LABEL];
+  return apiKey ? { label: PAID_LABEL, apiKey, isPaid: true } : null;
+}
+
+/** Test seam for the parse-failure log latch. */
+export function resetParseFailureLatch(): void {
+  loggedParseFailure = false;
 }
 
 /** Round-robin cursor. Per process, which is enough — each pod spreads its own load. */

@@ -9,19 +9,32 @@ import {
   perMinuteBackoffMs,
   poolStatus,
   releaseKey,
+  resetParseFailureLatch,
   resetPoolState,
 } from "@/extensions/gemini-keys";
 
-const SIX_KEYS = ["k1", "k2", "k3", "k4", "k5", "k6"].join(",");
+/** Keys arrive as a JSON map keyed by contract label, never as a positional list. */
+function setKeys(map: Record<string, string>): void {
+  process.env.GEMINI_API_KEYS = JSON.stringify(map);
+}
+
+const SIX_FREE = {
+  "free-1": "k1",
+  "free-2": "k2",
+  "free-3": "k3",
+  "free-4": "k4",
+  "free-5": "k5",
+  "free-6": "k6",
+};
 
 beforeEach(() => {
   resetPoolState();
-  process.env.OMP_GEMINI_API_KEYS = SIX_KEYS;
+  resetParseFailureLatch();
+  setKeys(SIX_FREE);
 });
 
 afterEach(() => {
-  delete process.env.OMP_GEMINI_API_KEYS;
-  delete process.env.OMP_GEMINI_API_KEY_PAID;
+  delete process.env.GEMINI_API_KEYS;
   vi.useRealTimers();
 });
 
@@ -37,18 +50,40 @@ describe("key labels", () => {
     ]);
   });
 
-  it("ignores blanks and surrounding whitespace", () => {
-    process.env.OMP_GEMINI_API_KEYS = " a , ,b ,";
+  it("ignores blank values and surrounding whitespace", () => {
+    setKeys({ "free-1": " a ", "free-2": "", "free-3": "b" });
     expect(getGeminiKeys()).toEqual([
       { label: "free-1", apiKey: "a", isPaid: false },
-      { label: "free-2", apiKey: "b", isPaid: false },
+      { label: "free-3", apiKey: "b", isPaid: false },
     ]);
   });
 
+  it("takes the label from the map key, so a gap leaves a gap", () => {
+    // The whole reason for a map: with a positional list, dropping free-2
+    // would silently rename free-3..free-6 onto the wrong GCP accounts and the
+    // dashboard would attribute quota to projects that never served it.
+    setKeys({ "free-1": "a", "free-3": "c", "free-6": "f" });
+    expect(getGeminiKeys().map((k) => k.label)).toEqual(["free-1", "free-3", "free-6"]);
+  });
+
+  it("orders by label number, not by key insertion order", () => {
+    setKeys({ "free-6": "f", "free-1": "a", "free-2": "b" });
+    expect(getGeminiKeys().map((k) => k.label)).toEqual(["free-1", "free-2", "free-6"]);
+  });
+
   it("reports an empty pool when nothing is configured", () => {
-    delete process.env.OMP_GEMINI_API_KEYS;
+    delete process.env.GEMINI_API_KEYS;
     expect(getGeminiKeys()).toEqual([]);
     expect(availableKeys()).toEqual([]);
+  });
+
+  it("empties the pool loudly rather than throwing on a malformed value", () => {
+    process.env.GEMINI_API_KEYS = "not json";
+    expect(getGeminiKeys()).toEqual([]);
+    expect(availableKeys()).toEqual([]);
+
+    process.env.GEMINI_API_KEYS = JSON.stringify(["a", "b"]);
+    expect(getGeminiKeys()).toEqual([]);
   });
 });
 
@@ -151,7 +186,7 @@ describe("parsing Gemini 429 bodies", () => {
 
 describe("paid key as last resort", () => {
   beforeEach(() => {
-    process.env.OMP_GEMINI_API_KEY_PAID = "paid";
+    setKeys({ ...SIX_FREE, "paid-1": "paid" });
   });
 
   it("labels the paid key paid-1, per the contract label vocabulary", () => {
@@ -159,8 +194,15 @@ describe("paid key as last resort", () => {
   });
 
   it("is absent when not configured", () => {
-    delete process.env.OMP_GEMINI_API_KEY_PAID;
+    setKeys(SIX_FREE);
     expect(getPaidGeminiKey()).toBeNull();
+  });
+
+  it("never appears among the free keys, even though it shares the map", () => {
+    // paid-1 lives in the same JSON object, so the free list has to exclude it
+    // by label rather than by source, or round-robin would bill it 1-in-7.
+    expect(getGeminiKeys().map((k) => k.label)).not.toContain("paid-1");
+    expect(getGeminiKeys()).toHaveLength(6);
   });
 
   it("is NOT offered while any free key is usable", () => {
@@ -215,7 +257,7 @@ describe("labels satisfy the contract's validation rules", () => {
   // The vocabulary is free-1..free-6 / paid-1. These must survive the same
   // checks jiun-api applies, or a correct rotation would be 400'd away.
   it("every emitted label passes validateApiKeyLabel", async () => {
-    process.env.OMP_GEMINI_API_KEY_PAID = "paid";
+    setKeys({ ...SIX_FREE, "paid-1": "paid" });
     const { validateApiKeyLabel } = await import("@/lib/usage/contract");
 
     for (const key of [...getGeminiKeys(), getPaidGeminiKey()!]) {
@@ -224,7 +266,7 @@ describe("labels satisfy the contract's validation rules", () => {
   });
 
   it("uses the contract vocabulary, not the retired key_N form", () => {
-    process.env.OMP_GEMINI_API_KEY_PAID = "paid";
+    setKeys({ ...SIX_FREE, "paid-1": "paid" });
     expect(getGeminiKeys().map((k) => k.label)).toEqual([
       "free-1",
       "free-2",
