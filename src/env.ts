@@ -68,8 +68,11 @@ export const env = createEnv({
     // than a constant because the same image is what anyone self-hosting runs.
     JIUN_USAGE_SERVICE_ID: z.string().default("oh-my-prompt"),
     JIUN_USAGE_KEY: z.string().default(""),
-    // A Vault credential label such as "key_1" — never an API key. Rejected
-    // values are dropped rather than sent; see src/lib/usage/contract.ts.
+    // Static fallback label for a single-credential deployment. The contract
+    // vocabulary is "free-1".."free-6" and "paid-1" — never an API key, and
+    // never a Vault field name. A rotating pool supplies its own per-call
+    // label instead. Rejected values are dropped rather than sent; see
+    // src/lib/usage/contract.ts.
     JIUN_USAGE_API_KEY_LABEL: z.string().default(""),
     JIUN_USAGE_TIMEOUT_MS: z.coerce.number().default(5_000),
   },

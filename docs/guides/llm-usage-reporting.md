@@ -39,7 +39,7 @@ to report anything.
 | `JIUN_USAGE_API_URL` | Defaults to `https://api.jiun.dev`. |
 | `JIUN_USAGE_SERVICE_ID` | Defaults to `oh-my-prompt`. Must match the ID registered in `JIUN_SERVICES`. |
 | `JIUN_USAGE_KEY` | The service usage key. **Inject as a secret.** Never commit or log it. |
-| `JIUN_USAGE_API_KEY_LABEL` | Optional Vault credential *label* (`key_1`, `key_99`). Never a key. |
+| `JIUN_USAGE_API_KEY_LABEL` | Optional static label (`free-1`…`free-6`, `paid-1`) for a single-credential deployment. Never a key. |
 | `JIUN_USAGE_TIMEOUT_MS` | Delivery timeout, default 5000. |
 
 `JIUN_USAGE_SERVICE_ID` is configuration rather than a constant in the source,
@@ -75,7 +75,7 @@ The service's own `OMP_LLM_PROVIDER` vocabulary is **not** the contract's.
 
 | `OMP_LLM_PROVIDER` | Reported `provider` |
 |---|---|
-| `gemini` | `google` |
+| `gemini` | `google` (model `gemini-3.5-flash-lite`) |
 | `azure` | `openai` |
 | `anthropic` | `anthropic` |
 | `openai` | `openai` |
@@ -113,14 +113,74 @@ response body is not parsed for usage, and the contract accepts `0` for
 unavailable counts. The latency is still reported, which is the point — a
 failure that burned a quota slot is otherwise invisible.
 
+### Gemini key rotation
+
+Production runs `gemini-3.5-flash-lite` against six free keys, each on its own
+GCP project, so each carries an independent per-project quota for that model.
+`src/extensions/gemini-keys.ts` round-robins across them and parks a key when
+the provider says to:
+
+- a **per-minute** 429 parks the key for the `retryDelay` the response carried,
+  plus jitter;
+- a **per-day** 429 parks it until midnight America/Los_Angeles, because
+  retrying that project before the reset only burns latency.
+
+A per-minute breach is retried on the **same** key with exponential backoff and
+jitter (capped at 8s per wait, two retries) before the key is parked and the
+next project is tried — the quota is about to clear on its own, and spending
+another project's daily allowance on it would be waste.
+
+The paid key (`paid-1`) is a **last resort, not a standing route**: it is only
+offered once every free key is parked, and `availableKeys` enforces that. If it
+starts appearing in the aggregate, the free pool ran dry — which is precisely
+the signal this dashboard exists to surface, and it means real money.
+
+Each attempt reports the credential that served it as `apiKeyLabel` (`free-1` …
+`free-6`, `paid-1`), which is what makes per-key quota readable on the
+dashboard. The 429s that get retried are reported too — they are real provider
+calls that consumed a quota slot, and omitting them would make the pool look
+healthier than it is.
+
+Keys arrive in `GEMINI_API_KEYS` as a JSON object keyed by label:
+
+```
+GEMINI_API_KEYS={"free-1":"…","free-2":"…", … ,"paid-1":"…"}
+```
+
+A map rather than an ordered list, deliberately. With a positional list, one
+missing or reordered key shifts every label after it onto the wrong GCP account
+— the dashboard then attributes real quota to a project that never served it,
+and nothing looks broken. Here the label travels with its own key, so a gap
+stays a gap. `paid-1` shares the map but is excluded from the free rotation by
+label, or round-robin would bill it one request in seven.
+
+The number-to-account mapping is pinned in IaC `docs/ai-api-keys-reference.md`.
+A malformed value empties the pool and logs an error rather than throwing.
+
+A single `OMP_LLM_API_KEY` still works and is what a self-hosted install uses;
+the pool only engages when `GEMINI_API_KEYS` is set.
+
 ### Credential labels
 
-`JIUN_USAGE_API_KEY_LABEL` is a label such as `key_1`, matching the name in
-Vault. It must never be a key. The value is stored in MongoDB and exported as
+`apiKeyLabel` is a first-class contract field: the server validates it, it is an
+aggregation dimension, and it is exported as the Prometheus label `api_key`.
+
+The vocabulary is fixed by the contract's *Label vocabulary* section and is
+**not** the Vault field name or any service-local naming: `free-1` … `free-6`
+for the free Gemini keys, `paid-1` for the paid one. The number-to-account
+mapping is pinned in IaC `docs/ai-api-keys-reference.md`. The earlier `key_N`
+form is retired — the server still accepts it so a service that has not
+migrated does not lose already-consumed usage to a 400, but nothing new
+should send it. Two names for one key split it into several
+Prometheus series, the same failure shape as spelling a provider two ways.
+
+For the rotating pool the label comes from the key that actually served the
+request. `JIUN_USAGE_API_KEY_LABEL` remains as a static fallback for
+deployments with a single credential. It must never be a key. The value is stored in MongoDB and exported as
 the Prometheus `api_key` label, which puts it in front of everyone who can open
 a dashboard; a credential that arrived there could not be recalled from either.
 
-`validateApiKeyLabel` therefore refuses anything that is not 1–32 characters of
+`validateApiKeyLabel` refuses anything that is not 1–32 characters of
 lowercase letters, digits, underscore or hyphen, or that starts like a known
 credential (`AIza`, `sk-`, `ghp_`, `xoxb-`, `AKIA`, …). A rejected value is
 dropped, not sent, and never written to the log — it may be the credential.
