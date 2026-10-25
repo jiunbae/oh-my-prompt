@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Nothing yet
+
+## [2026.1025.1] - 2026-10-25
+
+### Added
 - Prefer file-backed `node:sqlite` when the optional `better-sqlite3` addon is unavailable and the runtime supports the required binding APIs and FTS4. `OMP_SQLITE_DRIVER=node:sqlite` selects it explicitly; unsupported runtimes retain the portable `sql.js` fallback.
 
 ### Performance
