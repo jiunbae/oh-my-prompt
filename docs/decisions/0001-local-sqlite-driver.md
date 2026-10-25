@@ -50,9 +50,12 @@ Official references:
 1. Install `better-sqlite3` 12.9.0 as an exact optional dependency and select it
    first when its native binding can be constructed. Version 12.9.0 retains a
    Node.js 20 prebuild; 12.10.0 deliberately removed Node.js 20 prebuilds.
-2. Keep `sql.js` as the automatic portability fallback when the optional native
-   addon cannot be installed or loaded. `OMP_SQLITE_DRIVER=sql.js` can force it
-   for diagnosis, and `OMP_SQLITE_DRIVER=native` fails explicitly if unavailable.
+2. When the optional native addon cannot be installed or loaded, prefer built-in
+   `node:sqlite` if its required binding APIs and FTS4 are available. Runtime
+   feature probes reject builds without either capability before file access.
+   Keep `sql.js` as the final portability fallback for unsupported runtimes.
+   `OMP_SQLITE_DRIVER=node:sqlite` and `OMP_SQLITE_DRIVER=sql.js` force each
+   engine for diagnosis; `OMP_SQLITE_DRIVER=native` still requires the addon.
 3. Before the first writable native open of an existing database, create
    `omp.db.pre-native.bak` (using a copy-on-write clone where supported), run
    `PRAGMA quick_check`, and write `omp.db.native-driver` only after validation.
@@ -68,7 +71,7 @@ Official references:
 - Linux x64 on Node.js 24.6 loaded the published 12.9.0 prebuild without a local
   compile, and CLI CI runs on Node.js 22. The optional dependency preserves
   installation on Node.js 20 or any platform where no compatible binary exists;
-  those environments select the tested sql.js fallback.
+  those environments select built-in SQLite when available, otherwise sql.js.
 - An existing schema-v11 sql.js database with 20,035 prompts opened through the
   native driver, passed `quick_check`, and remained queryable after a capture.
 - Adapter tests cover WAL selection, concurrent handles without last-writer-wins

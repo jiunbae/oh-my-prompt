@@ -3,6 +3,25 @@ const os = require("os");
 const path = require("path");
 const { openDatabase, getDriverInfo } = require("../db-driver");
 
+it("retains the portable driver when built-in SQLite lacks FTS4", () => {
+  const { execFileSync } = require("child_process");
+  const result = execFileSync(process.execPath, ["-e", `
+    const Module = require('module');
+    const load = Module._load;
+    Module._load = function(name, ...args) {
+      if (name === 'better-sqlite3') throw new Error('addon unavailable');
+      if (name === 'node:sqlite') return { DatabaseSync: class {
+        prepare() { return { setAllowUnknownNamedParameters() {} }; }
+        exec() { throw new Error('no such module: fts4'); }
+        close() {}
+      }};
+      return load.call(this, name, ...args);
+    };
+    console.log(JSON.stringify(require(${JSON.stringify(require.resolve("../db-driver"))}).getDriverInfo('auto')));
+  `], { encoding: "utf8" });
+  expect(JSON.parse(result)).toEqual({ name: "sql.js", native: false, fallback: true });
+});
+
 describe("sql.js database durability", () => {
   let previousDriver;
 
@@ -147,9 +166,129 @@ describe("sql.js database durability", () => {
     renameSpy.mockRestore();
     db.close();
   });
+
+  it("writes the exported bytes directly and handles partial writes", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-db-short-write-"));
+    const dbPath = path.join(root, "omp.db");
+    const db = await openDatabase(dbPath);
+    db.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
+    const write = fs.writeSync.bind(fs);
+    const spy = vi.spyOn(fs, "writeSync").mockImplementation((fd, data, offset, length) => {
+      expect(data).toBeInstanceOf(Uint8Array);
+      expect(Buffer.isBuffer(data)).toBe(false);
+      return write(fd, data, offset, Math.min(length, 1024));
+    });
+    try {
+      db.prepare("INSERT INTO records VALUES (?)").run("complete");
+      expect(spy.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      spy.mockRestore();
+      db.close();
+    }
+    const verify = await openDatabase(dbPath, { readonly: true });
+    expect(verify.prepare("PRAGMA quick_check").get().quick_check).toBe("ok");
+    expect(verify.prepare("SELECT id FROM records").get().id).toBe("complete");
+    verify.close();
+  });
+});
+
+let hasBuiltinSqlite = false;
+try {
+  require("../node-sqlite-driver");
+  hasBuiltinSqlite = true;
+} catch {}
+
+describe.skipIf(!hasBuiltinSqlite)("built-in SQLite fallback", () => {
+  it("keeps writes atomic, binds extra named fields, and preserves rollback", async () => {
+    const db = await openDatabase(null, { driver: "node:sqlite" });
+    expect(db.driver).toBe("node:sqlite");
+    db.exec("CREATE TABLE records (id TEXT PRIMARY KEY, value TEXT)");
+    const insert = db.prepare("INSERT INTO records VALUES (@id, @value)");
+    db.transaction(() => insert.run({ id: "first", value: undefined, unused: "ignored" }))();
+    expect(() => db.transaction(() => {
+      insert.run({ id: "rolled-back", value: "absent" });
+      throw new Error("rollback");
+    })()).toThrow("rollback");
+    expect(db.prepare("SELECT * FROM records").all()).toEqual([{ id: "first", value: null }]);
+    db.close();
+  });
+
+  it("shares WAL, backups, batch flush and readonly protection with the native driver", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-node-sqlite-"));
+    const dbPath = path.join(root, "omp.db");
+    const bootstrap = await openDatabase(dbPath, { driver: "sql.js" });
+    bootstrap.exec("CREATE TABLE records (id TEXT PRIMARY KEY)");
+    bootstrap.close();
+    const db = await openDatabase(dbPath, { driver: "node:sqlite" });
+    expect(fs.existsSync(`${dbPath}.pre-native.bak`)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(`${dbPath}.native-driver`, "utf8")).driver).toBe("node:sqlite");
+    expect(db.pragma("journal_mode = WAL")[0].journal_mode).toBe("wal");
+    db.setBatchMode(true);
+    const insert = db.prepare("INSERT INTO records VALUES (?)");
+    db.transaction(() => insert.run("first"))();
+    const reader = await openDatabase(dbPath, { driver: "node:sqlite", readonly: true });
+    expect(reader.prepare("SELECT * FROM records").all()).toEqual([]);
+    db.flush();
+    expect(reader.prepare("SELECT * FROM records").all()).toEqual([{ id: "first" }]);
+    expect(() => db.transaction(() => {
+      insert.run("failed");
+      throw new Error("rollback");
+    })()).toThrow("rollback");
+    db.transaction(() => insert.run("second"))();
+    db.close();
+    expect(reader.prepare("SELECT id FROM records ORDER BY id").all()).toEqual([{ id: "first" }, { id: "second" }]);
+    expect(() => reader.prepare("INSERT INTO records VALUES (?)").run("forbidden")).toThrow();
+    expect(reader.pragma("quick_check")[0].quick_check).toBe("ok");
+    reader.close();
+  });
+
+  it("automatically selects built-in SQLite when the optional addon is unavailable", () => {
+    const { execFileSync } = require("child_process");
+    const result = execFileSync(process.execPath, ["-e", `
+      const Module = require('module');
+      const load = Module._load;
+      Module._load = function(name, ...args) {
+        if (name === 'better-sqlite3' || name === 'sql.js') throw new Error('not installed');
+        return load.call(this, name, ...args);
+      };
+      const driver = require(${JSON.stringify(require.resolve("../db-driver"))});
+      console.log(JSON.stringify(driver.getDriverInfo('auto')));
+    `], { encoding: "utf8" });
+    expect(JSON.parse(result)).toEqual({ name: "node:sqlite", native: true, fallback: false });
+  });
 });
 
 describe("native SQLite driver", () => {
+  it("blocks portable reads and stale writes while native WAL contains committed rows", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-wal-safety-"));
+    const dbPath = path.join(root, "omp.db");
+    const native = await openDatabase(dbPath, { driver: "native" });
+    native.exec("CREATE TABLE records (id INTEGER PRIMARY KEY)");
+    native.prepare("INSERT INTO records VALUES (?)").run(1);
+    native.pragma("journal_mode = WAL");
+    native.pragma("wal_autocheckpoint = 0");
+    const portable = await openDatabase(dbPath, { driver: "sql.js" });
+    try {
+      native.prepare("INSERT INTO records VALUES (?)").run(2);
+      expect(fs.statSync(`${dbPath}-wal`).size).toBeGreaterThan(0);
+      for (const readonly of [false, true]) {
+        await expect(openDatabase(dbPath, { driver: "sql.js", readonly })).rejects.toMatchObject({
+          code: "OMP_SQLITE_WAL_PENDING",
+        });
+      }
+      expect(() => portable.prepare("INSERT INTO records VALUES (?)").run(3)).toThrow(/nonempty SQLite WAL/);
+      expect(native.prepare("SELECT id FROM records ORDER BY id").all()).toEqual([{ id: 1 }, { id: 2 }]);
+    } finally {
+      portable.close();
+      native.close();
+    }
+    // Closing the last native handle checkpoints the WAL. Portable access is
+    // safe again, and the rejected stale writer must not have lost row 2.
+    const verify = await openDatabase(dbPath, { driver: "sql.js", readonly: true });
+    expect(verify.prepare("SELECT id FROM records ORDER BY id").all()).toEqual([{ id: 1 }, { id: 2 }]);
+    verify.close();
+  });
+
   it("uses WAL and persists page-level writes without replacing the DB file", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-native-driver-"));
     const dbPath = path.join(root, "omp.db");

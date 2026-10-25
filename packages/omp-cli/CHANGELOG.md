@@ -8,7 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Nothing yet
+- Prefer file-backed `node:sqlite` when the optional `better-sqlite3` addon is unavailable and the runtime supports the required binding APIs and FTS4. `OMP_SQLITE_DRIVER=node:sqlite` selects it explicitly; unsupported runtimes retain the portable `sql.js` fallback.
+
+### Performance
+- Write the `sql.js` exported byte array directly, avoiding an extra database-sized Buffer allocation. Partial writes are completed before fsync and atomic rename.
+- Load `sql.js` only when selected, so native capture processes do not load its WebAssembly loader.
+- Claude Stop capture reads complete transcript lines backwards, joins long-line fragments once, and immediately discards tool results and thinking blocks. It retains only response text and clipped tool inputs, avoiding turn-sized raw transcript retention and repeated long-line copies.
+
+### Fixed
+- Refuse `sql.js` access while a nonempty native SQLite WAL exists, including a WAL created after a portable handle was opened. This prevents missing committed rows or overwriting them with a stale database image; failed ingest remains queued for retry.
+- Preserve array-form Claude user prompt text when matching the response to its prompt.
 
 ## [2026.812.1] - 2026-08-12
 

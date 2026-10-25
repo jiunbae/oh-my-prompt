@@ -109,8 +109,6 @@ if (fileSize === prevSize) process.exit(0);
 // plus all subsequent assistant lines. Bounded by the size of the last turn.
 const CHUNK = 64 * 1024;
 const fd = fs.openSync(tp, "r");
-let buf = Buffer.alloc(0);
-let pos = fileSize;
 
 function isReal(entry) {
   if ((entry.type || entry.role) !== "user") return false;
@@ -163,52 +161,63 @@ function clipToolInput(value) {
   return walk(value);
 }
 
-// Read backwards in CHUNK-sized blocks. After each chunk, split on newlines
-// and try to parse complete lines (everything except the first/leftmost
-// fragment, which may be partial until we read more). Stop as soon as the
-// most-recent real user line has been seen.
-let entries = []; // chronological order
-let foundUser = false;
-const MAX_READ = fileSize;
-let totalRead = 0;
-
-while (pos > 0 && totalRead < MAX_READ) {
-  const readSize = Math.min(CHUNK, pos);
-  pos -= readSize;
-  const chunk = Buffer.alloc(readSize);
-  fs.readSync(fd, chunk, 0, readSize, pos);
-  buf = Buffer.concat([chunk, buf]);
-  totalRead += readSize;
-
-  // Split on newline. If we are not at the start of file, the first segment
-  // may be partial -> keep it in buf for the next iteration.
-  const text = buf.toString("utf-8");
-  const lines = text.split("\\n");
-  let startIdx;
-  if (pos === 0) {
-    startIdx = 0;
-    buf = Buffer.alloc(0);
-  } else {
-    // Hold back the first (possibly partial) line.
-    startIdx = 1;
-    buf = Buffer.from(lines[0], "utf-8");
+// Yield complete lines from newest to oldest. Keep fragments until a newline
+// is reached, then join once: repeatedly concatenating an unfinished large
+// JSON line copies a quadratic number of bytes. Decode only complete lines so
+// UTF-8 characters split across read boundaries remain intact.
+function* reverseLines() {
+  let pos = fileSize;
+  let fragments = [];
+  while (pos > 0) {
+    const readSize = Math.min(CHUNK, pos);
+    pos -= readSize;
+    const chunk = Buffer.alloc(readSize);
+    const bytes = fs.readSync(fd, chunk, 0, readSize, pos);
+    let end = bytes;
+    for (let i = bytes - 1; i >= 0; i--) {
+      if (chunk[i] !== 10) continue;
+      fragments.push(chunk.subarray(i + 1, end));
+      const line = fragments.length === 1 ? fragments[0] : Buffer.concat(fragments.reverse());
+      fragments = [];
+      yield line.toString("utf-8");
+      end = i;
+    }
+    if (end > 0) fragments.push(chunk.subarray(0, end));
   }
-  const parsed = [];
-  for (let i = startIdx; i < lines.length; i++) {
-    const ln = lines[i];
-    if (!ln) continue;
-    let e;
-    try { e = JSON.parse(ln); } catch (_) { continue; }
-    parsed.push(e);
-  }
-  entries = parsed.concat(entries);
-
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (isReal(entries[i])) { foundUser = true; break; }
-  }
-  if (foundUser) break;
+  if (fragments.length) yield Buffer.concat(fragments.reverse()).toString("utf-8");
 }
-fs.closeSync(fd);
+
+// Discard tool results, thinking blocks and other metadata immediately. Keep
+// only the text and clipped tool inputs we actually send to ingest, rather
+// than retaining every parsed object in a long agent turn.
+const entries = [];
+let foundUser = false;
+try {
+  for (const line of reverseLines()) {
+    if (!line) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    const content = entry.message?.content ?? entry.content;
+    if (isReal(entry)) {
+      entries.push({ type: "user", content: extractText(content) });
+      foundUser = true;
+      break;
+    }
+    if ((entry.type || entry.role) !== "assistant") continue;
+    const retained = typeof content === "string" ? content :
+      Array.isArray(content) ? content.flatMap(block => {
+        if (block?.type === "text") return [{ type: "text", text: block.text }];
+        if (block?.type === "tool_use" && block.id && block.name) {
+          return [{ type: "tool_use", id: block.id, name: block.name, input: clipToolInput(block.input || {}) }];
+        }
+        return [];
+      }) : [];
+    if (retained.length) entries.push({ type: "assistant", content: retained, cwd: entry.cwd });
+  }
+} finally {
+  fs.closeSync(fd);
+}
+entries.reverse();
 
 function writeCheckpoint() {
   try {
@@ -246,7 +255,7 @@ for (let i = lastUserIdx + 1; i < entries.length; i++) {
         toolList.push({
           tool_use_id: String(b.id),
           tool_name: String(b.name),
-          input: clipToolInput(b.input || {}),
+          input: b.input || {},
           sequence: toolSeq++,
           cwd: e.cwd || "",
         });

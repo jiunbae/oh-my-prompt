@@ -380,8 +380,9 @@ synced as one batch; a one-hour interval is only a missed-event and network
 recovery safety net. The resident watcher does not open the database: each sync
 runs in a short-lived, low-priority worker so transient memory is reclaimed and
 interactive workloads win CPU and disk contention. Local storage prefers native
-SQLite WAL page writes and automatically retains `sql.js` as the portable
-fallback. To disable or remove it:
+SQLite WAL page writes through `better-sqlite3`, then built-in `node:sqlite`
+when available. Older runtimes retain `sql.js` as the portable fallback.
+`omp status` reports the selected driver. To disable or remove it:
 
 ```bash
 omp sync auto stop
@@ -527,5 +528,5 @@ MIT © Jiun Bae
 
 - Inspired by oh-my-zsh and prompt engineering best practices
 - Built for Claude Code, Codex, and OpenCode users
-- Uses optional `better-sqlite3` with WAL page writes when a compatible native
-  binary is available, with `sql.js` as the build-tool-free Node.js 20+ fallback
+- Uses optional `better-sqlite3`, then built-in `node:sqlite` when its required
+  binding APIs and FTS4 are available, with `sql.js` as the portable fallback

@@ -75,8 +75,20 @@ jobs:
           fallback_json="$(XDG_CONFIG_HOME="$fallback_dir/xdg-fallback" "$fallback_dir/node_modules/.bin/omp" status --json)"
           STATUS_JSON="$fallback_json" node -e "
             const status = JSON.parse(process.env.STATUS_JSON);
-            if (status.sqliteDriver.name !== 'sql.js' || !status.sqliteDriver.fallback) {
-              throw new Error('expected sql.js when optional dependencies are omitted');
+            let expected = 'sql.js';
+            try {
+              const { DatabaseSync } = require('node:sqlite');
+              const probe = new DatabaseSync(':memory:');
+              try {
+                if (typeof probe.prepare('SELECT 1').setAllowUnknownNamedParameters === 'function') {
+                  probe.exec('CREATE VIRTUAL TABLE temp.probe USING fts4(text)');
+                  expected = 'node:sqlite';
+                }
+              } finally { probe.close(); }
+            } catch {}
+            if (status.sqliteDriver.name !== expected || status.sqliteDriver.fallback !== (expected === 'sql.js')) {
+              throw new Error('unexpected SQLite driver without optional dependencies: ' + status.sqliteDriver.name);
             }
           "
+          printf '%s\n' '{"source":"ci","text":"capture without optional addons"}' | XDG_CONFIG_HOME="$fallback_dir/xdg-fallback" "$fallback_dir/node_modules/.bin/omp" ingest --stdin --json
           rm -f "$tarball"

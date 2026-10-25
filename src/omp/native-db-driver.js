@@ -50,11 +50,11 @@ function createTransitionBackup(filePath, backupPath) {
   }
 }
 
-function writeTransitionMarker(markerPath) {
+function writeTransitionMarker(markerPath, driver) {
   const temporaryPath = `${markerPath}.tmp-${process.pid}`;
   try {
     const payload = JSON.stringify({
-      driver: "better-sqlite3",
+      driver,
       transitionedAt: new Date().toISOString(),
     });
     const fd = fs.openSync(temporaryPath, "wx", 0o600);
@@ -112,7 +112,7 @@ class NativeDatabaseWrapper {
     this._readonly = !!options.readonly;
     this._batchMode = false;
     this._savepointId = 0;
-    this.driver = "better-sqlite3";
+    this.driver = options.driver || "better-sqlite3";
   }
 
   setBatchMode(enabled) {
@@ -205,7 +205,7 @@ function openNativeDatabase(NativeDatabase, filePath, options = {}) {
           `Native SQLite transition aborted: quick_check returned ${String(integrity)}`
         );
       }
-      writeTransitionMarker(markerPath);
+      writeTransitionMarker(markerPath, options.driver || "better-sqlite3");
     }
   }
   return new NativeDatabaseWrapper(db, filePath, options);

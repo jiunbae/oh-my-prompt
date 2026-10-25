@@ -1,10 +1,24 @@
-const initSqlJs = require("sql.js");
 const fs = require("fs");
 const path = require("path");
 
 const WRITE_LOCK_TIMEOUT_MS = 2_000;
 const WRITE_LOCK_STALE_MS = 30_000;
 const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
+
+function assertNoPendingWal(filePath) {
+  if (!filePath) return;
+  try {
+    if (fs.statSync(`${filePath}-wal`).size === 0) return;
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  const error = new Error(
+    "sql.js cannot read a database with a nonempty SQLite WAL; use a native SQLite driver or checkpoint it with the native writer closed"
+  );
+  error.code = "OMP_SQLITE_WAL_PENDING";
+  throw error;
+}
 
 function fileVersion(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return null;
@@ -61,8 +75,22 @@ function loadNativeDriver() {
 function resolveDriver(requested) {
   const preference = requested || process.env.OMP_SQLITE_DRIVER || "auto";
   if (preference === "sql.js") return { name: "sql.js", NativeDatabase: null };
+  if (preference === "node:sqlite") {
+    const { NodeSqliteDatabase } = require("./node-sqlite-driver");
+    return { name: "node:sqlite", NativeDatabase: NodeSqliteDatabase };
+  }
   const NativeDatabase = loadNativeDriver();
   if (NativeDatabase) return { name: "better-sqlite3", NativeDatabase };
+  // Optional addons can be omitted or fail to build after a Node upgrade.
+  // Prefer file-backed built-in SQLite over loading the entire DB into WASM.
+  if (preference === "auto") {
+    try {
+      const { NodeSqliteDatabase } = require("./node-sqlite-driver");
+      return { name: "node:sqlite", NativeDatabase: NodeSqliteDatabase };
+    } catch {
+      // Node 20 and builds without node:sqlite retain the portable fallback.
+    }
+  }
   if (preference === "native" || preference === "better-sqlite3") {
     const error = new Error(
       "Native SQLite was requested but better-sqlite3 is not installed for this platform"
@@ -77,13 +105,13 @@ function getDriverInfo(requested) {
   const selected = resolveDriver(requested);
   return {
     name: selected.name,
-    native: selected.name === "better-sqlite3",
+    native: selected.name !== "sql.js",
     fallback: selected.name === "sql.js",
   };
 }
 
 async function initDriver() {
-  if (!SQL) SQL = await initSqlJs();
+  if (!SQL) SQL = await require("sql.js")();
   return SQL;
 }
 
@@ -321,6 +349,7 @@ class DatabaseWrapper {
     const lockPath = `${this._filePath}.write.lock`;
     waitForWriteLock(lockPath);
     try {
+      assertNoPendingWal(this._filePath);
       const currentVersion = fileVersion(this._filePath);
       if (currentVersion !== this._diskVersion) {
         const conflict = new Error(
@@ -333,7 +362,14 @@ class DatabaseWrapper {
       const data = this._db.export();
       const fd = fs.openSync(tmp, "w", 0o600);
       try {
-        fs.writeSync(fd, Buffer.from(data));
+        // export() already returns a Uint8Array. Buffer.from(data) would copy
+        // the entire database again, adding hundreds of MB to peak RSS.
+        let written = 0;
+        while (written < data.byteLength) {
+          const bytes = fs.writeSync(fd, data, written, data.byteLength - written);
+          if (bytes === 0) throw new Error("Local database write made no progress");
+          written += bytes;
+        }
         fs.fsyncSync(fd);
       } finally {
         fs.closeSync(fd);
@@ -392,8 +428,14 @@ async function openDatabase(filePath, options = {}) {
   const selected = resolveDriver(options.driver);
   if (selected.NativeDatabase) {
     const { openNativeDatabase } = require("./native-db-driver");
-    return openNativeDatabase(selected.NativeDatabase, filePath, options);
+    return openNativeDatabase(selected.NativeDatabase, filePath, {
+      ...options, driver: selected.name,
+    });
   }
+  // sql.js reads only the main file, so opening a live WAL database could
+  // silently miss committed rows and later overwrite them with a stale image.
+  // Reject before allocating the database-sized WASM heap, including readers.
+  assertNoPendingWal(filePath);
   const drv = await initDriver();
   if (filePath && !options.readonly) sweepOrphanTemps(filePath);
 
@@ -414,6 +456,7 @@ async function openDatabase(filePath, options = {}) {
     if (!fileBuffer || diskVersion === null) {
       throw new Error("Local database changed repeatedly while it was being opened");
     }
+    assertNoPendingWal(filePath);
     db = new drv.Database(fileBuffer);
   } else {
     db = new drv.Database();
