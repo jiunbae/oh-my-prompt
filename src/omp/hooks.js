@@ -271,11 +271,9 @@ if (parts.length === 0 && toolList.length === 0) {
 const uc = (entries[lastUserIdx].message && entries[lastUserIdx].message.content) || entries[lastUserIdx].content;
 const userText = typeof uc === "string" ? uc : "";
 
-// Update checkpoint *before* emitting so a concurrent Stop firing for the
-// same session bytes will short-circuit.
-writeCheckpoint();
-
-process.stdout.write(JSON.stringify({
+// Acknowledge the snapshot only after ingest succeeds. Statting the file
+// again after ingest could skip bytes appended while the database was busy.
+process.stdout.write(String(fileSize) + "\\n" + JSON.stringify({
   session_id: sid,
   role: "assistant",
   text: parts.join("\\n\\n"),
@@ -290,7 +288,31 @@ process.stdout.write(JSON.stringify({
 NODESCRIPT
 )
   if [ -n "$response" ]; then
-    printf '%s\\n' "$response" | "$OMP_BIN" ingest --stdin || true
+    printf '%s\\n' "$response" | (
+      IFS= read -r checkpoint_size
+      if "$OMP_BIN" ingest --stdin; then
+        OMP_PAYLOAD="$payload" OMP_CAPTURE_SIZE="$checkpoint_size" node << 'CHECKPOINT'
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+try {
+  const event = JSON.parse(process.env.OMP_PAYLOAD);
+  const size = Number(process.env.OMP_CAPTURE_SIZE);
+  if (!Number.isSafeInteger(size) || size < 0) process.exit(0);
+  const dir = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "omp", "checkpoints");
+  const target = path.join(dir, event.session_id.replace(/[^A-Za-z0-9._-]/g, "_") + ".json");
+  fs.mkdirSync(dir, { recursive: true });
+  const temporary = target + "." + process.pid + ".tmp";
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ size }), { mode: 0o600 });
+    fs.renameSync(temporary, target);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch {}
+  }
+} catch { /* A missing checkpoint can safely be retried. */ }
+CHECKPOINT
+      fi
+    ) || true
   fi
 ) &
 disown $! 2>/dev/null || true

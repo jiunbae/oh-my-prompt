@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Stop capture reads complete transcript lines backwards, joins long-line fragments once, and immediately discards tool results and thinking blocks. It retains only response text and clipped tool inputs, avoiding turn-sized raw transcript retention and repeated long-line copies.
 
 ### Fixed
+- Advance the Claude Stop checkpoint only after successful ingest, so a failed capture can retry unchanged transcript bytes. Checkpoints acknowledge the parsed snapshot size, preserving bytes appended while ingest is running.
 - Refuse `sql.js` access while a nonempty native SQLite WAL exists, including a WAL created after a portable handle was opened. This prevents missing committed rows or overwriting them with a stale database image; failed ingest remains queued for retry.
 - Preserve array-form Claude user prompt text when matching the response to its prompt.
 
