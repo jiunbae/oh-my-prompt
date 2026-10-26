@@ -55,7 +55,7 @@ async function sendViaSmtp(options: SendEmailOptions): Promise<EmailResult> {
     const nodemailer = nodemailerModule?.default ?? nodemailerModule;
     if (!nodemailer || typeof nodemailer.createTransport !== "function") {
       throw new Error(
-        "EMAIL_PROVIDER=smtp requires the 'nodemailer' package, which is not installed. Run `npm install nodemailer` (and `@types/nodemailer`) or choose a different EMAIL_PROVIDER (resend/sendgrid).",
+        "EMAIL_PROVIDER=smtp requires the 'nodemailer' package, which is not installed. Run `pnpm add nodemailer` or choose a different EMAIL_PROVIDER (resend/sendgrid).",
       );
     }
     const transporter = nodemailer.createTransport({
