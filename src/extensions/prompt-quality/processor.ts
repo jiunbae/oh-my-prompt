@@ -174,16 +174,20 @@ async function flushPendingUpdates(
 
   for (let i = 0; i < updates.length; i += DB_BATCH_SIZE) {
     const chunk = updates.slice(i, i + DB_BATCH_SIZE);
+    // Bound parameters reach Postgres untyped, and a CASE whose branches are all
+    // untyped resolves to text — "column quality_score is of type integer but
+    // expression is of type text" (every run failed this way from 2026-10-25).
+    // Cast each branch to its column type.
     const ids = chunk.map((r) => sql`${r.id}`);
-    const scoreCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityScore}`);
-    const clarityCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityClarity}`);
-    const specificityCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualitySpecificity}`);
-    const contextCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityContext}`);
-    const constraintsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityConstraints}`);
-    const structureCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityStructure}`);
+    const scoreCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityScore}::integer`);
+    const clarityCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityClarity}::integer`);
+    const specificityCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualitySpecificity}::integer`);
+    const contextCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityContext}::integer`);
+    const constraintsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityConstraints}::integer`);
+    const structureCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.qualityStructure}::integer`);
     const detailsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${JSON.stringify(r.qualityDetails)}::jsonb`);
     const tagsCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${sql`ARRAY[${sql.join(r.topicTags.map((t) => sql`${t}`), sql`, `)}]::text[]`}`);
-    const enrichedCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.enrichedAt}`);
+    const enrichedCases = chunk.map((r) => sql`WHEN ${r.id} THEN ${r.enrichedAt.toISOString()}::timestamptz`);
 
     await db.execute(sql`
       UPDATE prompts SET
