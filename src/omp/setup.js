@@ -98,6 +98,37 @@ function cliDisplayName(cli) {
   return "OpenCode";
 }
 
+// --- Storage mode ---
+//
+// "local":  prompts stay in the local SQLite database; no server URL,
+//           account, or token is asked for or required.
+// "server": additionally sync to an Oh My Prompt server (login or token).
+//
+// Returns { mode, error }. mode is null when the user should be asked.
+function resolveSetupMode(options) {
+  const wantsLocal =
+    options.local === true || options.local === "true" || options.mode === "local";
+  const wantsServer =
+    options.mode === "server" || !!options.server || !!options.token;
+
+  if (options.mode && !["local", "server"].includes(options.mode)) {
+    return { mode: null, error: `Unknown --mode "${options.mode}". Use "local" or "server".` };
+  }
+  if (wantsLocal && wantsServer) {
+    return {
+      mode: null,
+      error: "--local cannot be combined with --server, --token, or --mode server.",
+    };
+  }
+  if (wantsLocal) return { mode: "local", error: null };
+  if (wantsServer) return { mode: "server", error: null };
+  return { mode: null, error: null };
+}
+
+function hasServerConfig(config) {
+  return !!(config.server && config.server.url && config.server.token);
+}
+
 // --- Main wizard ---
 
 async function runSetup(options) {
@@ -123,6 +154,16 @@ async function runSetup(options) {
   const { getConfigPath } = require("./paths");
   const hasExistingConfig = fs.existsSync(getConfigPath());
 
+  const resolved = resolveSetupMode(options);
+  if (resolved.error) {
+    process.stderr.write(`Error: ${resolved.error}\n`);
+    result.ok = false;
+    process.exitCode = 2;
+    return result;
+  }
+  let mode = resolved.mode;
+  result.mode = mode;
+
   // --- Interactive path (clack prompts) ---
   if (interactive) {
     const clack = await loadClack();
@@ -146,98 +187,183 @@ async function runSetup(options) {
       }
     }
 
-    // --- Step 1: Server URL ---
-    const defaultUrl = config.server.url || "https://prompt.jiun.dev";
-    let serverUrl;
-    if (options.server) {
-      serverUrl = normalizeUrl(options.server);
-      clack.log.info(`Server URL: ${c.cyan(serverUrl)}`);
-    } else {
-      const answer = await clack.text({
-        message: "Server URL",
-        placeholder: defaultUrl,
-        defaultValue: defaultUrl,
-        validate(value) {
-          const url = normalizeUrl(value);
-          if (!url) return "Server URL is required.";
-        },
-      });
-      handleCancel(answer);
-      serverUrl = normalizeUrl(answer);
-    }
-    config.server.url = serverUrl;
-
-    // --- Step 2: Authentication ---
-    const existingToken = config.server.token;
-    let token;
-    if (options.token) {
-      token = options.token;
-      clack.log.info("Using provided token.");
-    } else {
-      const authChoice = await clack.select({
-        message: "Authentication",
+    // --- Step 0: Storage mode ---
+    if (!mode) {
+      const choice = await clack.select({
+        message: "Where should prompts be stored?",
+        initialValue: hasServerConfig(config) ? "server" : "local",
         options: [
           {
-            value: "login",
-            label: "Login with email & password",
-            hint: "recommended",
+            value: "local",
+            label: "Local only",
+            hint: "SQLite on this machine, no account needed",
           },
-          { value: "token", label: "Paste existing API token" },
+          {
+            value: "server",
+            label: "Local + sync to a server",
+            hint: "requires a server account or API token",
+          },
         ],
       });
-      handleCancel(authChoice);
+      handleCancel(choice);
+      mode = choice;
+      result.mode = mode;
+    }
 
-      if (authChoice === "login") {
-        const email = await clack.text({
-          message: "Email",
+    if (mode === "local" && hasServerConfig(config)) {
+      clack.log.info(
+        c.dim(
+          "Existing server settings are left unchanged. To stop syncing, run: omp config set server.url \"\""
+        )
+      );
+    }
+
+    if (mode === "server") {
+      // --- Step 1: Server URL ---
+      const defaultUrl = config.server.url || "https://prompt.jiun.dev";
+      let serverUrl;
+      if (options.server) {
+        serverUrl = normalizeUrl(options.server);
+        clack.log.info(`Server URL: ${c.cyan(serverUrl)}`);
+      } else {
+        const answer = await clack.text({
+          message: "Server URL",
+          placeholder: defaultUrl,
+          defaultValue: defaultUrl,
           validate(value) {
-            if (!value || !value.trim()) return "Email is required.";
+            const url = normalizeUrl(value);
+            if (!url) return "Server URL is required.";
           },
         });
-        handleCancel(email);
+        handleCancel(answer);
+        serverUrl = normalizeUrl(answer);
+      }
+      config.server.url = serverUrl;
 
-        const password = await clack.password({
-          message: "Password",
-          validate(value) {
-            // Allow empty for new account registration flow
-          },
+      // --- Step 2: Authentication ---
+      const existingToken = config.server.token;
+      let token;
+      if (options.token) {
+        token = options.token;
+        clack.log.info("Using provided token.");
+      } else {
+        const authChoice = await clack.select({
+          message: "Authentication",
+          options: [
+            {
+              value: "login",
+              label: "Login with email & password",
+              hint: "recommended",
+            },
+            { value: "token", label: "Paste existing API token" },
+          ],
         });
-        handleCancel(password);
+        handleCancel(authChoice);
 
-        if (password) {
-          // Existing account - try login
-          const s = clack.spinner();
-          s.start("Authenticating...");
-          const loginResult = await cliLogin(serverUrl, email, password);
+        if (authChoice === "login") {
+          const email = await clack.text({
+            message: "Email",
+            validate(value) {
+              if (!value || !value.trim()) return "Email is required.";
+            },
+          });
+          handleCancel(email);
 
-          if (loginResult.ok) {
-            token = loginResult.token;
-            s.stop(`Logged in as ${c.cyan(loginResult.user.email)}`);
-          } else if (loginResult.code === "USER_NOT_FOUND") {
-            s.stop(c.yellow("Account not found."));
-            const doRegister = await clack.confirm({
-              message: "Create a new account with this email?",
-              initialValue: true,
-            });
-            handleCancel(doRegister);
-            if (!doRegister) {
-              clack.outro(c.dim("Setup cancelled."));
+          const password = await clack.password({
+            message: "Password",
+            validate(value) {
+              // Allow empty for new account registration flow
+            },
+          });
+          handleCancel(password);
+
+          if (password) {
+            // Existing account - try login
+            const s = clack.spinner();
+            s.start("Authenticating...");
+            const loginResult = await cliLogin(serverUrl, email, password);
+
+            if (loginResult.ok) {
+              token = loginResult.token;
+              s.stop(`Logged in as ${c.cyan(loginResult.user.email)}`);
+            } else if (loginResult.code === "USER_NOT_FOUND") {
+              s.stop(c.yellow("Account not found."));
+              const doRegister = await clack.confirm({
+                message: "Create a new account with this email?",
+                initialValue: true,
+              });
+              handleCancel(doRegister);
+              if (!doRegister) {
+                clack.outro(c.dim("Setup cancelled."));
+                result.ok = false;
+                return result;
+              }
+
+              let regPassword = password;
+              if (regPassword.length < 8) {
+                clack.log.warn("Password must be at least 8 characters.");
+                regPassword = await clack.password({
+                  message: "Password (min 8 chars)",
+                  validate(value) {
+                    if (!value || value.length < 8)
+                      return "Password must be at least 8 characters.";
+                  },
+                });
+                handleCancel(regPassword);
+              }
+              const confirmPw = await clack.password({
+                message: "Confirm password",
+                validate(value) {
+                  if (value !== regPassword) return "Passwords do not match.";
+                },
+              });
+              handleCancel(confirmPw);
+
+              const regName = await clack.text({
+                message: "Name (optional)",
+                placeholder: "Press Enter to skip",
+              });
+              handleCancel(regName);
+
+              const s2 = clack.spinner();
+              s2.start("Registering...");
+              const regResult = await cliLogin(
+                serverUrl,
+                email,
+                regPassword,
+                true,
+                regName || undefined
+              );
+              if (regResult.ok) {
+                token = regResult.token;
+                s2.stop(
+                  `Account created for ${c.cyan(regResult.user.email)}`
+                );
+              } else {
+                s2.stop(c.red("Registration failed."));
+                clack.log.error(regResult.error);
+                clack.outro(c.red("Setup failed."));
+                result.ok = false;
+                return result;
+              }
+            } else {
+              s.stop(c.red("Authentication failed."));
+              clack.log.error(loginResult.error);
+              clack.outro(c.red("Setup failed."));
               result.ok = false;
               return result;
             }
-
-            let regPassword = password;
-            if (regPassword.length < 8) {
-              clack.log.warn("Password must be at least 8 characters.");
-              regPassword = await clack.password({
-                message: "Password (min 8 chars)",
-                validate(value) {
-                  if (!value || value.length < 8)
-                    return "Password must be at least 8 characters.";
-                },
-              });
-              handleCancel(regPassword);
-            }
+          } else {
+            // No password — new account registration
+            clack.log.info(`Creating a new account for ${c.cyan(email)}`);
+            const regPassword = await clack.password({
+              message: "Set password (min 8 chars)",
+              validate(value) {
+                if (!value || value.length < 8)
+                  return "Password must be at least 8 characters.";
+              },
+            });
+            handleCancel(regPassword);
             const confirmPw = await clack.password({
               message: "Confirm password",
               validate(value) {
@@ -245,15 +371,14 @@ async function runSetup(options) {
               },
             });
             handleCancel(confirmPw);
-
             const regName = await clack.text({
               message: "Name (optional)",
               placeholder: "Press Enter to skip",
             });
             handleCancel(regName);
 
-            const s2 = clack.spinner();
-            s2.start("Registering...");
+            const s = clack.spinner();
+            s.start("Registering...");
             const regResult = await cliLogin(
               serverUrl,
               email,
@@ -263,93 +388,42 @@ async function runSetup(options) {
             );
             if (regResult.ok) {
               token = regResult.token;
-              s2.stop(
+              s.stop(
                 `Account created for ${c.cyan(regResult.user.email)}`
               );
             } else {
-              s2.stop(c.red("Registration failed."));
+              s.stop(c.red("Registration failed."));
               clack.log.error(regResult.error);
               clack.outro(c.red("Setup failed."));
               result.ok = false;
               return result;
             }
-          } else {
-            s.stop(c.red("Authentication failed."));
-            clack.log.error(loginResult.error);
-            clack.outro(c.red("Setup failed."));
-            result.ok = false;
-            return result;
           }
         } else {
-          // No password — new account registration
-          clack.log.info(`Creating a new account for ${c.cyan(email)}`);
-          const regPassword = await clack.password({
-            message: "Set password (min 8 chars)",
+          // Manual token paste
+          const tokenInput = await clack.password({
+            message: "API Token",
             validate(value) {
-              if (!value || value.length < 8)
-                return "Password must be at least 8 characters.";
+              if (!value && !existingToken) return "Token is required.";
             },
           });
-          handleCancel(regPassword);
-          const confirmPw = await clack.password({
-            message: "Confirm password",
-            validate(value) {
-              if (value !== regPassword) return "Passwords do not match.";
-            },
-          });
-          handleCancel(confirmPw);
-          const regName = await clack.text({
-            message: "Name (optional)",
-            placeholder: "Press Enter to skip",
-          });
-          handleCancel(regName);
-
-          const s = clack.spinner();
-          s.start("Registering...");
-          const regResult = await cliLogin(
-            serverUrl,
-            email,
-            regPassword,
-            true,
-            regName || undefined
-          );
-          if (regResult.ok) {
-            token = regResult.token;
-            s.stop(
-              `Account created for ${c.cyan(regResult.user.email)}`
-            );
-          } else {
-            s.stop(c.red("Registration failed."));
-            clack.log.error(regResult.error);
-            clack.outro(c.red("Setup failed."));
-            result.ok = false;
-            return result;
+          handleCancel(tokenInput);
+          token = tokenInput || existingToken;
+          if (!tokenInput && existingToken) {
+            clack.log.info("Keeping existing token.");
           }
         }
-      } else {
-        // Manual token paste
-        const tokenInput = await clack.password({
-          message: "API Token",
-          validate(value) {
-            if (!value && !existingToken) return "Token is required.";
-          },
-        });
-        handleCancel(tokenInput);
-        token = tokenInput || existingToken;
-        if (!tokenInput && existingToken) {
-          clack.log.info("Keeping existing token.");
-        }
       }
-    }
 
-    if (!token && !options["skip-validate"]) {
-      clack.log.error("Token is required. Use --token or --skip-validate.");
-      clack.outro(c.red("Setup failed."));
-      result.ok = false;
-      process.exitCode = 2;
-      return result;
+      if (!token && !options["skip-validate"]) {
+        clack.log.error("Token is required. Use --token or --skip-validate.");
+        clack.outro(c.red("Setup failed."));
+        result.ok = false;
+        process.exitCode = 2;
+        return result;
+      }
+      config.server.token = token || "";
     }
-    config.server.token = token || "";
 
     // --- Step 3: Device Name ---
     const defaultDevice = config.server.deviceId || os.hostname();
@@ -529,6 +603,7 @@ async function runSetup(options) {
 
     // --- Validate Server ---
     if (
+      mode === "server" &&
       !options["skip-validate"] &&
       !options["dry-run"] &&
       config.server.token
@@ -632,18 +707,37 @@ async function runSetup(options) {
         .filter(([, v]) => v.installed)
         .map(([k]) => k);
 
+      const serverLine =
+        mode === "local"
+          ? config.server.url
+            ? `${c.cyan(config.server.url)} ${c.dim("(unchanged)")}`
+            : c.dim("none (local only)")
+          : c.cyan(config.server.url);
+
       clack.note(
         [
-          `${c.dim("Server:")}  ${c.cyan(config.server.url)}`,
+          `${c.dim("Storage:")} ${config.storage.sqlite.path}`,
+          `${c.dim("Server:")}  ${serverLine}`,
           `${c.dim("Device:")}  ${config.server.deviceId}`,
           `${c.dim("Hooks:")}   ${installedHooks.length ? installedHooks.join(", ") : c.dim("none")}`,
         ].join("\n"),
         "Setup Complete"
       );
 
-      clack.outro(
-        `Run ${c.cyan("omp backfill")} to import existing prompts`
-      );
+      if (mode === "local") {
+        clack.log.info(
+          [
+            `Import history:  ${c.cyan("omp backfill")}`,
+            `Open dashboard:  ${c.cyan("omp serve --local")}`,
+            `Add a server:    ${c.cyan("omp setup --mode server")}`,
+          ].join("\n")
+        );
+        clack.outro("Prompts are now captured locally. No account needed.");
+      } else {
+        clack.outro(
+          `Run ${c.cyan("omp backfill")} to import existing prompts`
+        );
+      }
     }
 
     return result;
@@ -652,19 +746,30 @@ async function runSetup(options) {
   // --- Non-interactive path (--yes or piped input) ---
   const output = process.stdout;
 
-  const defaultUrl = config.server.url || "https://prompt.jiun.dev";
-  const serverUrl = normalizeUrl(options.server || defaultUrl);
-  config.server.url = serverUrl;
-
-  const existingToken = config.server.token;
-  const token = options.token || existingToken;
-  if (!token && !options["skip-validate"]) {
-    output.write("Error: Token is required. Use --token or --skip-validate.\n");
-    result.ok = false;
-    process.exitCode = 2;
-    return result;
+  // Without an explicit mode, keep the historical non-interactive behavior
+  // (server mode) so existing scripts are unaffected.
+  if (!mode) {
+    mode = "server";
+    result.mode = mode;
   }
-  config.server.token = token || "";
+
+  if (mode === "server") {
+    const defaultUrl = config.server.url || "https://prompt.jiun.dev";
+    const serverUrl = normalizeUrl(options.server || defaultUrl);
+    config.server.url = serverUrl;
+
+    const existingToken = config.server.token;
+    const token = options.token || existingToken;
+    if (!token && !options["skip-validate"]) {
+      output.write(
+        "Error: Token is required. Use --token, or --local to record prompts locally without a server account.\n"
+      );
+      result.ok = false;
+      process.exitCode = 2;
+      return result;
+    }
+    config.server.token = token || "";
+  }
 
   const defaultDevice = config.server.deviceId || os.hostname();
   config.server.deviceId = options.device || defaultDevice;
@@ -746,6 +851,7 @@ async function runSetup(options) {
 
   // Validate Server
   if (
+    mode === "server" &&
     !options["skip-validate"] &&
     !options["dry-run"] &&
     config.server.token
@@ -791,9 +897,28 @@ async function runSetup(options) {
 
   if (options.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  } else if (mode === "local") {
+    const installed = Object.entries(result.hooks)
+      .filter(([, v]) => v.installed)
+      .map(([k]) => k);
+    output.write(
+      [
+        hasServerConfig(config)
+          ? `Setup complete (local mode; existing server ${config.server.url} left unchanged — clear it with: omp config set server.url "").`
+          : "Setup complete (local only, no server account).",
+        `  Storage: ${config.storage.sqlite.path}`,
+        `  Hooks:   ${installed.length ? installed.join(", ") : "none"}`,
+        result.db && result.db.error ? `  Database error: ${result.db.error}` : null,
+        "Next: omp backfill   # import existing history",
+        "      omp serve --local   # dashboard at http://localhost:3000",
+        "      omp setup --mode server   # add server sync later",
+      ]
+        .filter(Boolean)
+        .join("\n") + "\n"
+    );
   }
 
   return result;
 }
 
-module.exports = { runSetup };
+module.exports = { runSetup, resolveSetupMode };

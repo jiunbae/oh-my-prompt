@@ -63,9 +63,9 @@ Quality scores, token usage,<br/>session patterns, trends
 </td>
 <td width="33%" align="center">
 
-**🔄 Sync**
+**🔄 Local first**
 
-Local SQLite → server API<br/>Works offline, syncs when ready
+Local SQLite, no account needed<br/>Optional sync to your own server
 
 </td>
 </tr>
@@ -104,7 +104,9 @@ Install and set up Oh My Prompt (https://github.com/jiunbae/oh-my-prompt).
 npm install -g oh-my-prompt && omp setup
 
 Run `omp setup` interactively — do NOT pass any flags.
-Ask me for each input (server URL, auth, device name, hooks).
+Ask me for each input. The first question is the storage mode:
+"Local only" needs no server or account; "sync to a server" also asks
+for server URL and login/token. Then device name and hooks.
 When done, run `omp doctor` and summarize the result.
 ```
 
@@ -121,6 +123,10 @@ When done, run `omp doctor` and summarize the result.
 $ omp setup
 
 ┌  oh-my-prompt
+│
+◆  Where should prompts be stored?
+│  ○ Local only (SQLite on this machine, no account needed)
+│  ● Local + sync to a server
 │
 ◆  Server URL
 │  https://prompt.jiun.dev
@@ -163,7 +169,10 @@ $ omp setup
 └  Run omp backfill to import existing prompts
 ```
 
-Non-interactive mode (`--yes`) and JSON output (`--json`) are fully supported for CI/scripting.
+Choosing **Local only** skips the server URL and authentication steps entirely.
+
+Non-interactive mode (`--yes`) and JSON output (`--json`) are fully supported for CI/scripting:
+`omp setup --local --yes` sets up local-only capture with no prompts at all.
 
 </details>
 
@@ -219,18 +228,26 @@ omp setup
 
 ## Start with Human
 
+No server, account, or email needed to start:
+
 ```bash
 # Install
 npm install -g oh-my-prompt
 
-# Setup (interactive wizard)
-omp setup
+# Setup — pick "Local only" (or skip the questions with --local --yes)
+omp setup --local
 
-# Verify
+# Verify, then open the dashboard
 omp doctor
+omp serve --local     # http://localhost:3000
 ```
 
-That's it. Now use Claude Code, Codex, OpenCode, or Gemini CLI normally — prompts are captured automatically.
+That's it. Now use Claude Code, Codex, OpenCode, or Gemini CLI normally — prompts are captured automatically into a local SQLite database.
+
+```bash
+omp backfill          # optional: import your existing history
+omp setup --mode server   # later: add sync to a server (login or API token)
+```
 
 ```bash
 claude "Refactor this function to use async/await"
@@ -241,8 +258,8 @@ claude "Refactor this function to use async/await"
 
 | | **SQLite (no Docker)** | **Local Docker** | **Server** |
 |:--|:--|:--|:--|
-| **Setup** | `omp serve --local` | `omp serve` | Deploy to your server |
-| **Requires** | Nothing | Docker | Docker + domain |
+| **Setup** | `omp setup --local` → `omp serve --local` | `omp serve` | Deploy, then `omp setup --mode server` |
+| **Requires** | Nothing (Node.js 20+, no account) | Docker | Docker + domain |
 | **Dashboard** | `localhost:3000` | `localhost:3000` | `your-domain.com` |
 | **Database** | SQLite (same as CLI) | PostgreSQL + Redis | PostgreSQL + Redis |
 | **Data** | Local only | Local only | Multi-device sync |
@@ -263,6 +280,8 @@ omp sync         # Sync captured prompts to local dashboard
 
 **Server Mode** — deploy once, sync from anywhere:
 ```bash
+omp setup --mode server   # wizard: server URL + login or API token
+# or configure directly:
 omp config set server.url https://your-domain.com
 printf '%s' "$OMP_TOKEN" | omp config set server.token --stdin
 omp sync         # Sync to remote server
@@ -304,7 +323,11 @@ $ omp setup
 └  Run omp backfill to import existing prompts
 ```
 
-Flags: `--yes` (non-interactive), `--json` (machine-readable), `--skip-validate`, `--server`, `--token`, `--device`
+The first step asks **Local only** (no server/account) or **sync to a server**; the server URL and authentication steps only appear for server sync.
+
+Flags: `--local` (local-only, no server), `--mode local|server`, `--yes` (non-interactive), `--json` (machine-readable), `--skip-validate`, `--server`, `--token`, `--device`
+
+`omp setup --yes` without `--local` keeps its previous behavior and requires `--token`.
 </details>
 
 <details>
@@ -354,7 +377,7 @@ $ omp stats --view weekday --since 7d
 
 | Command | Description |
 |:--------|:------------|
-| `omp setup` | Interactive configuration wizard |
+| `omp setup [--local\|--mode server]` | Configuration wizard (local-only or server sync) |
 | `omp install [claude\|codex\|opencode\|gemini\|all]` | Install capture hooks |
 | `omp uninstall [claude\|codex\|opencode\|gemini\|all]` | Remove capture hooks |
 | `omp status` | Show config and hook status |

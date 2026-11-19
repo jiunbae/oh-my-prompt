@@ -1975,8 +1975,16 @@ async function main() {
   USAGE
     omp setup [options]
 
+  MODES
+    Local only (default for new users): prompts are stored in a local SQLite
+    database. No server, account, email, or token is needed. View them with
+    'omp serve --local'.
+    Server sync: also upload prompts to an Oh My Prompt server.
+
   OPTIONS
-    --server <url>    Server URL
+    --local           Local-only mode: skip server URL and login entirely
+    --mode <m>        "local" or "server" (skips the mode question)
+    --server <url>    Server URL (implies --mode server)
     --token <token>   Authentication token
     --device <name>   Device name (default: hostname)
     --hooks <targets> Comma-separated: claude,codex,opencode,all,none
@@ -1985,6 +1993,11 @@ async function main() {
     --yes, -y         Non-interactive mode, accept all defaults
     --dry-run         Show what would be done without changes
     --json            Output as JSON
+
+  EXAMPLES
+    omp setup                          Interactive; choose local or server
+    omp setup --local --yes            Local only, no prompts (scripts/agents)
+    omp setup --mode server            Add server sync to an existing setup
 `);
         break;
       }
@@ -2715,7 +2728,15 @@ async function main() {
           const port = parseInt(options.port, 10) || config.serve?.port || 3000;
           const host = options.host || "127.0.0.1";
           const { startLocalServer } = require("./serve-local");
-          await startLocalServer(config, port, { host });
+          const { server } = await startLocalServer(config, port, { host });
+          // main() ends with process.exit(); keep running until the server
+          // closes (Ctrl+C / SIGTERM) instead of exiting right after listen.
+          await new Promise((resolve) => {
+            const shutdown = () => server.close(() => resolve());
+            process.once("SIGINT", shutdown);
+            process.once("SIGTERM", shutdown);
+            server.once("close", resolve);
+          });
         } else {
           await startServer(config, options);
         }

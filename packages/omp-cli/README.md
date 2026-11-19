@@ -12,8 +12,9 @@
 
 - **Automatic capture**: Hook into Claude Code, Codex, OpenCode, and Gemini CLI
 - **Tool tracking**: Per-prompt log of every `tool_use` the agent ran (Bash, Edit, Write, Read, WebFetch, etc.) with extracted `program` name for Bash commands so you can answer "which programs did the agent actually run"
-- **Local storage**: SQLite database at `~/.omp/prompts.db`
-- **Server sync**: Upload prompts to self-hosted server for analytics
+- **Local storage**: SQLite database at `~/.config/oh-my-prompt/omp.db`
+- **No account needed**: Local-only mode works without any server, email, or token
+- **Server sync (optional)**: Upload prompts to self-hosted server for analytics
 - **Prompt analysis**: Get quality scores and improvement suggestions
 - **Export/Import**: JSONL, CSV, or JSON formats
 - **Privacy-first**: Redact secrets, responses optional
@@ -47,17 +48,22 @@ npm link
 
 ### 1. Setup
 
-Run the interactive setup wizard:
+Run the setup wizard. No server or account is needed for local-only use:
 
 ```bash
-omp setup
+omp setup --local          # local only (asks device name and hooks)
+omp setup --local --yes    # local only, no questions
+omp setup                  # interactive: choose local only or server sync
 ```
 
 This will:
-- Create config at `~/.omp/config.json`
-- Initialize SQLite database
-- Detect installed CLIs (Claude, Codex, OpenCode)
-- Optionally configure server sync
+- Create config at `~/.config/oh-my-prompt/config.json`
+- Initialize the SQLite database (`~/.config/oh-my-prompt/omp.db`)
+- Detect installed CLIs (Claude, Codex, OpenCode, Gemini CLI) and install hooks
+- Only if you choose server sync: ask for server URL and login/API token
+
+View captured prompts locally with `omp serve --local` (http://localhost:3000).
+Add server sync later with `omp setup --mode server`.
 
 ### 2. Install Hooks
 
@@ -86,7 +92,7 @@ Expected output:
 Server: https://your-server.example.com (or not configured)
 Token: configured / not configured
 Storage: sqlite
-SQLite: /Users/you/.omp/prompts.db
+SQLite: /Users/you/.config/oh-my-prompt/omp.db
 Hooks: claude=installed, codex=installed, opencode=installed
 Last capture: 2026-02-08T10:30:00.000Z
 Queue: 0 files, 0 bytes
@@ -129,7 +135,7 @@ After installation, run:
 Important:
 - Do NOT use setup flags like --server, --token, --hooks, --yes.
 - Use the interactive wizard only, and let me provide values directly in the prompts.
-- Ask me each setup input in order (server URL, auth/login or token, device name, hook install confirmations).
+- Ask me each setup input in order (storage mode: local only or server sync; for server sync also server URL and auth/login or token; device name; hook install confirmations).
 
 After setup completes, verify with:
 - omp doctor
