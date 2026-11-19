@@ -138,6 +138,8 @@ ${cmd("db flush", "Delete all local records (destructive)")}
 `);
 }
 
+const SHORT_FLAGS = new Set(["-y", "-h", "-v"]);
+
 function parseArgs(argv) {
   const args = [...argv];
   const options = {};
@@ -152,7 +154,8 @@ function parseArgs(argv) {
         continue;
       }
       const next = args[i + 1];
-      if (!next || next.startsWith("--")) {
+      // Short aliases (-y, -h, -v) are flags, never values of a long option.
+      if (!next || next.startsWith("--") || SHORT_FLAGS.has(next)) {
         options[key] = true;
       } else {
         options[key] = next;

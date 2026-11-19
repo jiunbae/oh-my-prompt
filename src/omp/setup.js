@@ -125,6 +125,26 @@ function resolveSetupMode(options) {
   return { mode: null, error: null };
 }
 
+// Server URL/token as stored in config.json, ignoring OMP_SERVER_* env
+// overrides that loadConfig() applies. Local setup must not persist those.
+function readStoredServer(configPath) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    return {
+      url: (raw.server && raw.server.url) || "",
+      token: (raw.server && raw.server.token) || "",
+    };
+  } catch {
+    return { url: "", token: "" };
+  }
+}
+
+function restoreStoredServer(config, configPath) {
+  const stored = readStoredServer(configPath);
+  config.server.url = stored.url;
+  config.server.token = stored.token;
+}
+
 function hasServerConfig(config) {
   return !!(config.server && config.server.url && config.server.token);
 }
@@ -209,6 +229,8 @@ async function runSetup(options) {
       mode = choice;
       result.mode = mode;
     }
+
+    if (mode === "local") restoreStoredServer(config, getConfigPath());
 
     if (mode === "local" && hasServerConfig(config)) {
       clack.log.info(
@@ -697,10 +719,15 @@ async function runSetup(options) {
     };
 
     const validationOk = !result.validation || result.validation.valid;
-    result.ok = validationOk;
+    // Local mode has no server to validate; a usable database is the
+    // only thing that makes it work, so a migration error fails setup.
+    const dbOk = !(mode === "local" && result.db && result.db.error);
+    result.ok = validationOk && dbOk;
 
     if (options.json) {
       process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+    } else if (!dbOk) {
+      clack.outro(c.red("Setup failed: the local database could not be initialized."));
     } else {
       // Summary note box
       const installedHooks = Object.entries(result.hooks)
@@ -721,10 +748,12 @@ async function runSetup(options) {
           `${c.dim("Device:")}  ${config.server.deviceId}`,
           `${c.dim("Hooks:")}   ${installedHooks.length ? installedHooks.join(", ") : c.dim("none")}`,
         ].join("\n"),
-        "Setup Complete"
+        options["dry-run"] ? "Setup Preview (dry run, nothing saved)" : "Setup Complete"
       );
 
-      if (mode === "local") {
+      if (options["dry-run"]) {
+        clack.outro(c.dim("Dry run: no config, database, or hooks were changed."));
+      } else if (mode === "local") {
         clack.log.info(
           [
             `Import history:  ${c.cyan("omp backfill")}`,
@@ -752,6 +781,7 @@ async function runSetup(options) {
     mode = "server";
     result.mode = mode;
   }
+  if (mode === "local") restoreStoredServer(config, getConfigPath());
 
   if (mode === "server") {
     const defaultUrl = config.server.url || "https://prompt.jiun.dev";
@@ -893,10 +923,25 @@ async function runSetup(options) {
   };
 
   const validationOk = !result.validation || result.validation.valid;
-  result.ok = validationOk;
+  const dbOk = !(mode === "local" && result.db && result.db.error);
+  result.ok = validationOk && dbOk;
 
   if (options.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  } else if (mode === "local" && !dbOk) {
+    process.stderr.write(
+      `Error: local database could not be initialized: ${result.db.error}\n` +
+        `  Path: ${config.storage.sqlite.path}\n`
+    );
+  } else if (mode === "local" && options["dry-run"]) {
+    const planned = Object.keys(result.hooks);
+    output.write(
+      [
+        "Dry run (local only): nothing was saved.",
+        `  Would use storage: ${config.storage.sqlite.path}`,
+        `  Would install hooks: ${planned.length ? planned.join(", ") : "none"}`,
+      ].join("\n") + "\n"
+    );
   } else if (mode === "local") {
     const installed = Object.entries(result.hooks)
       .filter(([, v]) => v.installed)
@@ -908,7 +953,6 @@ async function runSetup(options) {
           : "Setup complete (local only, no server account).",
         `  Storage: ${config.storage.sqlite.path}`,
         `  Hooks:   ${installed.length ? installed.join(", ") : "none"}`,
-        result.db && result.db.error ? `  Database error: ${result.db.error}` : null,
         "Next: omp backfill   # import existing history",
         "      omp serve --local   # dashboard at http://localhost:3000",
         "      omp setup --mode server   # add server sync later",

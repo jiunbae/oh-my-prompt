@@ -137,4 +137,39 @@ describe("omp setup --local (fresh HOME, no server)", () => {
     expect(config.server.url).toBe("https://omp.example");
     expect(config.server.token).toBe("keep-me");
   });
+  it("does not persist OMP_SERVER_* env overrides in local mode", () => {
+    const res = runOmp(home, ["setup", "--local", "--yes", "--no-hooks"], {
+      OMP_SERVER_URL: "https://env.example",
+      OMP_SERVER_TOKEN: "env-token",
+    });
+    expect(res.status).toBe(0);
+    const config = readConfig(home);
+    expect(config.server.url).toBe("");
+    expect(config.server.token).toBe("");
+  });
+
+  it("accepts -y right after --local", () => {
+    const res = runOmp(home, ["setup", "--local", "-y", "--no-hooks"]);
+    expect(res.status).toBe(0);
+    expect(readConfig(home).server.token).toBe("");
+  });
+
+  it("fails when the local database cannot be initialized", () => {
+    const dir = path.join(home, "not-a-db");
+    fs.mkdirSync(dir);
+    const res = runOmp(home, ["setup", "--local", "--yes", "--no-hooks"], {
+      OMP_SQLITE_PATH: dir,
+    });
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toContain("local database could not be initialized");
+    expect(res.stdout).not.toContain("Setup complete");
+  });
+
+  it("labels a dry run as a preview and writes nothing", () => {
+    const res = runOmp(home, ["setup", "--local", "--yes", "--no-hooks", "--dry-run"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("Dry run");
+    expect(res.stdout).not.toContain("Setup complete");
+    expect(fs.existsSync(path.join(home, ".config", "oh-my-prompt", "config.json"))).toBe(false);
+  });
 });

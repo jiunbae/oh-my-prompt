@@ -1,6 +1,7 @@
 // Zero-dependency local dashboard server using Node's built-in http module.
 // Serves the SQLite-backed dashboard for users without Docker.
 
+const fs = require("fs");
 const http = require("http");
 const { getStats } = require("./stats");
 const queries = require("./serve-local-queries");
@@ -24,13 +25,43 @@ function send(res, status, html) {
 }
 
 async function startLocalServer(config, port = 3000, { host = "127.0.0.1" } = {}) {
-  const db = await queries.getDb(config);
+  const dbPath = config.storage.sqlite.path;
+  const fileStamp = () => {
+    try {
+      const st = fs.statSync(dbPath);
+      return `${st.mtimeMs}:${st.size}`;
+    } catch {
+      return null;
+    }
+  };
+  let db = await queries.getDb(config);
+  let dbStamp = fileStamp();
+
+  // The sql.js fallback reads an in-memory snapshot of the file, so a
+  // long-running dashboard would never see prompts captured after startup.
+  // Reopen the snapshot whenever the file on disk changes. Native drivers
+  // read the live file and need no refresh.
+  async function refreshDb() {
+    if (db.driver !== "sql.js") return;
+    const stamp = fileStamp();
+    if (stamp === dbStamp) return;
+    const next = await queries.getDb(config);
+    try {
+      db.close();
+    } catch {
+      // ignore: snapshot is read-only here
+    }
+    db = next;
+    dbStamp = stamp;
+  }
 
   const server = http.createServer(async (req, res) => {
     const { pathname, query } = parseQuery(req);
     const page = Math.max(1, parseInt(query.page, 10) || 1);
 
     try {
+      await refreshDb();
+
       // Dashboard
       if (pathname === "/" || pathname === "/dashboard") {
         const stats = await getStats(config, { since: null, until: null });
