@@ -10,6 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Nothing yet
 
+## [2026.1120.1] - 2026-11-20
+
+### Added
+- Local-only setup: `omp setup` first asks "Local only" (no server, account, email, or token) or "Local + sync to a server". New flags `--local` and `--mode local|server`; `omp setup --local --yes` configures capture with no prompts. Add server sync later with `omp setup --mode server`.
+
+### Changed
+- `omp setup --yes` without a mode keeps requiring `--token` (server mode) and now suggests `--local`. Existing server configs are preselected as server mode and are never cleared by `--local`; `OMP_SERVER_*` environment overrides are not persisted by local setup, and a warning is shown while they keep sync active.
+- `omp doctor` reports a missing server as optional local-only mode.
+
+### Fixed
+- `omp serve --local` exited immediately after starting; it now runs until Ctrl+C/SIGTERM, and with the `sql.js` fallback it shows prompts captured after startup.
+- Local setup fails (non-zero) when the SQLite database cannot be initialized or an explicitly requested hook fails to install; `--dry-run` no longer migrates the database and prints a preview.
+- `--local -y` (and other boolean options followed by `-y`/`-h`/`-v`) is parsed correctly.
+
 ## [2026.1025.1] - 2026-10-25
 
 ### Added
