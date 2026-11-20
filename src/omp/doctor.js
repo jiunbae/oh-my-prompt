@@ -86,7 +86,7 @@ function validateConfig(config) {
   } else if (!config.server?.url && config.server?.token) {
     warnings.push("server.token is set but server.url is missing");
   } else {
-    warnings.push("No sync configured. Set server.url and server.token for cloud sync.");
+    warnings.push("Local-only mode: no server sync configured (optional). Run 'omp setup --mode server' to add one.");
   }
 
   if (config.server?.url) {
