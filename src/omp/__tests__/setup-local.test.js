@@ -172,4 +172,38 @@ describe("omp setup --local (fresh HOME, no server)", () => {
     expect(res.stdout).not.toContain("Setup complete");
     expect(fs.existsSync(path.join(home, ".config", "oh-my-prompt", "config.json"))).toBe(false);
   });
+  it("warns when OMP_SERVER_* overrides would keep sync active", () => {
+    const res = runOmp(home, ["setup", "--local", "--yes", "--no-hooks"], {
+      OMP_SERVER_URL: "https://env.example",
+      OMP_SERVER_TOKEN: "env-token",
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("OMP_SERVER_URL and OMP_SERVER_TOKEN are set");
+    expect(res.stdout).not.toContain("local only, no server account");
+  });
+
+  it("does not create or migrate the database in a dry run", () => {
+    const dbPath = path.join(home, "dry.db");
+    fs.writeFileSync(dbPath, "");
+    const res = runOmp(home, ["setup", "--local", "--yes", "--no-hooks", "--dry-run"], {
+      OMP_SQLITE_PATH: dbPath,
+    });
+    expect(res.status).toBe(0);
+    expect(fs.statSync(dbPath).size).toBe(0);
+  });
+
+  it("fails when an explicitly requested hook cannot be installed", () => {
+    // A directory where the hook script must be written makes install fail.
+    fs.mkdirSync(path.join(home, ".claude", "hooks", "prompt-logger.sh"), { recursive: true });
+    const res = runOmp(home, ["setup", "--local", "--yes", "--hooks", "claude"]);
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toContain("requested hook installation failed");
+    expect(res.stderr).toContain("claude");
+  });
+
+  it("still accepts short-looking values for value-taking options", () => {
+    const res = runOmp(home, ["setup", "--local", "--yes", "--no-hooks", "--device", "-v"]);
+    expect(res.status).toBe(0);
+    expect(readConfig(home).server.deviceId).toBe("-v");
+  });
 });

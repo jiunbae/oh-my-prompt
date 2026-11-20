@@ -138,6 +138,10 @@ ${cmd("db flush", "Delete all local records (destructive)")}
 `);
 }
 
+// Long options that never take a value. A following short alias (-y, -h,
+// -v) is its own flag, not their value: `omp setup --local -y`. Options that
+// do take a value (e.g. --device -v) keep the old behavior.
+const BOOLEAN_OPTIONS = new Set(["local", "yes", "json", "dry-run", "no-hooks", "skip-validate"]);
 const SHORT_FLAGS = new Set(["-y", "-h", "-v"]);
 
 function parseArgs(argv) {
@@ -155,7 +159,11 @@ function parseArgs(argv) {
       }
       const next = args[i + 1];
       // Short aliases (-y, -h, -v) are flags, never values of a long option.
-      if (!next || next.startsWith("--") || SHORT_FLAGS.has(next)) {
+      if (
+        !next ||
+        next.startsWith("--") ||
+        (BOOLEAN_OPTIONS.has(key) && SHORT_FLAGS.has(next))
+      ) {
         options[key] = true;
       } else {
         options[key] = next;

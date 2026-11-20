@@ -145,6 +145,16 @@ function restoreStoredServer(config, configPath) {
   config.server.token = stored.token;
 }
 
+// True when OMP_SERVER_URL/OMP_SERVER_TOKEN would still make later
+// commands sync even though local setup did not save them.
+function envServerOverride() {
+  return !!(process.env.OMP_SERVER_URL && process.env.OMP_SERVER_TOKEN);
+}
+
+const ENV_OVERRIDE_WARNING =
+  "OMP_SERVER_URL and OMP_SERVER_TOKEN are set in your environment, so sync stays active " +
+  "for commands that inherit them. Unset both to stay local only.";
+
 function hasServerConfig(config) {
   return !!(config.server && config.server.url && config.server.token);
 }
@@ -231,6 +241,10 @@ async function runSetup(options) {
     }
 
     if (mode === "local") restoreStoredServer(config, getConfigPath());
+
+    if (mode === "local" && envServerOverride()) {
+      clack.log.warn(ENV_OVERRIDE_WARNING);
+    }
 
     if (mode === "local" && hasServerConfig(config)) {
       clack.log.info(
@@ -738,7 +752,9 @@ async function runSetup(options) {
         mode === "local"
           ? config.server.url
             ? `${c.cyan(config.server.url)} ${c.dim("(unchanged)")}`
-            : c.dim("none (local only)")
+            : envServerOverride()
+              ? c.yellow("from environment (OMP_SERVER_URL), not saved")
+              : c.dim("none (local only)")
           : c.cyan(config.server.url);
 
       clack.note(
@@ -908,12 +924,17 @@ async function runSetup(options) {
     };
   }
 
-  // Doctor
-  try {
-    const { runDoctor } = require("./doctor");
-    result.doctor = runDoctor(config);
-  } catch (err) {
-    result.doctor = { ok: false, errors: [err.message], warnings: [] };
+  // Doctor (skipped in dry runs: its database check opens and migrates
+  // the SQLite file, which a dry run must not do)
+  if (options["dry-run"]) {
+    result.doctor = { skipped: true, dryRun: true };
+  } else {
+    try {
+      const { runDoctor } = require("./doctor");
+      result.doctor = runDoctor(config);
+    } catch (err) {
+      result.doctor = { ok: false, errors: [err.message], warnings: [] };
+    }
   }
 
   result.config = {
@@ -924,7 +945,12 @@ async function runSetup(options) {
 
   const validationOk = !result.validation || result.validation.valid;
   const dbOk = !(mode === "local" && result.db && result.db.error);
-  result.ok = validationOk && dbOk;
+  const failedHooks = Object.entries(result.hooks).filter(([, v]) => v.error);
+  // An explicitly requested hook (--hooks <cli>) that failed to install
+  // means prompts will not be captured; fail local setup instead of
+  // reporting success.
+  const hooksOk = !(mode === "local" && options.hooks && failedHooks.length);
+  result.ok = validationOk && dbOk && hooksOk;
 
   if (options.json) {
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
@@ -942,6 +968,12 @@ async function runSetup(options) {
         `  Would install hooks: ${planned.length ? planned.join(", ") : "none"}`,
       ].join("\n") + "\n"
     );
+  } else if (mode === "local" && !hooksOk) {
+    process.stderr.write(
+      "Error: requested hook installation failed; prompts will not be captured automatically.\n" +
+        failedHooks.map(([cli, v]) => `  ${cli}: ${v.error}\n`).join("") +
+        "  Fix the error and run: omp install <cli>\n"
+    );
   } else if (mode === "local") {
     const installed = Object.entries(result.hooks)
       .filter(([, v]) => v.installed)
@@ -950,9 +982,13 @@ async function runSetup(options) {
       [
         hasServerConfig(config)
           ? `Setup complete (local mode; existing server ${config.server.url} left unchanged — clear it with: omp config set server.url "").`
-          : "Setup complete (local only, no server account).",
+          : envServerOverride()
+            ? "Setup complete (nothing saved for a server, but environment overrides still enable sync)."
+            : "Setup complete (local only, no server account).",
         `  Storage: ${config.storage.sqlite.path}`,
         `  Hooks:   ${installed.length ? installed.join(", ") : "none"}`,
+        ...failedHooks.map(([cli, v]) => `  Hook failed: ${cli}: ${v.error} (retry: omp install ${cli})`),
+        envServerOverride() ? `Warning: ${ENV_OVERRIDE_WARNING}` : null,
         "Next: omp backfill   # import existing history",
         "      omp serve --local   # dashboard at http://localhost:3000",
         "      omp setup --mode server   # add server sync later",

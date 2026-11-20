@@ -29,7 +29,8 @@ async function startLocalServer(config, port = 3000, { host = "127.0.0.1" } = {}
   const fileStamp = () => {
     try {
       const st = fs.statSync(dbPath);
-      return `${st.mtimeMs}:${st.size}`;
+      // ino catches atomic replacements that keep size and mtime.
+      return `${st.dev}:${st.ino}:${st.mtimeMs}:${st.size}`;
     } catch {
       return null;
     }
